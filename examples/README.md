@@ -65,5 +65,5 @@ npm install
 npm run build      # produces dist/ consumed by the file:../.. examples
 ```
 
-See the [main README](../README.md) and the [docs](https://docs.useago.com) for the
+See the [main README](../README.md) and the [docs](https://ago.mintlify.app) for the
 full API.
