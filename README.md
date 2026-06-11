@@ -1,7 +1,6 @@
 # @useago/sdk
 
 [![npm version](https://img.shields.io/npm/v/@useago/sdk.svg)](https://www.npmjs.com/package/@useago/sdk)
-[![license](https://img.shields.io/npm/l/@useago/sdk.svg)](./LICENSE)
 [![types](https://img.shields.io/npm/types/@useago/sdk.svg)](https://www.npmjs.com/package/@useago/sdk)
 
 Official JavaScript/TypeScript SDK for [AGO](https://useago.com) — embed AGO's AI
@@ -17,7 +16,7 @@ same `AgoClient`.
 npm install @useago/sdk
 ```
 
-📚 **Full documentation:** [docs.useago.com](https://docs.useago.com) · the
+📚 **Full documentation:** [ago.mintlify.app](https://ago.mintlify.app/) · the
 framework guides below are also published there.
 
 ---
@@ -120,4 +119,4 @@ ESM and CJS builds are both shipped, with full TypeScript declarations.
 
 ## License
 
-[Apache 2.0](./LICENSE) · [Documentation](https://docs.useago.com) · [Website](https://useago.com)
+[Apache 2.0](./LICENSE) · [Documentation](https://ago.mintlify.app/) · [Website](https://useago.com)
