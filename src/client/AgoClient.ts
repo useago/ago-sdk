@@ -1,4 +1,9 @@
 import { HttpClient } from "../api/HttpClient";
+import type {
+  FormCollectorDefinition,
+  FormCollectorSchema,
+  SubmitConfig,
+} from "../forms/createFormCollector";
 import { FunctionRegistry } from "../functions/FunctionRegistry";
 import type { ClientFunctionDefinition, ClientFunctionHandler, ClientFunctionSchema } from "../functions/types";
 import { ClientContextRegistry } from "../state/ClientContextRegistry";
@@ -313,6 +318,29 @@ export class AgoClient {
   // ─────────────────────────────────────────────────────────────────
   // Forms
   // ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Fetch a backend-stored form collector definition by name (the single source
+   * of truth for the form's description, schema, and submit target). Used by
+   * `loadFormCollector` / the name-only form of `useFormCollector` so the schema
+   * lives in the backend instead of being hardcoded in client code.
+   */
+  async getFormCollector(name: string): Promise<FormCollectorDefinition> {
+    const response = await this.httpClient.get<{
+      name: string;
+      description: string;
+      schema: FormCollectorSchema;
+      submit?: SubmitConfig | null;
+    }>(`/api/sdk/v1/forms/${encodeURIComponent(name)}`);
+
+    return {
+      name: response.name,
+      description: response.description,
+      schema: response.schema,
+      // Backend stores null for "collect only"; the SDK uses `undefined`/`false`.
+      submit: response.submit ?? undefined,
+    };
+  }
 
   /**
    * Relay a completed form collector's values to a server-configured destination.

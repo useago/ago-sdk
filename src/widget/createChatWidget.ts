@@ -2,7 +2,9 @@ import { AgoClient } from "../client/AgoClient";
 import type { AgoConfig, AgoMessage, Conversation } from "../client/types";
 import {
   createFormCollector,
+  loadFormCollector,
   type CreateFormCollectorOptions,
+  type LoadFormCollectorOptions,
 } from "../forms/createFormCollector";
 import {
   createConversationSession,
@@ -92,10 +94,13 @@ export interface MountChatWidgetOptions {
   loadThreads?: boolean;
   /**
    * Conversational forms the agent can fill and submit during the chat. Each
-   * config is installed as a {@link createFormCollector} for the lifetime of the
+   * entry is installed as a {@link createFormCollector} for the lifetime of the
    * widget (removed on `destroy()`).
+   *
+   * Pass a full config (with `schema`) to define it inline, or just `{ name }` to
+   * fetch the definition from the backend ({@link loadFormCollector}).
    */
-  forms?: CreateFormCollectorOptions[];
+  forms?: Array<CreateFormCollectorOptions | LoadFormCollectorOptions>;
   /**
    * How clicking a suggested follow-up reply behaves. Defaults to sending the
    * reply as a new user message. Pass a handler to override, or `false` to
@@ -631,9 +636,24 @@ export function mountChatWidget(
   client.on("message:error", onError);
 
   // ── Form collectors ────────────────────────────────────────────────
-  const uninstallForms = (forms ?? []).map((f) =>
-    createFormCollector(f).install(client),
-  );
+  // Inline configs (with `schema`) install synchronously; name-only entries are
+  // fetched from the backend and installed once they resolve.
+  const uninstallForms: Array<() => void> = [];
+  let formsDestroyed = false;
+  for (const f of forms ?? []) {
+    if (f.schema != null) {
+      uninstallForms.push(
+        createFormCollector(f as CreateFormCollectorOptions).install(client),
+      );
+    } else {
+      loadFormCollector(client, f as LoadFormCollectorOptions)
+        .then((collector) => {
+          if (!formsDestroyed) uninstallForms.push(collector.install(client));
+        })
+        // A missing/failed form definition shouldn't break the widget.
+        .catch(() => {});
+    }
+  }
 
   // ── Send path ──────────────────────────────────────────────────────
   async function send(content: string, files?: File[]): Promise<void> {
@@ -751,6 +771,7 @@ export function mountChatWidget(
       client.off("message:answer-complete", onAnswerComplete);
       client.off("message:complete", onComplete);
       client.off("message:error", onError);
+      formsDestroyed = true;
       uninstallForms.forEach((fn) => fn());
       container.remove();
       // Only tear down the client if we created it.

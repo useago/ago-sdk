@@ -134,6 +134,33 @@ export interface FormCollector<V = Record<string, unknown>> {
   getValues: () => Partial<V>;
   setValues: (patch: Partial<V>) => void;
   reset: () => void;
+  /** Completeness status (`missing`/`complete`) derived from the current values + schema. */
+  getStatus: () => FormCollectorStatus;
+}
+
+/**
+ * The backend-stored shape returned by `GET /api/sdk/v1/forms/{name}` (see
+ * {@link AgoClient.getFormCollector}). Mirrors the persistable subset of
+ * {@link CreateFormCollectorOptions}: the `submit` here is never the client-only
+ * `handler` variant (a function can't be stored server-side).
+ */
+export interface FormCollectorDefinition<V = Record<string, unknown>> {
+  name: string;
+  description: string;
+  schema: FormCollectorSchema;
+  /** Server-stored submit target, if any. Absent means collect-only. */
+  submit?: SubmitConfig<V>;
+}
+
+/**
+ * Options for {@link loadFormCollector} / the name-only form of `useFormCollector`:
+ * the `name` is required and the definition is fetched from the backend, while any
+ * field here overrides the fetched one — notably a client-only `submit` handler,
+ * which can't be stored server-side.
+ */
+export interface LoadFormCollectorOptions<V = Record<string, unknown>>
+  extends Partial<Omit<CreateFormCollectorOptions<V>, "name">> {
+  name: string;
 }
 
 // Must stay within the backend's client-function name rule once prefixed.
@@ -523,5 +550,34 @@ export function createFormCollector<V = Record<string, unknown>>(
         submitted: false,
       });
     },
+    getStatus: () => deriveFormStatus(schema, store.get().values),
   };
+}
+
+/**
+ * Async sibling of {@link createFormCollector} that pulls the form's definition
+ * (description + schema + submit target) from the backend by name — the single
+ * source of truth — instead of hardcoding it in client code. Any field passed in
+ * `options` overrides the fetched one (e.g. a client-only `submit` handler or
+ * `initialValues`).
+ *
+ * ```ts
+ * const order = await loadFormCollector(client, { name: "order" });
+ * order.install(client);
+ * ```
+ */
+export async function loadFormCollector<V = Record<string, unknown>>(
+  client: Pick<AgoClient, "getFormCollector">,
+  options: LoadFormCollectorOptions<V>,
+): Promise<FormCollector<V>> {
+  const def = (await client.getFormCollector(
+    options.name,
+  )) as FormCollectorDefinition<V>;
+  return createFormCollector<V>({
+    name: def.name,
+    description: options.description ?? def.description,
+    schema: options.schema ?? def.schema,
+    submit: options.submit ?? def.submit,
+    initialValues: options.initialValues,
+  });
 }
