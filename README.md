@@ -13,13 +13,13 @@ the same two steps through its own guide:
 
 | Stack | Guide |
 | --- | --- |
-| <img src="https://cdn.simple-icons.org/react/61DAFB" width="14" /> React | **you're reading it**, just scroll down |
+| <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/react/react-original.svg" width="14" /> React | **you're reading it**, just scroll down |
 | <img src="https://cdn.simple-icons.org/vuedotjs/4FC08D" width="14" /> Vue 3 | [Vue guide](docs/frameworks/vue.md) |
 | <img src="https://cdn.simple-icons.org/angular/DD0031" width="14" /> Angular | [Angular guide](docs/frameworks/angular.md) |
 | <img src="https://cdn.simple-icons.org/typescript/3178C6" width="14" /> Plain JavaScript / TypeScript | [Core guide](docs/general/core.md) |
 | <img src="https://cdn.simple-icons.org/html5/E34F26" width="14" /> Any website, no build step (`<script>`) | [Widget guide](docs/general/widget.md) |
 
-## <img src="https://cdn.simple-icons.org/react/61DAFB" width="22" /> Try it in 30 seconds
+## <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/react/react-original.svg" width="22" /> Try it in 30 seconds
 
 ```bash
 npm install @useago/sdk
