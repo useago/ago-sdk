@@ -63,14 +63,16 @@ export type {
 } from "./functions/types";
 
 // Form collector
-export { createFormCollector, deriveFormStatus } from "./forms/createFormCollector";
+export { createFormCollector, deriveFormStatus, loadFormCollector } from "./forms/createFormCollector";
 export type {
   CreateFormCollectorOptions,
   FormCollector,
+  FormCollectorDefinition,
   FormCollectorSchema,
   FormCollectorState,
   FormCollectorStatus,
   FormSubmitResult,
+  LoadFormCollectorOptions,
   SubmitConfig,
 } from "./forms/createFormCollector";
 

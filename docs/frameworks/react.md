@@ -104,7 +104,7 @@ function Support() {
 | `height?` | `string \| number` | `500` |
 | `logoUrl?` | `string` | — |
 | `showAgentName?` | `boolean` | `false` |
-| `forms?` | `CreateFormCollectorOptions[]` | — |
+| `forms?` | `Array<CreateFormCollectorOptions \| LoadFormCollectorOptions>` | — |
 | `onFollowUpClick?` | `((reply) => void) \| false` | sends the reply |
 | `className?` | `string` | `""` |
 | `onMessageSent?` | `(content) => void` | — |
@@ -156,6 +156,11 @@ the data collected so far, and which required fields are still missing.
 > target changes. For full control over the live form state (e.g. a side panel
 > that updates as fields fill in), use the `useFormCollector` hook directly
 > instead of the `forms` prop.
+
+To keep the schema in the backend instead of inline, pass an entry with just a
+`name` (`{ name: "demo_request" }`): the widget fetches the definition via
+`loadFormCollector`. The same works with the hook — `useFormCollector({ name })`
+fetches the definition and exposes `loading` until it resolves.
 
 Building your own UI? The widget is composed from exported building blocks you
 can reuse: **`<Message>`** (accepts `onFollowUpClick`), **`<ChatInput>`** and

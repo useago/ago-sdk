@@ -39,14 +39,16 @@ export { useFormCollector } from "./hooks/useFormCollector";
 export type { UseFormCollectorResult } from "./hooks/useFormCollector";
 
 // Form collector core (re-exported for typing the ChatWidget `forms` prop)
-export { createFormCollector, deriveFormStatus } from "../forms/createFormCollector";
+export { createFormCollector, deriveFormStatus, loadFormCollector } from "../forms/createFormCollector";
 export type {
   CreateFormCollectorOptions,
   FormCollector,
+  FormCollectorDefinition,
   FormCollectorSchema,
   FormCollectorState,
   FormCollectorStatus,
   FormSubmitResult,
+  LoadFormCollectorOptions,
   SubmitConfig,
 } from "../forms/createFormCollector";
 

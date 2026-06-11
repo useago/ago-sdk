@@ -55,6 +55,8 @@ const widget = mountChatWidget("#chat", {
       // Relay to a server-configured destination (URL + secret stay server-side):
       submit: { via: "backend", destination: "demo_webhook" },
     },
+    // Or keep the schema in the backend and reference it by name:
+    // { name: "demo_request" },
   ],
 });
 
@@ -80,7 +82,7 @@ widget.destroy(); // removes listeners, uninstalls forms, clears the DOM
 | `logoUrl?`             | `string`                                         | —                                |
 | `showAgentName?`       | `boolean`                                        | `false`                          |
 | `theme?`               | `WidgetTheme`                                    | — (see [Theming](#theming))      |
-| `forms?`               | `CreateFormCollectorOptions[]`                   | —                                |
+| `forms?`               | `Array<CreateFormCollectorOptions \| LoadFormCollectorOptions>` | —                  |
 | `onFollowUpClick?`     | `((reply) => void) \| false`                     | sends the reply                  |
 | `onMessageSent?`       | `(content) => void`                              | —                                |
 | `onMessageReceived?`   | `({ id, content }) => void`                      | —                                |

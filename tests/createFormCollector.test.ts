@@ -3,6 +3,7 @@ import { AgoClient } from "../src/client/AgoClient";
 import {
   createFormCollector,
   deriveFormStatus,
+  loadFormCollector,
   type FormCollectorSchema,
 } from "../src/forms/createFormCollector";
 
@@ -560,5 +561,92 @@ describe("createFormCollector with requiredWhen conditions", () => {
       nb_loans: 0,
       housing_type: "1",
     });
+  });
+
+  it("exposes completeness via getStatus() derived from the schema", () => {
+    const c = makeCollector();
+
+    expect(c.getStatus()).toEqual({
+      missing: ["product", "quantity"],
+      complete: false,
+    });
+
+    c.setValues({ product: "Widget", quantity: 3 });
+    expect(c.getStatus()).toEqual({ missing: [], complete: true });
+  });
+});
+
+describe("loadFormCollector", () => {
+  const definition = {
+    name: "order",
+    description: "The order the user wants to place.",
+    schema,
+    submit: { via: "backend" as const, destination: "order_webhook" },
+  };
+
+  it("builds a collector from the backend definition", async () => {
+    const client = { getFormCollector: vi.fn().mockResolvedValue(definition) };
+
+    const c = await loadFormCollector(client, { name: "order" });
+
+    expect(client.getFormCollector).toHaveBeenCalledWith("order");
+    expect(c.name).toBe("order");
+    expect(c.functions.map((f) => f.name)).toEqual([
+      "update_order",
+      "submit_order",
+    ]);
+    expect(c.getStatus()).toEqual({
+      missing: ["product", "quantity"],
+      complete: false,
+    });
+  });
+
+  it("lets passed options override the fetched definition", async () => {
+    const client = { getFormCollector: vi.fn().mockResolvedValue(definition) };
+    const handler = vi.fn(async () => ({ ok: true }));
+
+    const c = await loadFormCollector(client, {
+      name: "order",
+      submit: { via: "client", handler },
+      initialValues: { product: "Widget" },
+    });
+
+    expect(c.getValues()).toEqual({ product: "Widget" });
+    c.setValues({ quantity: 2 });
+    await c.submit();
+    expect(handler).toHaveBeenCalledWith({ product: "Widget", quantity: 2 });
+  });
+});
+
+describe("AgoClient.getFormCollector", () => {
+  it("fetches the definition and normalizes a null submit to undefined", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        name: "order",
+        description: "An order.",
+        schema,
+        submit: null,
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const def = await client.getFormCollector("order");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://example.test/api/sdk/v1/forms/order",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(def).toEqual({
+      name: "order",
+      description: "An order.",
+      schema,
+      submit: undefined,
+    });
+
+    vi.unstubAllGlobals();
+    client.destroy();
   });
 });

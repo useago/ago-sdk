@@ -1,8 +1,10 @@
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useRef } from "react";
 import type { AgoClient } from "../../client/AgoClient";
 import {
   createFormCollector,
+  loadFormCollector,
   type CreateFormCollectorOptions,
+  type LoadFormCollectorOptions,
 } from "../../forms/createFormCollector";
 import { useOptionalAgoClient } from "../context/AgoContext";
 import { useMessages } from "../hooks/useMessages";
@@ -30,10 +32,13 @@ export interface ChatWidgetProps {
   showAgentName?: boolean;
   /**
    * Conversational forms the agent can fill and submit during the chat. Each
-   * config is installed as a {@link createFormCollector} (its `update_<name>` /
+   * entry is installed as a {@link createFormCollector} (its `update_<name>` /
    * `submit_<name>` functions + dynamic context) for the lifetime of the widget.
+   *
+   * Pass a full config (with `schema`) to define it inline, or just `{ name }` to
+   * fetch the definition from the backend ({@link loadFormCollector}).
    */
-  forms?: CreateFormCollectorOptions[];
+  forms?: Array<CreateFormCollectorOptions | LoadFormCollectorOptions>;
   /**
    * How clicking a suggested follow-up reply behaves. Defaults to sending the
    * reply as a new user message. Pass a handler to override, or `false` to
@@ -76,23 +81,46 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
   });
 
   // Install the conversational form collectors for the widget's lifetime.
-  // Recreate only when the form configs actually change (by name + schema +
-  // submit target), not on every render of an inline `forms` array.
+  // Inline configs (with `schema`) are built synchronously; name-only entries are
+  // fetched from the backend. Re-run only when the form configs actually change
+  // (by name + schema + submit target), not on every render of an inline array.
   const formsKey = forms
     ? JSON.stringify(
-        forms.map((f) => [f.name, f.schema, f.submit ?? false, f.description]),
+        forms.map((f) => [
+          f.name,
+          f.schema ?? null,
+          f.submit ?? false,
+          f.description ?? null,
+        ]),
       )
     : "";
-  const collectors = useMemo(
-    () => (forms ?? []).map((f) => createFormCollector(f)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [formsKey],
-  );
   useEffect(() => {
-    if (!resolvedClient || collectors.length === 0) return;
-    const uninstalls = collectors.map((c) => c.install(resolvedClient));
-    return () => uninstalls.forEach((fn) => fn());
-  }, [resolvedClient, collectors]);
+    if (!resolvedClient || !forms || forms.length === 0) return;
+    let cancelled = false;
+    const uninstalls: Array<() => void> = [];
+    Promise.all(
+      forms.map((f) =>
+        f.schema != null
+          ? Promise.resolve(
+              createFormCollector(f as CreateFormCollectorOptions),
+            )
+          : loadFormCollector(resolvedClient, f as LoadFormCollectorOptions),
+      ),
+    )
+      .then((collectors) => {
+        if (cancelled) return;
+        for (const collector of collectors) {
+          uninstalls.push(collector.install(resolvedClient));
+        }
+      })
+      // A missing/failed form definition shouldn't break the whole widget.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      uninstalls.forEach((fn) => fn());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedClient, formsKey]);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
