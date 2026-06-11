@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AGO · Rachat de crédits (formulaire simplifié)</title>
+
+    <!-- Local SDK build served at /sdk by bs-config.js. `mountChatWidget` lives in
+         the `/widget` entry; the dev panel (opt-in via ?dev) in `/devtools`. -->
+    <script type="importmap">
+      {
+        "imports": {
+          "@useago/sdk/widget": "https://esm.sh/@useago/sdk@0.4.2/widget",
+          "@useago/sdk/devtools": "https://esm.sh/@useago/sdk@0.4.2/devtools"
+        }
+      }
+    </script>
+
+    <style>
+      /* Minimal: just center the widget. Everything inside #chat is AGO's. */
+      #ago-chat {
+        max-width: 560px;
+        margin: 40px auto;
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- The widget owns everything inside this element (header, stream, input). -->
+    <div id="ago-chat"></div>
+
+    <script type="module">
+      import { mountChatWidget } from "@useago/sdk/widget";
+      import { initDevPanel } from "@useago/sdk/devtools";
+
+      // ─── Configuration ────────────────────────────────────────────────
+      const AGENT_ID = "credit2";
+
+      // Simplified credit-consolidation schema. The full Weendeal flow gathers
+      // ~50 fields (co-emprunteur, charges, profession, etc.); this example keeps
+      // only the essentials needed to qualify a lead and call them back. The agent
+      // fills these in opportunistically as the conversation surfaces them.
+      // `required` is empty: fields are never gated, just gathered.
+      const CREDIT_SCHEMA = {
+        type: "object",
+        properties: {
+          // ── Projet ──
+          locataire: {
+            type: "string",
+            description:
+              "Le client est-il propriétaire de son logement. Valeurs : 1=Propriétaire, 2=Pas propriétaire",
+            enum: ["1", "2"],
+          },
+          detail_projet: {
+            type: "string",
+            description:
+              "Type de démarche souhaitée. Valeurs : 1=Renégocier uniquement le prêt immobilier, 2=Regrouper prêts conso et immo, 3=Regrouper uniquement les prêts conso",
+            enum: ["1", "2", "3"],
+          },
+
+          // ── Crédits en cours ──
+          montant_remboursements_mensuel: {
+            type: "number",
+            description:
+              "Montant total des remboursements mensuels de tous les crédits en cours, en euros par mois",
+          },
+          capitaux_restant_dus: {
+            type: "number",
+            description:
+              "Estimation du capital total restant dû sur l'ensemble des crédits, en euros",
+          },
+
+          // ── Revenus ──
+          salaire: {
+            type: "number",
+            description:
+              "Revenus nets mensuels du foyer, en euros par mois",
+          },
+
+          // ── Coordonnées ──
+          nom: { type: "string", description: "Nom de famille du client" },
+          prenom: { type: "string", description: "Prénom du client" },
+          tel_mobile: {
+            type: "string",
+            description: "Numéro de téléphone mobile (10 chiffres)",
+          },
+          email: {
+            type: "string",
+            description: "Adresse email du client",
+          },
+        },
+        required: [],
+      };
+
+      // ─── Mount the widget ─────────────────────────────────────────────
+      // mountChatWidget builds its own AgoClient from `config`, renders the full
+      // chat panel, streams replies, shows clickable suggested replies, installs
+      // the credit form collector, and persists the conversation across reloads.
+      const widget = mountChatWidget("#ago-chat", {
+        config: {
+          baseUrl: window.AGO_BASE_URL ?? "https://weendeal.api.useago.com",
+          agent: AGENT_ID,
+        },
+        persistConversation: true,
+        title: "Rachat de crédits",
+        welcomeMessage:
+          "Bonjour 👋 Je vous accompagne dans votre demande de rachat / regroupement de crédits. Pour commencer, êtes-vous propriétaire de votre logement ?",
+        placeholder: "Écris un message…",
+        forms: [
+          {
+            name: "credit",
+            description:
+              "Demande de rachat / regroupement de crédits (version simplifiée). Renseigne les champs au fur et à mesure ; ne redemande pas un champ déjà rempli.",
+            schema: CREDIT_SCHEMA,
+          },
+        ],
+      });
+
+      // ─── Dev panel (opt-in via ?dev) ──────────────────────────────────
+      // The widget installs the credit form collector on its client, so the panel
+      // renders its live state and logs each update_credit call from just the client.
+      const DEV = new URLSearchParams(location.search).has("dev");
+      if (DEV) initDevPanel({ client: widget.client });
+    </script>
+  </body>
+</html>

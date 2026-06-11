@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AGO Widget - Vue.js Example</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; }
+      label { display: block; margin: 8px 0 4px; font-weight: 500; }
+      input { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+      button { margin-top: 16px; padding: 10px 20px; background: #4f46e5; color: white; border: none; border-radius: 6px; cursor: pointer; }
+      button:hover { background: #4338ca; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <h1>AGO Widget - Vue.js Example</h1>
+      <p>Configure and load the AGO chat widget.</p>
+
+      <label>Base Path</label>
+      <input v-model="config.basepath" placeholder="https://app.useago.com/" />
+
+      <label>Widget API Key</label>
+      <input v-model="config.widgetApiKey" placeholder="your-widget-api-key" />
+
+      <label>Title (optional)</label>
+      <input v-model="config.title" placeholder="Chat with us" />
+
+      <label>Welcome Prompt (optional)</label>
+      <input v-model="config.prompt" placeholder="Hello, how can I help?" />
+
+      <label>User Email (optional)</label>
+      <input v-model="config.email" placeholder="user@example.com" />
+
+      <button @click="loadWidget" :disabled="!config.basepath || !config.widgetApiKey">
+        Load Widget
+      </button>
+    </div>
+
+    <script type="module">
+      /** @typedef {import('@useago/sdk/widget').AgoWidgetConfig} AgoWidgetConfig */
+
+      const { createApp, ref } = Vue;
+
+      createApp({
+        setup() {
+          /** @type {import('vue').Ref<AgoWidgetConfig>} */
+          const config = ref({
+            basepath: "",
+            widgetApiKey: "",
+            title: "",
+            prompt: "",
+            email: "",
+          });
+
+          function loadWidget() {
+            // Set window.AGO with the typed config
+            window.AGO = {
+              basepath: config.value.basepath,
+              widgetApiKey: config.value.widgetApiKey,
+              ...(config.value.title && { title: config.value.title }),
+              ...(config.value.prompt && { prompt: config.value.prompt }),
+              ...(config.value.email && { email: config.value.email }),
+            };
+
+            // Load frame.js to bootstrap the widget
+            const script = document.createElement("script");
+            script.src = "https://useago.github.io/widgetjs/frame.js";
+            script.async = true;
+            document.head.appendChild(script);
+
+            // Load frame.css
+            const link = document.createElement("link");
+            link.rel = "stylesheet";
+            link.href = "https://useago.github.io/widgetjs/frame.css";
+            document.head.appendChild(link);
+          }
+
+          return { config, loadWidget };
+        },
+      }).mount("#app");
+    </script>
+  </body>
+</html>

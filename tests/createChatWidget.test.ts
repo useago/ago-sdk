@@ -1,0 +1,441 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { AgoClient } from "../src/client/AgoClient";
+import type { AgoMessage, Conversation } from "../src/client/types";
+import { mountChatWidget } from "../src/widget/createChatWidget";
+import type { CreateFormCollectorOptions } from "../src/forms/createFormCollector";
+import type { StorageLike } from "../src/state/createStore";
+
+// The widget loads the conversation list on mount (refreshThreads → getConversations).
+// Stub fetch so unmocked mounts return an empty list instead of hitting the network;
+// tests that care about threads spy on client.getConversations directly.
+beforeEach(() => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ count: 0, items: [] }),
+    }))
+  );
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+/** A Map-backed StorageLike so tests never touch real Web Storage. */
+function fakeStorage(): StorageLike & { raw: Map<string, string> } {
+  const raw = new Map<string, string>();
+  return {
+    raw,
+    getItem: (key) => (raw.has(key) ? raw.get(key)! : null),
+    setItem: (key, value) => {
+      raw.set(key, value);
+    },
+  };
+}
+
+
+const orderForm: CreateFormCollectorOptions = {
+  name: "order",
+  description: "The order the user wants to place.",
+  schema: {
+    type: "object",
+    properties: { product: { type: "string" }, quantity: { type: "number" } },
+    required: ["product", "quantity"],
+  },
+};
+
+function makeAssistantMessage(overrides: Partial<AgoMessage> = {}): AgoMessage {
+  return {
+    id: "assistant-1",
+    conversationId: "conv-1",
+    content: "Hi there!",
+    role: "assistant",
+    status: "DONE",
+    createdAt: new Date(0),
+    ...overrides,
+  };
+}
+
+function makeConversation(id: string, messages: AgoMessage[] = []): Conversation {
+  return { id, title: "Thread", lastMessageDate: new Date(0), messages };
+}
+
+describe("mountChatWidget", () => {
+  it("renders into the target and shows the welcome message", () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+
+    const widget = mountChatWidget(root, {
+      client,
+      title: "Helpdesk",
+      welcomeMessage: "Welcome!",
+    });
+
+    expect(root.querySelector(".ago-chat-widget")).not.toBeNull();
+    expect(root.textContent).toContain("Helpdesk");
+    expect(root.textContent).toContain("Welcome!");
+
+    widget.destroy();
+    expect(root.querySelector(".ago-chat-widget")).toBeNull();
+    root.remove();
+    client.destroy();
+  });
+
+  it("installs form collectors on mount and removes them on destroy", () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+
+    const widget = mountChatWidget(root, { client, forms: [orderForm] });
+    expect(client.getRegisteredFunctions().map((s) => s.name)).toContain(
+      "update_order"
+    );
+
+    widget.destroy();
+    expect(client.getRegisteredFunctions()).toHaveLength(0);
+    root.remove();
+    client.destroy();
+  });
+
+  it("renders clickable suggested replies that send the reply", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const sent: string[] = [];
+    const sendSpy = vi
+      .spyOn(client, "sendMessage")
+      .mockImplementation(async (content: string) => {
+        sent.push(content);
+        // First turn returns follow-up suggestions; later turns return plain.
+        return makeAssistantMessage({
+          id: `assistant-${sent.length}`,
+          followUpReplies: sent.length === 1 ? ["Pricing", "Book a demo"] : undefined,
+        });
+      });
+
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    const widget = mountChatWidget(root, { client });
+
+    await widget.sendMessage("hello");
+
+    const buttons = root.querySelectorAll<HTMLButtonElement>(
+      ".ago-message__followup-btn"
+    );
+    expect(buttons).toHaveLength(2);
+    expect(buttons[0].disabled).toBe(false);
+
+    buttons[1].click();
+    // Let the async send settle.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(sent).toEqual(["hello", "Book a demo"]);
+
+    sendSpy.mockRestore();
+    widget.destroy();
+    root.remove();
+    client.destroy();
+  });
+
+  it("hides a previous turn's suggested replies once the user sends again", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const sent: string[] = [];
+    vi.spyOn(client, "sendMessage").mockImplementation(
+      async (content: string) => {
+        sent.push(content);
+        // Only the first turn returns follow-up suggestions.
+        return makeAssistantMessage({
+          id: `assistant-${sent.length}`,
+          followUpReplies: sent.length === 1 ? ["Pricing", "Book a demo"] : undefined,
+        });
+      }
+    );
+
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    const widget = mountChatWidget(root, { client });
+
+    await widget.sendMessage("hello");
+    expect(
+      root.querySelectorAll(".ago-message__followup-btn")
+    ).toHaveLength(2);
+
+    // Second turn: the first reply is no longer the last message, so its
+    // stale suggestions must disappear.
+    await widget.sendMessage("tell me more");
+    expect(
+      root.querySelectorAll(".ago-message__followup-btn")
+    ).toHaveLength(0);
+
+    widget.destroy();
+    root.remove();
+    client.destroy();
+  });
+
+  it("renders suggested replies as disabled when onFollowUpClick is false", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    vi.spyOn(client, "sendMessage").mockResolvedValue(
+      makeAssistantMessage({ followUpReplies: ["A"] })
+    );
+
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    const widget = mountChatWidget(root, { client, onFollowUpClick: false });
+
+    await widget.sendMessage("hello");
+
+    const button = root.querySelector<HTMLButtonElement>(
+      ".ago-message__followup-btn"
+    );
+    expect(button).not.toBeNull();
+    expect(button?.disabled).toBe(true);
+
+    widget.destroy();
+    root.remove();
+    client.destroy();
+  });
+
+  describe("persistConversation", () => {
+    /** Seed the front-cached last active thread (id + last message time). */
+    function seedThread(
+      storage: StorageLike & { raw: Map<string, string> },
+      value: string,
+      lastMessageAt: number
+    ): void {
+      storage.raw.set("ago_last_thread", JSON.stringify({ value, lastMessageAt }));
+    }
+
+    it("resumes the cached last active thread on mount (id comes from the front cache)", async () => {
+      const storage = fakeStorage();
+      seedThread(storage, "conv-restored", Date.now());
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const sendSpy = vi
+        .spyOn(client, "sendMessage")
+        .mockResolvedValue(makeAssistantMessage());
+      const getSpy = vi
+        .spyOn(client, "getConversation")
+        .mockResolvedValue(makeConversation("conv-restored"));
+
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      const widget = mountChatWidget(root, {
+        client,
+        persistConversation: { storage },
+      });
+
+      await widget.sendMessage("hi");
+
+      // The resumed id comes from the front cache, and its history is loaded by id —
+      // no need to look it up in the conversations list.
+      expect(getSpy).toHaveBeenCalledWith("conv-restored");
+      expect(sendSpy).toHaveBeenCalledWith(
+        "hi",
+        expect.objectContaining({ conversationId: "conv-restored" })
+      );
+
+      sendSpy.mockRestore();
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("loads the conversation list into widget.threads on mount and after a turn (loadThreads)", async () => {
+      const storage = fakeStorage();
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      vi.spyOn(client, "sendMessage").mockResolvedValue(
+        makeAssistantMessage({ conversationId: "conv-1" })
+      );
+      const listSpy = vi
+        .spyOn(client, "getConversations")
+        .mockResolvedValue([makeConversation("conv-1"), makeConversation("conv-2")]);
+
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      const widget = mountChatWidget(root, {
+        client,
+        loadThreads: true,
+        persistConversation: { storage },
+      });
+
+      await vi.waitFor(() => {
+        expect(widget.threads.map((t) => t.id)).toEqual(["conv-1", "conv-2"]);
+      });
+
+      // The list refreshes after a turn (e.g. a freshly created thread shows up).
+      listSpy.mockResolvedValue([makeConversation("conv-3")]);
+      await widget.sendMessage("hi");
+      await vi.waitFor(() => {
+        expect(widget.threads.map((t) => t.id)).toEqual(["conv-3"]);
+      });
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("does not load threads by default; refreshThreads() still works on demand", async () => {
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const listSpy = vi
+        .spyOn(client, "getConversations")
+        .mockResolvedValue([makeConversation("conv-1")]);
+
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      const widget = mountChatWidget(root, { client });
+
+      // No automatic load on mount.
+      expect(listSpy).not.toHaveBeenCalled();
+      expect(widget.threads).toEqual([]);
+
+      // Manual refresh still populates the same array reference.
+      await widget.refreshThreads();
+      expect(widget.threads.map((t) => t.id)).toEqual(["conv-1"]);
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("does not resume a thread idle past the ttl", async () => {
+      const storage = fakeStorage();
+      seedThread(storage, "conv-stale", 0); // very old
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const sendSpy = vi
+        .spyOn(client, "sendMessage")
+        .mockResolvedValue(makeAssistantMessage({ conversationId: "conv-new" }));
+      const getSpy = vi.spyOn(client, "getConversation");
+
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      const widget = mountChatWidget(root, {
+        client,
+        persistConversation: { storage, ttlMs: 1000 },
+      });
+
+      await widget.sendMessage("hi");
+
+      // Stale thread is ignored: history not loaded, send starts a fresh thread.
+      expect(getSpy).not.toHaveBeenCalled();
+      expect(sendSpy).toHaveBeenCalledWith(
+        "hi",
+        expect.objectContaining({ conversationId: undefined })
+      );
+
+      sendSpy.mockRestore();
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("caches the thread and its last message time after a turn", async () => {
+      const storage = fakeStorage();
+      const completedAt = new Date();
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      vi.spyOn(client, "sendMessage").mockResolvedValue(
+        makeAssistantMessage({ conversationId: "conv-9", createdAt: completedAt })
+      );
+
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      const widget = mountChatWidget(root, {
+        client,
+        persistConversation: { storage },
+      });
+
+      await widget.sendMessage("hi");
+
+      const stored = JSON.parse(storage.raw.get("ago_last_thread")!);
+      expect(stored.value).toBe("conv-9");
+      expect(stored.lastMessageAt).toBe(completedAt.getTime());
+      // Fresh timestamp → resumable on the front without a backend call.
+      expect(widget.session?.getLastActiveThread()).toBe("conv-9");
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("lets an explicit conversationId win over the cached thread", async () => {
+      const storage = fakeStorage();
+      seedThread(storage, "conv-saved", Date.now());
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const sendSpy = vi
+        .spyOn(client, "sendMessage")
+        .mockResolvedValue(makeAssistantMessage());
+      vi.spyOn(client, "getConversation").mockResolvedValue(
+        makeConversation("conv-explicit")
+      );
+
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      const widget = mountChatWidget(root, {
+        client,
+        conversationId: "conv-explicit",
+        persistConversation: { storage },
+      });
+
+      await widget.sendMessage("hi");
+
+      expect(sendSpy).toHaveBeenCalledWith(
+        "hi",
+        expect.objectContaining({ conversationId: "conv-explicit" })
+      );
+
+      sendSpy.mockRestore();
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("exposes no session when persistConversation is unset", () => {
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      const widget = mountChatWidget(root, { client });
+
+      expect(widget.session).toBeUndefined();
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("renders the previous messages when resuming a thread", async () => {
+      const storage = fakeStorage();
+      seedThread(storage, "conv-restored", Date.now());
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      vi.spyOn(client, "getConversation").mockResolvedValue(
+        makeConversation("conv-restored", [
+          {
+            id: "m1",
+            conversationId: "conv-restored",
+            content: "Earlier question",
+            role: "user",
+            status: "DONE",
+            createdAt: new Date(0),
+          },
+          makeAssistantMessage({ id: "m2", content: "Earlier answer" }),
+        ])
+      );
+
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      const widget = mountChatWidget(root, {
+        client,
+        persistConversation: { storage },
+      });
+
+      // loadHistory resolves on a later microtask; wait for it to paint.
+      await vi.waitFor(() => {
+        expect(root.textContent).toContain("Earlier answer");
+      });
+      expect(root.textContent).toContain("Earlier question");
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+  });
+});

@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AGO SDK — Formulaire de prise de contact</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      max-width: 980px;
+      margin: 40px auto;
+      padding: 20px;
+      color: #1a1a1a;
+    }
+    .config {
+      background: #f5f5f5;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+    .config input {
+      width: 100%;
+      padding: 8px;
+      margin: 5px 0 15px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      box-sizing: border-box;
+    }
+    .config label { font-weight: 500; }
+    button {
+      padding: 10px 20px;
+      background: #0066cc;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover { background: #0055aa; }
+    button:disabled { background: #aaa; cursor: not-allowed; }
+    .layout { display: none; gap: 20px; }
+    .col { flex: 1; min-width: 0; }
+    #chat {
+      height: 460px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+    }
+    #messages { flex: 1; overflow-y: auto; padding: 15px; }
+    .row { display: flex; padding: 10px; border-top: 1px solid #ddd; }
+    .row input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
+    .row button { margin-left: 10px; }
+    .msg-user { text-align: right; margin: 10px 0; }
+    .msg-user span { background: #0066cc; color: white; padding: 8px 12px; border-radius: 12px; display: inline-block; }
+    .msg-bot { margin: 10px 0; }
+    .msg-bot span { background: #f0f0f0; padding: 8px 12px; border-radius: 12px; display: inline-block; }
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 20px; }
+    .field { margin-bottom: 12px; }
+    .field .key { font-size: 12px; color: #777; text-transform: uppercase; letter-spacing: .03em; }
+    .field .val { font-size: 15px; }
+    .field .val.empty { color: #bbb; font-style: italic; }
+    .status { margin: 14px 0; font-size: 14px; }
+    .status.missing { color: #b26a00; }
+    .status.ready { color: #1b7f37; }
+    .status.sent { color: #1b7f37; font-weight: 600; }
+    #logs {
+      background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 8px;
+      font-family: monospace; font-size: 12px; height: 140px; overflow-y: auto; margin-top: 20px;
+    }
+    .log-event { color: #4fc3f7; }
+    .log-function { color: #81c784; }
+    .log-error { color: #ef5350; }
+  </style>
+</head>
+<body>
+  <h1>AGO — Prise de contact conversationnelle</h1>
+  <p>L'agent remplit la fiche de contact au fil de la conversation. La fiche à droite se met à jour en direct.</p>
+
+  <div class="config">
+    <h3>Configuration</h3>
+    <label>Backend URL :</label>
+    <input type="text" id="baseUrl" value="http://localhost:8000" />
+
+    <label>Agent (id ou slug) :</label>
+    <input type="text" id="agent" placeholder="ex : contact-bot (sinon agent par défaut)" />
+
+    <label>Widget ID (optionnel) :</label>
+    <input type="text" id="widgetId" placeholder="Généré automatiquement si vide" />
+
+    <button onclick="initSDK()">Initialiser</button>
+  </div>
+
+  <div class="layout" id="layout">
+    <div class="col">
+      <div id="chat">
+        <div id="messages"></div>
+        <div class="row">
+          <input type="text" id="messageInput" placeholder="Ex : Bonjour, je voudrais une démo pour mon entreprise" />
+          <button onclick="sendMessage()">Envoyer</button>
+          <button onclick="newConversation()" title="Oublier la conversation et repartir de zéro">Nouveau</button>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="card">
+        <h3 style="margin-top:0">Fiche contact</h3>
+        <div id="form-preview"></div>
+        <div id="form-status" class="status"></div>
+        <button id="submit-btn" onclick="submitContact()" disabled>Envoyer la demande</button>
+      </div>
+    </div>
+  </div>
+
+  <h3>Logs</h3>
+  <div id="logs"></div>
+
+  <script type="module">
+    // Built output of the SDK (run `npm run build` in sdk/ first).
+    import { AgoClient, createFormCollector, createConversationSession, deriveFormStatus } from '../../dist/index.js';
+    // Dev panel: a floating widget showing the live client context (form values +
+    // missing fields) and a log of client-function calls. Dev-only — never ship it.
+    import { initDevPanel } from '../../dist/devtools.js';
+
+    let client = null;
+    let contact = null;
+    let session = null;
+    // The conversation we're in. Threaded into sendMessage so every turn stays in
+    // the same thread, and cached (with createConversationSession) so a page reload
+    // can resume it.
+    let conversationId = undefined;
+
+    // Labels for the live preview, in field order.
+    const FIELDS = [
+      { key: 'full_name', label: 'Nom complet' },
+      { key: 'work_email', label: 'Email professionnel' },
+      { key: 'company', label: 'Entreprise' },
+      { key: 'phone', label: 'Téléphone' },
+      { key: 'reason', label: 'Raison du contact' },
+      { key: 'message', label: 'Message' },
+    ];
+
+    // One schema -> store + update_contact function + dynamic context + submit_contact.
+    // Shared with renderPreview so completeness is derived (not stored) the same way.
+    const CONTACT_SCHEMA = {
+      type: 'object',
+      properties: {
+        full_name: { type: 'string', description: 'Nom et prénom du contact' },
+        work_email: { type: 'string', description: 'Adresse email professionnelle' },
+        company: { type: 'string', description: "Nom de l'entreprise" },
+        phone: { type: 'string', description: 'Numéro de téléphone (optionnel)' },
+        reason: {
+          type: 'string',
+          description: 'Motif de la prise de contact',
+          enum: ['Démonstration', 'Tarifs', 'Support', 'Partenariat', 'Autre'],
+        },
+        message: { type: 'string', description: 'Précisions libres (optionnel)' },
+      },
+      required: ['full_name', 'work_email', 'company', 'reason'],
+    };
+
+    function log(message, type = '') {
+      const logs = document.getElementById('logs');
+      const entry = document.createElement('div');
+      entry.className = type;
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+      logs.appendChild(entry);
+      logs.scrollTop = logs.scrollHeight;
+    }
+
+    // Paint a whole message list at once — used when resuming a conversation on reload.
+    function renderMessages(messages) {
+      const box = document.getElementById('messages');
+      box.innerHTML = messages
+        .map((m) =>
+          m.role === 'user'
+            ? `<div class="msg-user"><span>${m.content}</span></div>`
+            : `<div class="msg-bot"><span>${m.content}</span></div>`
+        )
+        .join('');
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function renderPreview(state) {
+      const preview = document.getElementById('form-preview');
+      preview.innerHTML = FIELDS.map(({ key, label }) => {
+        const value = state.values[key];
+        const has = value !== undefined && value !== null && value !== '';
+        return `
+          <div class="field">
+            <div class="key">${label}</div>
+            <div class="val ${has ? '' : 'empty'}">${has ? String(value) : '—'}</div>
+          </div>`;
+      }).join('');
+
+      // The store holds only canonical state ({ values, submitted }); derive
+      // completeness on read with the same helper the SDK uses internally.
+      const { complete, missing } = deriveFormStatus(CONTACT_SCHEMA, state.values);
+      const status = document.getElementById('form-status');
+      const submitBtn = document.getElementById('submit-btn');
+      if (state.submitted) {
+        status.className = 'status sent';
+        status.textContent = '✓ Demande envoyée. Merci !';
+        submitBtn.disabled = true;
+      } else if (complete) {
+        status.className = 'status ready';
+        status.textContent = 'Prêt à envoyer.';
+        submitBtn.disabled = false;
+      } else {
+        status.className = 'status missing';
+        status.textContent = `Encore nécessaire : ${missing.join(', ')}`;
+        submitBtn.disabled = true;
+      }
+    }
+
+    window.initSDK = async function () {
+      const baseUrl = document.getElementById('baseUrl').value;
+      const agent = document.getElementById('agent').value;
+      const widgetId = document.getElementById('widgetId').value;
+      if (!baseUrl) {
+        log('Veuillez remplir le Backend URL', 'log-error');
+        return;
+      }
+
+      // Stable visitor id + cached last active thread (both persisted in localStorage),
+      // so a reload can resume the same conversation. An explicit widget id wins.
+      // ttlMs: Infinity for the demo — the default is 2h, after which the cached
+      // thread is considered stale and NOT resumed (getLastActiveThread → null).
+      session = createConversationSession({
+        ...(widgetId ? { widgetId } : {}),
+        ttlMs: Infinity,
+      });
+
+      client = new AgoClient({
+        baseUrl,
+        // Cible l'agent (id ou slug). Sans ça, l'agent par défaut du backend est utilisé.
+        ...(agent ? { agent } : {}),
+        // Reuse the session's id so the X-Widget-Id header matches the cached thread's owner.
+        widgetId: session.widgetId,
+        debug: true,
+      });
+
+      // update_contact function + dynamic context + submit_contact, all from CONTACT_SCHEMA.
+      contact = createFormCollector({
+        name: 'contact',
+        description: "Coordonnées d'un prospect professionnel qui souhaite être recontacté.",
+        schema: CONTACT_SCHEMA,
+        // Le plus simple : une string = POST des valeurs vers cette URL (votre API).
+        // Variantes :
+        //   submit: { via: 'client', handler: async (values) => myApi.createLead(values) }  // logique sur mesure
+        //   submit: { via: 'backend', destination: 'contact_webhook' }   // relais ; URL + secret restent côté serveur
+        submit: '/api/leads',
+      });
+
+      // Register update_contact / submit_contact + the dynamic-context provider.
+      contact.install(client);
+
+      // Mount the dev panel after install so it lists the form's functions and shows
+      // the fiche's missing fields straight away — the context:changed event keeps it
+      // live as the agent fills fields or a reloaded conversation hydrates.
+      initDevPanel({ client });
+
+      // Re-render the fiche on every store change (agent updates land here).
+      contact.store.subscribe(renderPreview);
+      renderPreview(contact.store.get());
+
+      client.on('function:invoke', (d) =>
+        log(`Fonction appelée : ${d.functionName}(${JSON.stringify(d.arguments)})`, 'log-function')
+      );
+      client.on('message:error', (d) => log(`Erreur : ${d.error}`, 'log-error'));
+
+      document.getElementById('layout').style.display = 'flex';
+      document.getElementById('messageInput').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') sendMessage();
+      });
+      window.client = client;
+      window.contact = contact;
+
+      // Diagnostic: what's cached for resume (raw value + last-message time).
+      log(`Thread caché (ago_last_thread) : ${localStorage.getItem('ago_last_thread') ?? '(aucun)'}`, 'log-event');
+
+      // Resume the last conversation if one is still fresh. Loading it replays the
+      // persisted update_contact calls — getConversation emits "conversation:loaded",
+      // which the installed collector listens to and re-hydrates from. So after a
+      // page reload the fiche comes back filled, with no extra wiring here.
+      conversationId = session.getLastActiveThread() ?? undefined;
+      if (conversationId) {
+        try {
+          log(`Reprise de la conversation ${conversationId}…`, 'log-event');
+          const conv = await client.getConversation(conversationId);
+          renderMessages(conv.messages ?? []);
+          log('Conversation reprise — la fiche est restaurée depuis l\'historique.', 'log-event');
+        } catch (error) {
+          log(`Reprise impossible (${error.message}) — nouvelle conversation.`, 'log-error');
+          session.clear();
+          conversationId = undefined;
+        }
+      } else {
+        log('SDK initialisé. Discutez avec l\'agent pour remplir la fiche.', 'log-event');
+      }
+    };
+
+    window.sendMessage = async function () {
+      if (!client) return log('SDK non initialisé', 'log-error');
+      const input = document.getElementById('messageInput');
+      const content = input.value.trim();
+      if (!content) return;
+      input.value = '';
+
+      const messages = document.getElementById('messages');
+      messages.innerHTML += `<div class="msg-user"><span>${content}</span></div>`;
+      messages.scrollTop = messages.scrollHeight;
+
+      try {
+        // Thread conversationId so every turn stays in the same conversation.
+        const response = await client.sendMessage(content, conversationId ? { conversationId } : {});
+        messages.innerHTML += `<div class="msg-bot"><span>${response.content}</span></div>`;
+        messages.scrollTop = messages.scrollHeight;
+
+        // Cache the active thread so a reload can resume it (drives the TTL too).
+        if (response.conversationId) {
+          conversationId = response.conversationId;
+          session.setActiveThread(conversationId, response.createdAt);
+        }
+      } catch (error) {
+        log(`Erreur : ${error.message}`, 'log-error');
+      }
+    };
+
+    // Forget the cached thread and clear the fiche — start a brand new conversation.
+    window.newConversation = function () {
+      session?.clear();
+      conversationId = undefined;
+      contact?.reset();
+      document.getElementById('messages').innerHTML = '';
+      log('Nouvelle conversation.', 'log-event');
+    };
+
+    // The agent normally calls submit_contact itself once the fiche is complete,
+    // but the user can also send it from this button.
+    window.submitContact = async function () {
+      const result = await contact.submit();
+      if (result.ok) {
+        log(`Demande envoyée : ${JSON.stringify(result.result)}`, 'log-function');
+      } else {
+        log(`Envoi refusé : ${result.error ?? 'champs manquants ' + result.missing}`, 'log-error');
+      }
+    };
+  </script>
+</body>
+</html>
