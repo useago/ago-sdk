@@ -16,7 +16,7 @@ There are **two** widgets in this package:
 |                           | Embed snippet             | `mountChatWidget`                  |
 | ------------------------- | ------------------------- | ---------------------------------- |
 | Setup                     | `<script>` tag, no build  | `import` from `@useago/sdk/widget` |
-| Renders                   | floating bubble (iframe)  | inline panel into any element      |
+| Renders                   | floating bubble (iframe)  | inline panel, or fixed side panel  |
 | Framework                 | none                      | none (pure TS/JS)                  |
 | Forms / suggested replies | built-in                  | yes, via options                   |
 | Use when                  | marketing site, zero code | you control the DOM, no framework  |
@@ -78,7 +78,11 @@ widget.destroy(); // removes listeners, uninstalls forms, clears the DOM
 | `welcomeMessage?`      | `string`                                         | `"Hello! How can I help you today?"` |
 | `placeholder?`         | `string`                                         | `"Type a message..."`            |
 | `allowFiles?`          | `boolean`                                        | `false`                          |
-| `height?`              | `string \| number`                               | `500`                            |
+| `height?`              | `string \| number`                               | `500` (ignored for side panels)  |
+| `placement?`           | `"inline" \| "left" \| "right"`                  | `"inline"`                       |
+| `width?`               | `string \| number`                               | `400` (side panels only)         |
+| `launcher?`            | `boolean`                                         | `true` (side panels only)        |
+| `defaultOpen?`         | `boolean`                                         | `false` (side panels only)       |
 | `logoUrl?`             | `string`                                         | —                                |
 | `showAgentName?`       | `boolean`                                        | `false`                          |
 | `theme?`               | `WidgetTheme`                                    | — (see [Theming](#theming))      |
@@ -89,7 +93,8 @@ widget.destroy(); // removes listeners, uninstalls forms, clears the DOM
 
 `mountChatWidget` returns a handle:
 `{ client, element, sendMessage, session, threads, refreshThreads, destroy }` (`session` is
-present only when `persistConversation` is set). `threads` is the visitor's conversation list —
+present only when `persistConversation` is set; `open`/`close`/`toggle` are present only for
+side placements — see [Side panel](#side-panel-left--right)). `threads` is the visitor's conversation list —
 the vanilla equivalent of the React/Vue `useConversation().conversations`. It auto-loads on
 mount and refreshes after each turn only when `loadThreads: true`; otherwise it stays empty
 until you call `refreshThreads()`. To debug, hand `widget.client` to the [dev panel](devtools.md)
@@ -103,6 +108,37 @@ function the agent calls.
 > link/image URLs are scheme-validated, so untrusted agent output can't inject
 > markup. The same renderer is exported as `renderMarkdown(source)` →
 > `DocumentFragment` if you build a custom vanilla UI.
+
+### Side panel (`left` / `right`)
+
+By default the panel renders **inline**, filling the target element. Set
+`placement: "left"` or `"right"` and it instead pins a **fixed, full-height panel**
+to that edge of the viewport that slides open and closed — pass `document.body` as
+the target for a true page overlay. A circular **launcher button** opens it and a
+"×" in the header closes it; the `height` option is ignored (the panel is always
+full-height) and the width comes from `width` (default `400`, capped at the
+viewport).
+
+```ts
+const widget = mountChatWidget(document.body, {
+  config: { baseUrl: "https://YOUR-DOMAIN.useago.com" },
+  placement: "left", // or "right"
+  width: 420, // panel width (number → px)
+  // defaultOpen: true,   // start open instead of behind the launcher
+  // launcher: false,     // hide the built-in button and drive it yourself
+});
+
+// Drive open/close yourself (present only for side placements):
+widget.open?.();
+widget.toggle?.();
+widget.close?.();
+```
+
+The panel is themed exactly like the inline one (see [Theming](#theming)); it just
+drops its rounded corners and keeps a single divider on the inner edge. The
+wrapper, launcher, and close button all carry `ago`-prefixed class names
+(`.ago-chat-widget-panel`, `.ago-chat-widget-launcher`, `.ago-chat-widget__close`)
+so nothing leaks into the host page.
 
 ### Resume the last thread across reloads
 

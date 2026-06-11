@@ -75,9 +75,37 @@ export interface MountChatWidgetOptions {
   placeholder?: string;
   /** Enable file attachments. */
   allowFiles?: boolean;
-  /** Widget height (number → px). */
+  /** Widget height (number → px). Ignored when `placement` is `"left"`/`"right"`
+   * (a side panel is always full-height). */
   height?: string | number;
-  /** URL of a logo shown in the header. */
+  /**
+   * Where the panel renders. `"inline"` (default) mounts it directly into the
+   * target element, filling it. `"left"` / `"right"` instead pin a **fixed,
+   * full-height side panel** to that edge of the viewport that slides open and
+   * closed; the target is only used as the DOM parent (pass `document.body` for
+   * a true page overlay). In side mode `height` is ignored and the width comes
+   * from {@link MountChatWidgetOptions.width}.
+   */
+  placement?: "inline" | "left" | "right";
+  /**
+   * Width of the side panel for `placement: "left" | "right"` (number → px).
+   * Capped at the viewport width so it never overflows on mobile. Ignored when
+   * `placement` is `"inline"`. Defaults to `400`.
+   */
+  width?: string | number;
+  /**
+   * For side placements, render the built-in floating launcher button that opens
+   * the panel (plus a close "×" in the header). Set `false` to drive open/close
+   * yourself via the handle's `open()`/`close()`/`toggle()`. Ignored when
+   * `placement` is `"inline"`. Defaults to `true`.
+   */
+  launcher?: boolean;
+  /**
+   * For side placements, whether the panel starts open. Ignored when `placement`
+   * is `"inline"` (an inline panel is always visible). Defaults to `false`.
+   */
+  defaultOpen?: boolean;
+  /** URL of a logo shown in the header (and on the launcher button, if shown). */
   logoUrl?: string;
   /** Show the agent name above assistant messages. Defaults to `false`. */
   showAgentName?: boolean;
@@ -121,6 +149,13 @@ export interface ChatWidgetHandle {
   element: HTMLElement;
   /** Programmatically send a message (same path as the input). */
   sendMessage: (content: string, files?: File[]) => Promise<void>;
+  /**
+   * Open / close / toggle the side panel. Present only for
+   * `placement: "left" | "right"` (an inline panel is always visible).
+   */
+  open?: () => void;
+  close?: () => void;
+  toggle?: () => void;
   /**
    * The conversation-persistence session, present only when `persistConversation`
    * is set — exposes the stable `widgetId` and `session.clear()` to start a new thread.
@@ -263,6 +298,9 @@ export function mountChatWidget(
     placeholder = "Type a message...",
     allowFiles = false,
     height = 500,
+    placement = "inline",
+    width = 400,
+    defaultOpen = false,
     logoUrl,
     showAgentName = false,
     theme,
@@ -280,6 +318,13 @@ export function mountChatWidget(
   }
   const client = options.client ?? new AgoClient(options.config as AgoConfig);
   const root = resolveTarget(target);
+
+  // Side-panel mode: a fixed, full-height panel pinned to the left/right edge that
+  // slides open and closed. `inline` (default) keeps the original behavior of
+  // filling the target element.
+  const isSide = placement === "left" || placement === "right";
+  const showLauncher = isSide && (options.launcher ?? true);
+  let panelOpen = isSide ? defaultOpen : true;
 
   // Optional cross-reload resumption of the visitor's last active thread, keyed off
   // a single stable widget id rather than a per-agent stored conversation id.
@@ -303,7 +348,11 @@ export function mountChatWidget(
   const container = div({
     display: "flex",
     flexDirection: "column",
-    height: typeof height === "number" ? `${height}px` : height,
+    height: isSide
+      ? "100%"
+      : typeof height === "number"
+        ? `${height}px`
+        : height,
     border: `1px solid ${BORDER_COLOR}`,
     borderRadius: RADIUS,
     overflow: "hidden",
@@ -339,6 +388,27 @@ export function mountChatWidget(
   css(titleEl, { margin: "0", fontSize: "15px", fontWeight: "600" });
   header.appendChild(titleEl);
 
+  // Side panels get a close affordance in the header (the launcher reopens them).
+  if (isSide) {
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "ago-chat-widget__close";
+    closeBtn.setAttribute("aria-label", "Close");
+    closeBtn.textContent = "×";
+    css(closeBtn, {
+      marginLeft: "auto",
+      background: "transparent",
+      border: "none",
+      color: HEADER_TEXT_COLOR,
+      fontSize: "22px",
+      lineHeight: "1",
+      cursor: "pointer",
+      padding: "0 2px",
+    });
+    closeBtn.addEventListener("click", () => closePanel());
+    header.appendChild(closeBtn);
+  }
+
   const messagesEl = div({
     flex: "1",
     overflow: "auto",
@@ -356,7 +426,85 @@ export function mountChatWidget(
   ensureKeyframes();
 
   container.append(header, messagesEl, inputRow);
-  root.appendChild(container);
+
+  // In side mode the panel lives inside a fixed, full-height wrapper pinned to the
+  // chosen edge; otherwise it's mounted inline as before. `mountInto` is whatever
+  // gets appended to the host element (and removed on destroy).
+  let mountInto: HTMLElement = container;
+  let wrapper: HTMLDivElement | undefined;
+  let launcherBtn: HTMLButtonElement | undefined;
+
+  // Which viewport edge the side panel/launcher pin to (narrowed for use as a
+  // CSS property key); only meaningful when `isSide`.
+  const edge: "left" | "right" = placement === "left" ? "left" : "right";
+
+  if (isSide) {
+    wrapper = div({
+      position: "fixed",
+      top: "0",
+      bottom: "0",
+      [edge]: "0",
+      width: typeof width === "number" ? `${width}px` : width,
+      maxWidth: "100vw",
+      display: "flex",
+      zIndex: "2147483000",
+      transition: "transform 0.3s ease",
+      boxShadow: "rgba(15, 15, 15, 0.18) 0px 0px 24px 0px",
+    });
+    wrapper.className = "ago-chat-widget-panel";
+    // The panel fills the wrapper edge-to-edge: drop the rounded corners and keep a
+    // single divider on the inner edge facing the page.
+    css(container, {
+      height: "100%",
+      width: "100%",
+      borderRadius: "0",
+      border: "none",
+      boxShadow: "none",
+      [edge === "left" ? "borderRight" : "borderLeft"]:
+        `1px solid ${BORDER_COLOR}`,
+    });
+    wrapper.appendChild(container);
+    mountInto = wrapper;
+  }
+
+  if (showLauncher) {
+    launcherBtn = document.createElement("button");
+    launcherBtn.type = "button";
+    launcherBtn.className = "ago-chat-widget-launcher";
+    launcherBtn.setAttribute("aria-label", `Open ${title}`);
+    css(launcherBtn, {
+      position: "fixed",
+      bottom: "20px",
+      [edge]: "20px",
+      width: "56px",
+      height: "56px",
+      borderRadius: "50%",
+      border: "none",
+      backgroundColor: BRAND_COLOR,
+      color: BRAND_TEXT_COLOR,
+      cursor: "pointer",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: "2147483000",
+      boxShadow: "rgba(15, 15, 15, 0.2) 0px 4px 14px 0px",
+      fontFamily: FONT_VAR,
+    });
+    if (logoUrl) {
+      const img = document.createElement("img");
+      img.src = logoUrl;
+      img.alt = "";
+      css(img, { width: "26px", height: "26px", objectFit: "contain" });
+      launcherBtn.appendChild(img);
+    } else {
+      launcherBtn.appendChild(buildChatIcon());
+    }
+    launcherBtn.addEventListener("click", () => openPanel());
+  }
+
+  root.appendChild(mountInto);
+  if (launcherBtn) root.appendChild(launcherBtn);
+  applyOpenState();
 
   // ── Rendering ──────────────────────────────────────────────────────
   const followUpEnabled = onFollowUpClick !== false;
@@ -760,8 +908,11 @@ export function mountChatWidget(
 
   return {
     client,
-    element: container,
+    element: mountInto,
     sendMessage: send,
+    ...(isSide
+      ? { open: openPanel, close: closePanel, toggle: togglePanel }
+      : {}),
     session,
     threads,
     refreshThreads,
@@ -773,11 +924,56 @@ export function mountChatWidget(
       client.off("message:error", onError);
       formsDestroyed = true;
       uninstallForms.forEach((fn) => fn());
-      container.remove();
+      mountInto.remove();
+      launcherBtn?.remove();
       // Only tear down the client if we created it.
       if (!options.client) client.destroy();
     },
   };
+
+  // ── Side-panel open/close (no-ops in inline mode) ──────────────────
+  function applyOpenState(): void {
+    if (!wrapper) return;
+    const hidden =
+      placement === "left" ? "translateX(-100%)" : "translateX(100%)";
+    wrapper.style.transform = panelOpen ? "translateX(0)" : hidden;
+    wrapper.setAttribute("aria-hidden", panelOpen ? "false" : "true");
+    if (launcherBtn) launcherBtn.style.display = panelOpen ? "none" : "flex";
+  }
+  function openPanel(): void {
+    panelOpen = true;
+    applyOpenState();
+    focus();
+  }
+  function closePanel(): void {
+    panelOpen = false;
+    applyOpenState();
+  }
+  function togglePanel(): void {
+    if (panelOpen) closePanel();
+    else openPanel();
+  }
+
+  /** A dependency-free chat-bubble glyph for the launcher button. */
+  function buildChatIcon(): SVGSVGElement {
+    const ns = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("width", "26");
+    svg.setAttribute("height", "26");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("fill", "none");
+    const path = document.createElementNS(ns, "path");
+    path.setAttribute(
+      "d",
+      "M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.7a8.5 8.5 0 0 1-.9-3.8 8.38 8.38 0 0 1 8.5-8.5 8.38 8.38 0 0 1 8.5 8.5z",
+    );
+    path.setAttribute("stroke", "currentColor");
+    path.setAttribute("stroke-width", "2");
+    path.setAttribute("stroke-linecap", "round");
+    path.setAttribute("stroke-linejoin", "round");
+    svg.appendChild(path);
+    return svg;
+  }
 
   // ── Input builder (closure over send) ──────────────────────────────
   function buildStreamingDots(): HTMLElement {
