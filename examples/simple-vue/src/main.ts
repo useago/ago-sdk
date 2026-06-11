@@ -20,7 +20,8 @@ const app = createApp(App);
 app.use(router);
 
 app.use(AgoPlugin, {
-  baseUrl: 'http://localhost:55121',
+  baseUrl: 'https://ago.api.useago.com',
+  agent: 'generic-guide',
   debug: true,
 });
 

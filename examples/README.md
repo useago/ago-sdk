@@ -11,9 +11,9 @@ Runnable example apps for `@useago/sdk`, one per stack.
 | `simple-html/` | Plain HTML (no build) | open the `.html` file |
 | `vue-widget/` | Embeddable widget in Vue | open `index.html` |
 
-Each example points its chat at a running AGO instance. Set `baseUrl` to your
-domain (e.g. `https://YOUR-DOMAIN.useago.com`) — the examples default to
-`http://localhost:8000` for local development.
+The examples default to the public demo backend (`https://ago.api.useago.com`,
+agent `generic-guide`), so they answer out of the box. Point `baseUrl` at your
+own domain (e.g. `https://YOUR-DOMAIN.api.useago.com`) to chat with your agents.
 
 ## Two ways to depend on the SDK
 
@@ -26,7 +26,7 @@ track your local source:
 
 This requires building the SDK first (`npm install && npm run build` from `sdk/`).
 
-To run an example **as an external user would** — against the published package —
+To run an example **as an external user would** (against the published package),
 swap that line for the released version and reinstall:
 
 ```jsonc
@@ -42,8 +42,7 @@ npm run dev
 ### Plain HTML / CDN
 
 The `simple-html/` examples import the local build (`../../dist/*.js`). To run one
-without any build step, import from a CDN instead — see
-`simple-html/credit-form-simple.html`, which uses an import map:
+without any build step, import from a CDN instead with an import map:
 
 ```html
 <script type="importmap">

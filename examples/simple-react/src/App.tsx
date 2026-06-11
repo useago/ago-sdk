@@ -195,7 +195,8 @@ export default function App() {
   return (
     <BrowserRouter>
       <AgoProvider
-        baseUrl="http://localhost:8000"
+        baseUrl="https://ago.api.useago.com"
+        agent="generic-guide"
         debug
       >
         <AppContent />
