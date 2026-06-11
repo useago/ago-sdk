@@ -3,8 +3,8 @@ import {
   type CreateFormCollectorOptions,
 } from '@useago/sdk/widget';
 
-// Local AGO backend.
-const BASE_URL = 'http://localhost:8000';
+// Public demo backend. Swap for your own https://YOUR-DOMAIN.api.useago.com.
+const BASE_URL = 'https://ago.api.useago.com';
 
 // Conversational form the agent fills while chatting, then submits.
 const demoRequest: CreateFormCollectorOptions = {
@@ -34,7 +34,7 @@ const demoRequest: CreateFormCollectorOptions = {
 };
 
 const widget = mountChatWidget('#chat', {
-  config: { baseUrl: BASE_URL, agent: 'open' },
+  config: { baseUrl: BASE_URL, agent: 'generic-guide' },
   title: 'Book a demo',
   welcomeMessage: "Hi! Tell me a bit about your team and I'll set up a demo.",
   placeholder: 'Type your message…',

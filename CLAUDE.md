@@ -30,6 +30,36 @@ npm run typecheck # Type check
 - Client-side functions are registered via `FunctionRegistry`
 - React components are optional (peer dependency)
 
+## Documentation (keep it simple)
+
+Docs exist so a developer can try the SDK in minutes. Optimize for that, not for
+completeness.
+
+- **A new reader must understand it right away.** The top of any doc (and the
+  README) leads with a copy-paste-runnable example, not prose or reference tables.
+- **Show, don't catalogue.** Prefer one working snippet over an exhaustive option
+  list. Push deep reference (full prop/option/event tables) below the fold or into
+  a dedicated page; in the README, collapse them behind `<details>`.
+- **Use the live endpoint** `https://ago.api.useago.com` in runnable examples so
+  readers get a real response with zero setup. Note they swap it for their own
+  `https://YOUR-DOMAIN.api.useago.com` when they have a tenant.
+- **Lead with the three things devs test first:** (1) send a message and see a
+  response, (2) let the agent navigate/act on their app, (3) a short map of what
+  else is possible. See `docs/general/getting-started.md`.
+- Short sentences. Link to deeper guides instead of inlining everything.
+- **No AI-style writing.** The em-dash "—" is forbidden; use a period, comma,
+  colon, or parentheses instead. Also avoid the other tells: "it's not just X,
+  it's Y" constructions, rule-of-three lists ("fast, simple, and powerful"),
+  hype adjectives ("seamless", "powerful", "robust", "supercharge"), starting
+  sentences with "Whether you're...", and emoji sprinkled through prose. Write
+  like a developer explaining to another developer.
+- **A big README is fine:** the most important info should live there so a reader
+  finds it without leaving the page. "Simple" means the top is instantly runnable
+  and the layout is scannable (lead with the example, collapse reference behind
+  `<details>`), not that the file is short. Don't strip out important content to
+  make it shorter; structure it so the key path is obvious and the depth is still
+  one scroll (or one `<details>`) away.
+
 ## Scoping (must not clobber the host app)
 
 The SDK is embedded into third-party pages, so its CSS and JS must never override

@@ -3,94 +3,113 @@
 [![npm version](https://img.shields.io/npm/v/@useago/sdk.svg)](https://www.npmjs.com/package/@useago/sdk)
 [![types](https://img.shields.io/npm/types/@useago/sdk.svg)](https://www.npmjs.com/package/@useago/sdk)
 
-Official JavaScript/TypeScript SDK for [AGO](https://useago.com) — embed AGO's AI
-agents directly inside your own app. Stream answers, let the agent call **your**
-client-side functions, navigate users around your UI, and feed it live context
-about what the user is doing.
+**The agent layer for your frontend stack.** AGO's agents plug into React, Vue,
+Angular or plain TypeScript like any other dependency: send a message, stream
+the reply, and let the agent call **your** code and navigate **your** UI.
 
-Works with **plain JS/TS, React, Vue and Angular**. The core is framework-agnostic;
-each framework gets idiomatic bindings (hooks, composables, services) on top of the
-same `AgoClient`.
+In two minutes you'll have a working chat on your page and an agent that can
+navigate your app. The quickstart below uses **React**; every other stack gets
+the same two steps through its own guide:
+
+| Stack | Guide |
+| --- | --- |
+| <img src="https://cdn.simple-icons.org/react/61DAFB" width="14" /> React | **you're reading it**, just scroll down |
+| <img src="https://cdn.simple-icons.org/vuedotjs/4FC08D" width="14" /> Vue 3 | [Vue guide](docs/frameworks/vue.md) |
+| <img src="https://cdn.simple-icons.org/angular/DD0031" width="14" /> Angular | [Angular guide](docs/frameworks/angular.md) |
+| <img src="https://cdn.simple-icons.org/typescript/3178C6" width="14" /> Plain JavaScript / TypeScript | [Core guide](docs/general/core.md) |
+| <img src="https://cdn.simple-icons.org/html5/E34F26" width="14" /> Any website, no build step (`<script>`) | [Widget guide](docs/general/widget.md) |
+
+## <img src="https://cdn.simple-icons.org/react/61DAFB" width="22" /> Try it in 30 seconds
 
 ```bash
 npm install @useago/sdk
 ```
 
-📚 **Full documentation:** [ago.mintlify.app](https://ago.mintlify.app/) · the
-framework guides below are also published there.
+The SDK has no framework dependency of its own. The React bindings need `react`
+and `react-dom` (>=17): already there in an existing React app, otherwise
+install them too.
 
----
+```tsx
+// App.tsx
+import { AgoProvider, ChatWidget } from "@useago/sdk/react";
 
-## Quick start
-
-Pick your stack — each guide is self-contained.
-
-| Stack | Guide |
-| --- | --- |
-| Plain JavaScript / TypeScript | [docs/general/core.md](docs/general/core.md) |
-| React | [docs/frameworks/react.md](docs/frameworks/react.md) |
-| Vue 3 | [docs/frameworks/vue.md](docs/frameworks/vue.md) |
-| Angular | [docs/frameworks/angular.md](docs/frameworks/angular.md) |
-| Embeddable widget (`<script>`) | [docs/general/widget.md](docs/general/widget.md) |
-
-Cross-cutting topics (apply to every framework):
-
-- [**Client-side functions & helpers**](docs/general/functions-and-context.md#client-side-functions) — let the agent run code in the browser
-- [**Client context**](docs/general/functions-and-context.md#client-context) — tell the agent what the user is looking at
-- [**Events & streaming**](docs/general/events-and-streaming.md) — low-level hooks into the message stream
-- [**Testing**](docs/general/testing.md) — a mock client for unit tests
-- [**Configuration & auth**](docs/general/configuration.md) — every `AgoConfig` option, headers, errors
-
-The 30-second version (vanilla):
-
-```ts
-import { AgoClient } from "@useago/sdk";
-
-const ago = new AgoClient({ baseUrl: "https://YOUR-DOMAIN.useago.com" });
-
-ago.on("message:chunk", ({ content }) => process.stdout.write(content));
-
-const reply = await ago.sendMessage("What can you do?");
-console.log("\nDone:", reply.status);
+export default function App() {
+  return (
+    <AgoProvider baseUrl="https://ago.api.useago.com" agent="generic-guide">
+      <ChatWidget title="AGO" welcomeMessage="Ask me anything!" height={500} />
+    </AgoProvider>
+  );
+}
 ```
 
+Start your dev server. A chat panel renders on the page; type a message and
+watch the reply stream in. That's a complete integration. (`generic-guide` is a
+public demo agent; swap `baseUrl` and `agent` for your own once you have a tenant.)
+
+## Let the agent drive your existing routes
+
+This is the part existing apps care about. You already have a router and pages;
+describe them to the agent and *"show me my invoices"* actually navigates there.
+One hook in the layout you already have, nothing to restructure:
+
+```tsx
+import { Outlet, useNavigate } from "react-router-dom";
+import { useAgoNavigation } from "@useago/sdk/react";
+
+// Your existing layout component. Only the hook is new.
+function AppLayout() {
+  const navigate = useNavigate();
+
+  useAgoNavigation(navigate, [
+    { name: "dashboard", path: "/dashboard", description: "KPIs and recent activity" },
+    { name: "invoices", path: "/invoices", description: "List, search and download invoices" },
+    { name: "settings", path: "/settings", description: "Account, billing and team settings" },
+  ]);
+
+  return <Outlet />; // your existing routes render as before
+}
+```
+
+Each route needs a `name`, its existing `path`, and a `description` the agent
+uses to pick the right page. It calls **your** `navigate` function, so route
+guards, auth and layouts keep working exactly as they do today.
+`react-router-dom` here is *your* router, not an SDK dependency:
+`useAgoNavigation` accepts any `(path: string) => void` function.
+
+**Next: the [Getting started guide](docs/general/getting-started.md)** has both
+examples assembled into a running app, plus everything else the SDK can do, in
+about 5 minutes.
+
+## Or clone a running example
+
+```bash
+git clone https://github.com/useago/ago-sdk.git
+cd ago-sdk && npm install && npm run build   # build the SDK once
+cd examples/simple-react
+npm install && npm run dev
+```
+
+The examples ship pre-configured against the demo backend, so they answer
+immediately. [`examples/`](examples/) has one per stack: React (with
+react-router navigation), Vue, Angular, plain TypeScript, and no-build HTML.
+
 ---
 
-## Feature matrix
+## Docs
 
-What ships out of the box for each entry point. The **core** (`@useago/sdk`)
-APIs are usable from *any* framework — the framework columns mark where a more
-idiomatic binding (hook / composable / service / component) is also provided.
+- [**Getting started**](docs/general/getting-started.md): send a message, wire the router, see the feature map
+- [**Feature matrix**](docs/general/feature-matrix.md): everything that ships, per stack
+- [**Functions & context**](docs/general/functions-and-context.md): let the agent run your code and see what the user sees
+- [**Events & streaming**](docs/general/events-and-streaming.md): low-level hooks into the message stream
+- [**Testing**](docs/general/testing.md): mock client for unit tests
+- [**Configuration & auth**](docs/general/configuration.md): every `AgoConfig` option, headers, errors
 
-| Feature | Core (vanilla) | React | Vue | Angular |
-| --- | :---: | :---: | :---: | :---: |
-| Create client | `new AgoClient()` | `useAgo` / `<AgoProvider>` | `AgoPlugin` / `useAgo` | `provideAgo` / `AgoService` |
-| Zero-config auto-detect | ✅ `createAgo()` | ✅ | ✅ | ✅ |
-| Send message (streaming) | ✅ | ✅ `useChat`/`useMessages` | ✅ `useChat`/`useMessages` | ✅ `AgoService.sendMessage` |
-| File attachments | ✅ | ✅ | ✅ | ✅ |
-| List / load conversations | ✅ | ✅ `useConversation` | ✅ `useConversation` | ✅ `AgoService` |
-| All-in-one chat state | — | ✅ `useChat` | ✅ `useChat` | ➖ compose manually |
-| Pre-built `<ChatWidget>` UI | — | ✅ | ➖ see example | — |
-| Markdown / `<Message>` / `<ChatInput>` | — | ✅ | — | — |
-| Client-side functions | ✅ `registerFunction` | ✅ `useAgoFunction` | ✅ `useAgoFunction` | ✅ `AgoService` |
-| `defineFunction` / `withHandler` | ✅ | ✅ | ✅ | ✅ |
-| Pre-built helpers (`showToast`, …) | ✅ | ✅ `helpers` prop | ✅ | ✅ |
-| Navigation function | ✅ `registerNavigationFunction` | ✅ `useAgoNavigation` | ✅ `useAgoNavigation` | ✅ `AgoService` |
-| Client context | ✅ `setContext` / `addDynamicContext` | ✅ `useAgoContext` | ✅ core API | ✅ core API |
-| Auto page context | ✅ `enableAutoPageContext()` | ✅ `pageContext="auto"` | ✅ core API | ✅ core API |
-| Events (`on`/`off`/`once`/`waitFor`) | ✅ | ✅ (via client) | ✅ `useAgoEvents` | ✅ `messages$` Observables |
-| Streaming helpers / async generator | ✅ | ✅ | ✅ | ✅ |
-| Tool calls (form/confirm/reject) | ✅ | ✅ | ✅ | ✅ `AgoService` |
-| Message feedback | ✅ `submitFeedback` | ✅ | ✅ | ✅ `AgoService` |
-| Observable store | ✅ `createStore` | ✅ `useAgoStore` | ✅ `useAgoStore` | ➖ core API |
-| Dev panel / devtools | ✅ `initDevPanel` (`/devtools`) | ✅ | ✅ | ✅ |
-| Testing mock client | ✅ `createMockClient` | ✅ | ✅ | ✅ |
-
-Legend: ✅ first-class binding · ➖ supported via the core API, no dedicated sugar · — not applicable.
+Full documentation: [ago.mintlify.app](https://ago.mintlify.app/)
 
 ---
 
-## Package entry points
+<details>
+<summary><strong>Package entry points</strong> (subpath exports)</summary>
 
 The package is published with several subpath exports so bundlers only pull in
 what you use:
@@ -103,19 +122,30 @@ what you use:
 | `@useago/sdk/angular` | Angular service and provider |
 | `@useago/sdk/helpers` | Pre-built client functions only |
 | `@useago/sdk/widget` | `window.AGO` widget config types |
-| `@useago/sdk/devtools` | `initDevPanel` — in-browser debug overlay (DOM/CSS) |
-| `@useago/sdk/testing` | `createMockClient` — mock client for tests |
+| `@useago/sdk/devtools` | `initDevPanel`, an in-browser debug overlay (DOM/CSS) |
+| `@useago/sdk/testing` | `createMockClient`, a mock client for tests |
 
 ESM and CJS builds are both shipped, with full TypeScript declarations.
 
+</details>
+
+## Dependencies
+
+The core SDK depends on nothing but the platform: `fetch` and `ReadableStream`,
+so any modern browser or Node 18+. Framework packages are **optional peer
+dependencies**; you only need the one whose bindings you import:
+
+| You import | Needs | Notes |
+| --- | --- | --- |
+| `@useago/sdk` (core, widget, helpers, testing) | nothing | works everywhere |
+| `@useago/sdk/react` | `react` + `react-dom` `>=17` | already present in any React app |
+| `@useago/sdk/vue` | `vue` `>=3.3` | already present in any Vue 3 app |
+| `@useago/sdk/angular` | nothing | no hard Angular dependency, works with any DI container |
+
+Your router (`react-router-dom`, `vue-router`, Angular Router) is **never** an
+SDK dependency: the navigation helpers just take your navigate function.
+
 ---
-
-## Requirements
-
-- A modern browser environment (uses `fetch` + `ReadableStream` for SSE) or Node 18+.
-- `react` / `react-dom` `>=17` for the React bindings (peer dependency, optional).
-- `vue` `>=3.3` for the Vue bindings (peer dependency, optional).
-- Angular bindings have **no** hard Angular dependency — they work with any DI container.
 
 ## License
 
