@@ -197,6 +197,104 @@ describe("mountChatWidget", () => {
     client.destroy();
   });
 
+  describe("placement (side panel)", () => {
+    it("renders a fixed side wrapper + launcher, closed by default", () => {
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+
+      const widget = mountChatWidget(root, { client, placement: "left" });
+
+      const wrapper = root.querySelector<HTMLElement>(".ago-chat-widget-panel");
+      const launcher = root.querySelector<HTMLElement>(
+        ".ago-chat-widget-launcher"
+      );
+      expect(wrapper).not.toBeNull();
+      expect(launcher).not.toBeNull();
+      // The panel still lives inside the wrapper.
+      expect(wrapper!.querySelector(".ago-chat-widget")).not.toBeNull();
+      // Pinned to the left edge, full-height, and slid off-screen while closed.
+      expect(wrapper!.style.position).toBe("fixed");
+      expect(wrapper!.style.left).toBe("0px");
+      expect(wrapper!.style.transform).toBe("translateX(-100%)");
+      expect(wrapper!.getAttribute("aria-hidden")).toBe("true");
+      // The handle exposes open/close/toggle for side placements.
+      expect(typeof widget.open).toBe("function");
+
+      widget.destroy();
+      expect(root.querySelector(".ago-chat-widget-panel")).toBeNull();
+      expect(root.querySelector(".ago-chat-widget-launcher")).toBeNull();
+      root.remove();
+      client.destroy();
+    });
+
+    it("opens and closes the panel (launcher hides while open)", () => {
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+
+      const widget = mountChatWidget(root, { client, placement: "right" });
+      const wrapper = root.querySelector<HTMLElement>(".ago-chat-widget-panel")!;
+      const launcher = root.querySelector<HTMLElement>(
+        ".ago-chat-widget-launcher"
+      )!;
+
+      // Right edge → slides off to the right while closed.
+      expect(wrapper.style.right).toBe("0px");
+      expect(wrapper.style.transform).toBe("translateX(100%)");
+
+      widget.open!();
+      expect(wrapper.style.transform).toBe("translateX(0)");
+      expect(wrapper.getAttribute("aria-hidden")).toBe("false");
+      expect(launcher.style.display).toBe("none");
+
+      widget.close!();
+      expect(wrapper.style.transform).toBe("translateX(100%)");
+      expect(launcher.style.display).toBe("flex");
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("starts open with defaultOpen and can omit the launcher", () => {
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+
+      const widget = mountChatWidget(root, {
+        client,
+        placement: "left",
+        defaultOpen: true,
+        launcher: false,
+      });
+      const wrapper = root.querySelector<HTMLElement>(".ago-chat-widget-panel")!;
+
+      expect(wrapper.style.transform).toBe("translateX(0)");
+      expect(root.querySelector(".ago-chat-widget-launcher")).toBeNull();
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("inline placement (default) exposes no open/close controls", () => {
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+
+      const widget = mountChatWidget(root, { client });
+
+      expect(root.querySelector(".ago-chat-widget-panel")).toBeNull();
+      expect(root.querySelector(".ago-chat-widget-launcher")).toBeNull();
+      expect(widget.open).toBeUndefined();
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+  });
+
   describe("persistConversation", () => {
     /** Seed the front-cached last active thread (id + last message time). */
     function seedThread(
