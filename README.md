@@ -22,12 +22,12 @@ the same two steps through its own guide:
 ## <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/react/react-original.svg" width="22" /> Try it in 30 seconds
 
 ```bash
-npm install @useago/sdk
+npm install @useago/sdk react react-dom
 ```
 
 The SDK has no framework dependency of its own. The React bindings need `react`
-and `react-dom` (>=17): already there in an existing React app, otherwise
-install them too.
+and `react-dom` (>=17): already there in an existing React app, so you can drop
+them from the command above.
 
 ```tsx
 // App.tsx
