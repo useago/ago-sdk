@@ -15,6 +15,8 @@ import type {
 import { SSEHandler } from "../streaming/SSEHandler";
 import { EventEmitter } from "../utils/eventEmitter";
 import { logger } from "../utils/logger";
+import { AgoError } from "./errors";
+import { validateConfig } from "./validateConfig";
 import type {
   AgoConfig,
   AgoClientEvents,
@@ -36,7 +38,11 @@ export class AgoClient {
   private eventEmitter: EventEmitter<AgoClientEvents>;
   private config: AgoConfig;
 
+  /** Conversations already warned about an empty reply (one warning each). */
+  private warnedEmptyConversations = new Set<string>();
+
   constructor(config: AgoConfig) {
+    validateConfig(config, "AgoClient");
     this.config = config;
     this.httpClient = new HttpClient(config);
     this.functionRegistry = new FunctionRegistry();
@@ -119,6 +125,13 @@ export class AgoClient {
   }
 
   private async processSSEResponse(response: Response): Promise<AgoMessage> {
+    // One stream == one assistant message. Client-function invocations are
+    // deliberately NOT in the final message's `toolCalls` (SSEHandler filters
+    // `type === "client_function"`), and their payloads carry no messageId, so
+    // an action-only turn (agent runs a function, replies with no text) is
+    // tracked with this closure-local flag instead.
+    let sawClientFunction = false;
+
     const handler = new SSEHandler({
       onStart: (data) => {
         this.eventEmitter.emit("message:start", data);
@@ -134,6 +147,7 @@ export class AgoClient {
         }
       },
       onClientFunction: async (data) => {
+        sawClientFunction = true;
         this.eventEmitter.emit("function:invoke", data);
         await this.handleClientFunctionInvocation(data);
       },
@@ -144,11 +158,75 @@ export class AgoClient {
         this.eventEmitter.emit("message:complete", message);
       },
       onError: (error) => {
-        this.eventEmitter.emit("message:error", { error: error.message });
+        this.eventEmitter.emit("message:error", {
+          error: error.message,
+          code: error instanceof AgoError ? error.code : undefined,
+        });
       },
     });
 
-    return handler.processStream(response);
+    const message = await handler.processStream(response);
+    this.maybeFlagEmptyReply(message, sawClientFunction);
+    return message;
+  }
+
+  /**
+   * Detect a reply that completed as DONE with no content and no activity —
+   * today's backend answers an unknown `agent` slug with an empty 200, which
+   * otherwise fails silently. Emits `message:empty` (always) and warns on the
+   * console once per conversation (unless `warnOnEmptyReply: false`).
+   *
+   * Deferred with setTimeout(0) so both land AFTER `sendMessage` resolves:
+   * `await client.sendMessage(...)` followed by `client.waitFor("message:empty")`
+   * must not race. TEMPORARY heuristic: remove once the backend returns an
+   * explicit error for unknown agents (see TODOS.md, backend issue).
+   */
+  private maybeFlagEmptyReply(message: AgoMessage, sawClientFunction: boolean): void {
+    const isEmpty =
+      message.status === "DONE" &&
+      (message.content ?? "").trim() === "" &&
+      !sawClientFunction &&
+      !(message.toolCalls && message.toolCalls.length > 0) &&
+      !(message.followUpReplies && message.followUpReplies.length > 0);
+
+    if (!isEmpty) return;
+
+    setTimeout(() => {
+      this.eventEmitter.emit("message:empty", {
+        conversationId: message.conversationId ?? "",
+        messageId: message.id ?? "",
+      });
+
+      if (this.config.warnOnEmptyReply === false) return;
+
+      const conversationKey = message.conversationId || "(no conversation)";
+      if (this.warnedEmptyConversations.has(conversationKey)) return;
+      this.warnedEmptyConversations.add(conversationKey);
+
+      const agent = this.config.agent || this.config.defaultAgentId;
+      if (!message.id) {
+        // Stream completed without any message data at all. Live backends
+        // currently answer an UNKNOWN AGENT SLUG this way too (empty 200, no
+        // envelope), so name both causes when an agent is configured.
+        console.warn(
+          "[AGO] The stream completed without any message data. Possible causes: " +
+            (agent ? `the agent "${agent}" may not exist for this tenant, or ` : "") +
+            "`baseUrl` does not point at an AGO endpoint that returns server-sent " +
+            "events. Listen for the `message:empty` event to handle this in your " +
+            "app; silence this warning with `warnOnEmptyReply: false`."
+        );
+      } else {
+        console.warn(
+          "[AGO] Reply completed with empty content. Possible causes: " +
+            (agent
+              ? `the agent "${agent}" may not exist for this tenant, `
+              : "an unknown `agent` slug, ") +
+            "or the agent replied with no text. Listen for the `message:empty` " +
+            "event to handle this in your app; silence this warning with " +
+            "`warnOnEmptyReply: false`."
+        );
+      }
+    }, 0);
   }
 
   private async handleClientFunctionInvocation(data: {
@@ -627,13 +705,30 @@ export class AgoClient {
 
   /**
    * Update client configuration
+   *
+   * Validates the MERGED config before committing: omitting a key (or passing
+   * it as `undefined`, common with spread-built partials) keeps the current
+   * value; an explicit empty/non-string `baseUrl` throws `config_missing_base_url`
+   * and leaves the client unchanged (no half-updated state).
    */
   updateConfig(config: Partial<AgoConfig>): void {
-    this.config = { ...this.config, ...config };
-    this.httpClient.updateConfig(config);
+    // Normalize explicit `undefined` to "absent" (standard optional-property
+    // semantics) so it cannot clobber the stored value through the spread.
+    const cleaned: Partial<AgoConfig> = {};
+    for (const [key, value] of Object.entries(config)) {
+      if (value !== undefined) {
+        (cleaned as Record<string, unknown>)[key] = value;
+      }
+    }
 
-    if (config.debug !== undefined) {
-      config.debug ? logger.enable() : logger.disable();
+    const merged = { ...this.config, ...cleaned };
+    validateConfig(merged, "AgoClient.updateConfig");
+
+    this.config = merged;
+    this.httpClient.updateConfig(cleaned);
+
+    if (cleaned.debug !== undefined) {
+      cleaned.debug ? logger.enable() : logger.disable();
     }
   }
 

@@ -20,6 +20,13 @@ export interface AgoConfig {
   userJwt?: string;
   /** Enable debug logging */
   debug?: boolean;
+  /**
+   * Warn on the console when a reply completes with empty content and no tool
+   * calls (the usual cause is an unknown `agent` slug, which the backend
+   * currently answers with an empty 200). Default `true`. The `message:empty`
+   * event fires regardless of this setting.
+   */
+  warnOnEmptyReply?: boolean;
 }
 
 /**
@@ -227,8 +234,23 @@ export interface AgoClientEvents {
    */
   "message:answer-complete": AgoMessage;
   "message:complete": AgoMessage;
+  /**
+   * A reply finished as `DONE` with empty content and no tool calls, client
+   * functions, or follow-up replies — usually an unknown `agent` slug (the
+   * backend currently answers those with an empty 200). Fires after
+   * `message:complete` AND after `sendMessage` resolves, so subscribing right
+   * after `await sendMessage(...)` still catches it. `messageId` and
+   * `conversationId` are empty strings when the stream completed without any
+   * message data at all (e.g. a proxy stripped the SSE stream).
+   */
+  "message:empty": {
+    conversationId: string;
+    messageId: string;
+  };
   "message:error": {
     error: string;
+    /** Stable error code (see configuration.md#error-codes) when the failure was an AgoError. */
+    code?: string;
     conversationId?: string;
     messageId?: string;
   };

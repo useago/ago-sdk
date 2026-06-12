@@ -151,7 +151,7 @@ the data collected so far, and which required fields are still missing.
 />
 ```
 
-> Keep the `forms` array stable (declare it outside render or memoize it) — the
+> Keep the `forms` array stable (declare it outside render or memoize it); the
 > collectors are reinstalled when a form's name, schema, description, or submit
 > target changes. For full control over the live form state (e.g. a side panel
 > that updates as fields fill in), use the `useFormCollector` hook directly
@@ -159,7 +159,7 @@ the data collected so far, and which required fields are still missing.
 
 To keep the schema in the backend instead of inline, pass an entry with just a
 `name` (`{ name: "demo_request" }`): the widget fetches the definition via
-`loadFormCollector`. The same works with the hook — `useFormCollector({ name })`
+`loadFormCollector`. The same works with the hook: `useFormCollector({ name })`
 fetches the definition and exposes `loading` until it resolves.
 
 Building your own UI? The widget is composed from exported building blocks you
@@ -170,7 +170,7 @@ can reuse: **`<Message>`** (accepts `onFollowUpClick`), **`<ChatInput>`** and
 
 ## 3. Custom UI with `useChat`
 
-All-in-one state for a custom chat interface — composes `useMessages` +
+All-in-one state for a custom chat interface; composes `useMessages` +
 `useConversation`.
 
 ```tsx
@@ -285,13 +285,13 @@ function AppShell() {
 
 ## 6. Give the agent context: `useAgoContext`
 
-Expose what the user is looking at — sent with every message. A unique key is
+Expose what the user is looking at, sent with every message. A unique key is
 generated per component via `useId()`.
 
 ```tsx
 import { useAgoContext } from "@useago/sdk/react";
 
-// Static object — captured from props/state
+// Static object, captured from props/state
 function OrderPage({ order }) {
   useAgoContext({
     name: "Order detail",
@@ -301,7 +301,7 @@ function OrderPage({ order }) {
   return <OrderView order={order} />;
 }
 
-// Dynamic function — evaluated on every send (fresh data from a store)
+// Dynamic function, evaluated on every send (fresh data from a store)
 function App() {
   useAgoContext(() => ({
     name: "App shell",
@@ -319,7 +319,7 @@ useAgoContext({ name: "Sidebar filter", data: { filter } }, "sidebar-filter");
 
 If you hold shared UI/request state in a core [`createStore`](../general/core.md#hold-live-state-with-createstore)
 (handy when client-side functions and your components mutate the same value),
-`useAgoStore` reads it reactively — the component re-renders on every `store.set`.
+`useAgoStore` reads it reactively: the component re-renders on every `store.set`.
 It's a thin `useSyncExternalStore` wrapper, so it's SSR-safe and batches correctly.
 
 ```tsx
@@ -333,7 +333,7 @@ function CartBadge() {
   return <span>{items.length}</span>;
 }
 
-// Mutate through the store — from anywhere, including a registered AGO function:
+// Mutate through the store, from anywhere, including a registered AGO function:
 cart.set({ items: [...cart.get().items, "SKU-1"] });
 ```
 

@@ -1,4 +1,4 @@
-import { AgoFunctionError } from "../client/errors";
+import { AgoError, AgoFunctionError } from "../client/errors";
 import { logger } from "../utils/logger";
 import type {
   ClientFunctionDefinition,
@@ -35,7 +35,12 @@ export class FunctionRegistry {
 
     const name = nameOrDef;
     if (!handler || !schema) {
-      throw new Error("handler and schema are required");
+      throw new AgoError(
+        `registerFunction("${name}"): both a handler and a schema are required. ` +
+          "Pass them as arguments or use the single-object form: " +
+          "registerFunction({ name, parameters, handler }).",
+        "function_invalid_registration"
+      );
     }
     if (this.functions.has(name)) {
       logger.warn(`Function "${name}" is being overwritten`);

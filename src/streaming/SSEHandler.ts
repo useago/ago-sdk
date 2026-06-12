@@ -46,7 +46,11 @@ export class SSEHandler {
    */
   async processStream(response: Response): Promise<AgoMessage> {
     if (!response.body) {
-      throw new AgoStreamError("Response has no body");
+      throw new AgoStreamError(
+        "Response has no body. The endpoint did not return a stream: check that " +
+          "`baseUrl` points at an AGO API and nothing (proxy, mock) strips the SSE body.",
+        "stream_no_body"
+      );
     }
 
     const reader = response.body.getReader();
@@ -73,7 +77,11 @@ export class SSEHandler {
       return this.buildFinalMessage();
     } catch (error) {
       const streamError =
-        error instanceof Error ? error : new AgoStreamError("Stream processing failed");
+        error instanceof Error
+          ? error
+          : new AgoStreamError(
+              "Stream processing failed mid-flight. The connection may have dropped; retry the message."
+            );
       this.callbacks.onError?.(streamError);
       throw streamError;
     } finally {

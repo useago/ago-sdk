@@ -11,7 +11,13 @@ function generateWidgetId(): string {
     if (stored) return stored;
   }
 
-  const id = crypto.randomUUID();
+  // Global WebCrypto is flag-gated on Node 18 (unflagged in 19+), and this
+  // must stay bundleable for browsers (no `node:crypto` import). The fallback
+  // only needs uniqueness for a widget id, not cryptographic strength.
+  const id =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `ago-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 
   if (typeof localStorage !== "undefined") {
     try {
@@ -116,7 +122,8 @@ export class HttpClient {
         throw error;
       }
       throw new AgoNetworkError(
-        `Network error: ${error instanceof Error ? error.message : "Unknown error"}`,
+        `Network error: ${error instanceof Error ? error.message : "Unknown error"}. ` +
+          "Check that `baseUrl` is reachable and includes the protocol (https://).",
         error instanceof Error ? error : undefined
       );
     }
@@ -149,7 +156,8 @@ export class HttpClient {
         throw error;
       }
       throw new AgoNetworkError(
-        `Network error: ${error instanceof Error ? error.message : "Unknown error"}`,
+        `Network error: ${error instanceof Error ? error.message : "Unknown error"}. ` +
+          "Check that `baseUrl` is reachable and includes the protocol (https://).",
         error instanceof Error ? error : undefined
       );
     }
@@ -188,7 +196,8 @@ export class HttpClient {
         throw error;
       }
       throw new AgoNetworkError(
-        `Network error: ${error instanceof Error ? error.message : "Unknown error"}`,
+        `Network error: ${error instanceof Error ? error.message : "Unknown error"}. ` +
+          "Check that `baseUrl` is reachable and includes the protocol (https://).",
         error instanceof Error ? error : undefined
       );
     }
@@ -207,8 +216,18 @@ export class HttpClient {
       throw AgoApiError.fromResponse(errorData, response.status);
     }
 
+    // Status-keyed hints for the likeliest first-session failures. Short on
+    // purpose: these strings can surface in end-user UIs (the widget renders
+    // error messages verbatim).
+    let hint = "";
+    if (response.status === 401 || response.status === 403) {
+      hint = " Check `userJwt` (and that it has not expired).";
+    } else if (response.status === 404) {
+      hint = " Check that `baseUrl` points at your AGO API root.";
+    }
+
     throw new AgoApiError(
-      `HTTP ${response.status}: ${response.statusText}`,
+      `HTTP ${response.status}: ${response.statusText}.${hint}`,
       "http_error",
       response.status,
       "api_error"

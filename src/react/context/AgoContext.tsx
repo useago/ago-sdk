@@ -66,11 +66,12 @@ export const AgoProvider: React.FC<AgoProviderProps> = ({
   pageContext,
   ...config
 }) => {
-  // Only call useAgo when no external client is provided
+  // Skip internal client creation entirely when an external client is provided
+  // (useAgo accepts null for exactly this case).
   const { client: internalClient } = useAgo(
-    externalClient ? { baseUrl: "" } : (config as AgoConfig)
+    externalClient ? null : (config as AgoConfig)
   );
-  const client = externalClient || internalClient;
+  const client = (externalClient || internalClient) as AgoClient;
 
   // Register app-wide tools declaratively
   useEffect(() => {

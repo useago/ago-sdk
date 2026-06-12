@@ -1,12 +1,12 @@
 # Client-side functions & context
 
 Two capabilities that turn AGO from a chatbot into an agent that acts inside
-**your** app. Both work in every framework — this page is the canonical
-reference; the framework guides show the idiomatic wrappers.
+**your** app. Both work in every framework; this page is the canonical
+reference, and the framework guides show the idiomatic wrappers.
 
-- [Client-side functions](#client-side-functions) — the agent runs code in the browser
-- [Pre-built helpers](#pre-built-helpers) — a catalogue of ready-made functions
-- [Client context](#client-context) — tell the agent what the user is doing
+- [Client-side functions](#client-side-functions): the agent runs code in the browser
+- [Pre-built helpers](#pre-built-helpers): a catalogue of ready-made functions
+- [Client context](#client-context): tell the agent what the user is doing
 
 ---
 
@@ -34,13 +34,14 @@ export const lookupOrder = defineFunction({
     required: ["id"],
   },
   handler: async (args) => {
+    // fetchOrder: your own API call
     const order = await fetchOrder(args.id as string);
     return { status: order.status, total: order.total }; // returned to the agent
   },
 });
 ```
 
-`defineFunction` is an identity helper — it just gives you typing and a reusable
+`defineFunction` is an identity helper: it just gives you typing and a reusable
 object. The shape is:
 
 ```ts
@@ -63,7 +64,7 @@ interface ClientFunctionDefinition {
 
 > **Tip:** write descriptions for the model. A clear `description` (and per-field
 > `description`) is what makes the agent call the function correctly. Return a
-> small, structured object — it's fed straight back into the conversation.
+> small, structured object; it's fed straight back into the conversation.
 
 ### Register a function
 
@@ -71,7 +72,7 @@ interface ClientFunctionDefinition {
 // Single object (preferred)
 client.registerFunction(lookupOrder);
 
-// Short alias — also accepts an array
+// Short alias, also accepts an array
 client.register([lookupOrder, cancelOrder]);
 
 // Classic 3-arg form
@@ -92,7 +93,7 @@ Per framework:
 
 ### Navigation shortcut
 
-A common case — letting the agent move the user around — has a dedicated helper
+A common case (letting the agent move the user around) has a dedicated helper
 that builds the function for you:
 
 ```ts
@@ -153,7 +154,7 @@ import { showToast, withHandler } from "@useago/sdk";
 
 client.register(
   withHandler(showToast, (args) => {
-    myToast(args.message as string);
+    myToast(args.message as string); // myToast: your own toast handler
     return { shown: true };
   }),
 );
@@ -176,7 +177,7 @@ In React you can wire helpers declaratively on the provider:
 ## Client context
 
 Context is structured data describing the user's current situation. It's sent
-with **every** message so the agent answers in context — without the user having
+with **every** message so the agent answers in context, without the user having
 to explain where they are.
 
 ### Static context
@@ -203,10 +204,11 @@ interface ContextEntry {
 
 ### Dynamic context
 
-A function evaluated on every send — perfect for data outside your render state
+A function evaluated on every send, perfect for data outside your render state
 (global stores, refs, computed values). Return `null` to skip.
 
 ```ts
+// cart / cartTotal(): a variable and helper from your outer scope or store
 client.addDynamicContext("cart", () => ({
   name: "Cart",
   data: { itemCount: cart.length, total: cartTotal() },

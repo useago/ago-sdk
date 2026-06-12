@@ -33,6 +33,9 @@ export {
   AgoStreamError,
 } from "./client/errors";
 
+// Config validation (shared by AgoClient, createAgo and the widget)
+export { validateConfig } from "./client/validateConfig";
+
 // Observable store
 export { createStore } from "./state/createStore";
 export type { Store, PersistOptions, StorageLike } from "./state/createStore";

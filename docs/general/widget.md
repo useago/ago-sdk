@@ -1,6 +1,6 @@
 # Embeddable widget
 
-The embeddable chat widget is a drop-in `<script>` snippet — **no build step and
+The embeddable chat widget is a drop-in `<script>` snippet: **no build step and
 no npm install required**. The SDK ships the **TypeScript types** for its
 `window.AGO` configuration object (so projects configuring the widget in
 TypeScript get autocomplete) and a **programmatic vanilla widget**
@@ -27,7 +27,7 @@ There are **two** widgets in this package:
 
 The pure TS/JS equivalent of the React [`<ChatWidget>`](../frameworks/react.md#2-the-fastest-ui-chatwidget):
 a complete chat panel (header, streaming messages, input) you mount into any DOM
-element — **no React, Vue, or Angular**. It supports the same conversational
+element, **no React, Vue, or Angular**. It supports the same conversational
 **forms** (form creator) and **clickable suggested replies**.
 
 ```ts
@@ -94,16 +94,16 @@ widget.destroy(); // removes listeners, uninstalls forms, clears the DOM
 `mountChatWidget` returns a handle:
 `{ client, element, sendMessage, session, threads, refreshThreads, destroy }` (`session` is
 present only when `persistConversation` is set; `open`/`close`/`toggle` are present only for
-side placements — see [Side panel](#side-panel-left--right)). `threads` is the visitor's conversation list —
+side placements, see [Side panel](#side-panel-left--right)). `threads` is the visitor's conversation list,
 the vanilla equivalent of the React/Vue `useConversation().conversations`. It auto-loads on
 mount and refreshes after each turn only when `loadThreads: true`; otherwise it stays empty
 until you call `refreshThreads()`. To debug, hand `widget.client` to the [dev panel](devtools.md)
-(`initDevPanel({ client: widget.client })`) — it shows the installed forms' live state and every
+(`initDevPanel({ client: widget.client })`); it shows the installed forms' live state and every
 function the agent calls.
 
 > Message content is rendered as **GitHub-flavored markdown** (headings, bold,
 > italic, strikethrough, inline + fenced code, links, images, ordered/nested
-> lists, blockquotes, tables, and rules) by a tiny built-in parser — no extra
+> lists, blockquotes, tables, and rules) by a tiny built-in parser, no extra
 > dependencies. All message text is HTML-escaped before it reaches the DOM and
 > link/image URLs are scheme-validated, so untrusted agent output can't inject
 > markup. The same renderer is exported as `renderMarkdown(source)` →
@@ -113,7 +113,7 @@ function the agent calls.
 
 By default the panel renders **inline**, filling the target element. Set
 `placement: "left"` or `"right"` and it instead pins a **fixed, full-height panel**
-to that edge of the viewport that slides open and closed — pass `document.body` as
+to that edge of the viewport that slides open and closed; pass `document.body` as
 the target for a true page overlay. A circular **launcher button** opens it and a
 "×" in the header closes it; the `height` option is ignored (the panel is always
 full-height) and the width comes from `width` (default `400`, capped at the
@@ -143,12 +143,12 @@ so nothing leaks into the host page.
 ### Resume the last thread across reloads
 
 Set `persistConversation` and the widget resumes the visitor's last active thread
-automatically — no manual `localStorage` wiring. It's built on
+automatically, no manual `localStorage` wiring. It's built on
 [`createConversationSession`](core.md#resume-the-visitors-last-thread-with-createconversationsession):
 the visitor is identified by a single stable **widget id** (`ago_widget_id`), and the last
 active thread (its id + last message time) is cached on the front. On the next mount the
 widget decides **without a backend call** whether that thread is still fresh, and if so
-fetches its history — so the panel shows the previous messages instead of an empty greeting.
+fetches its history, so the panel shows the previous messages instead of an empty greeting.
 Only threads idle for less than `ttlMs` (default **2h**, sliding) are resumed; a thread with
 no recorded last-message time is not.
 
@@ -170,7 +170,7 @@ mountChatWidget("#chat", {
   },
 });
 
-widget.session?.clear(); // forget the thread — e.g. a "new chat" button
+widget.session?.clear(); // forget the thread, e.g. a "new chat" button
 widget.session?.widgetId; // the stable visitor id (for debugging / correlation)
 ```
 
@@ -185,7 +185,7 @@ every color, font, and corner radius from a small set of **CSS custom properties
 with built-in fallbacks. A widget with no theming looks exactly as shipped; set a
 token and that part of the panel re-skins to match the surrounding page.
 
-There are two ways to set the tokens — they do the same thing, so pick whichever
+There are two ways to set the tokens; they do the same thing, so pick whichever
 fits where your brand values live:
 
 **1. Plain CSS** (recommended for anything context-dependent). Target the widget
@@ -213,7 +213,7 @@ root, `.ago-chat-widget`:
 }
 ```
 
-**2. The `theme` option** (a typed convenience — sets the same variables for you).
+**2. The `theme` option** (a typed convenience; sets the same variables for you).
 Best when the colors come from JavaScript (a tenant config, a CMS value):
 
 ```ts
@@ -253,7 +253,7 @@ Error messages stay red by design, and a couple of incidental tints (file/source
 chip background, streaming dots) are fixed neutrals that read on any light surface.
 To embed the panel flush inside a frame you already drew, match `--ago-border-color`
 to your frame's color (it's shared with the header/input dividers) and set
-`--ago-radius` to match — or drop your wrapper's own border and let the widget's be
+`--ago-radius` to match, or drop your wrapper's own border and let the widget's be
 the single frame.
 
 ---
@@ -327,7 +327,7 @@ anywhere this import is in scope.
 ### `AgoWidgetColors`
 
 `button`, `header`, `agentMessage`, `agentMessageFont`, `background`, `font`,
-`userMessage`, `userMessageFont` — all optional CSS color strings.
+`userMessage`, `userMessageFont`: all optional CSS color strings.
 
 ---
 
@@ -335,7 +335,7 @@ anywhere this import is in scope.
 
 The widget and the SDK talk to the same AGO backend. Notably, the core SDK's
 [`createAgo()`](configuration.md#zero-config-auto-detection) auto-detects an
-existing `window.AGO` object — so you can have the embedded widget **and**
+existing `window.AGO` object, so you can have the embedded widget **and**
 script your own SDK-driven interactions on the same page without re-declaring
 config.
 

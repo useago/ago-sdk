@@ -1,7 +1,7 @@
 # Feature matrix
 
 What ships out of the box for each entry point. The **core** (`@useago/sdk`)
-APIs are usable from *any* framework — the framework columns mark where a more
+APIs are usable from *any* framework; the framework columns mark where a more
 idiomatic binding (hook / composable / service / component) is also provided.
 
 | Feature | Core (vanilla) | React | Vue | Angular |

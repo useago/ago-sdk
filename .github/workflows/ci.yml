@@ -16,4 +16,54 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
       - run: npm test
+      - run: npm run build
+      # Needs dist/ — keep after the build step (publint/attw inspect the pack).
+      - run: npm run check:package
+
+  # The dev toolchain (vite 8 / vitest 4) needs Node 20.19+, so the runtime
+  # claim in `engines` (>=18) is verified against the PACKED ARTIFACT instead:
+  # build on 24, install the tarball on stock Node 18, import (ESM), require
+  # (CJS) and instantiate.
+  node18-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build on Node 24
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm pack
+      - name: Switch to Node 18
+        uses: actions/setup-node@v5
+        with:
+          node-version: 18
+      - name: Install tarball and smoke-test ESM + CJS on Node 18
+        run: |
+          node --version
+          mkdir smoke && cd smoke
+          npm init -y > /dev/null
+          npm install ../useago-sdk-*.tgz
+          # ESM import + instantiate (exercises the crypto.randomUUID fallback:
+          # global WebCrypto is flag-gated on stock Node 18)
+          node --input-type=module -e "
+            import { AgoClient } from '@useago/sdk';
+            const c = new AgoClient({ baseUrl: 'https://smoke.invalid' });
+            if (!c) throw new Error('ESM instantiation failed');
+            try { new AgoClient({}); throw new Error('validation did not throw'); }
+            catch (e) { if (e.code !== 'config_missing_base_url') throw e; }
+            console.log('ESM OK');
+          "
+          # CJS require + instantiate (the dual build's cts types are hand-copied;
+          # exercise the actual require path too)
+          node -e "
+            const { AgoClient } = require('@useago/sdk');
+            const c = new AgoClient({ baseUrl: 'https://smoke.invalid' });
+            if (!c) throw new Error('CJS instantiation failed');
+            console.log('CJS OK');
+          "

@@ -3,9 +3,9 @@
 `AgoClient` streams responses over Server-Sent Events and re-emits them as typed
 events. You can consume them three ways, from lowest to highest level:
 
-1. Raw events — `client.on(event, handler)`
-2. Callback helpers — `onMessage`, `onMessageChunk`, …
-3. An async generator — `createMessageStream`
+1. Raw events: `client.on(event, handler)`
+2. Callback helpers: `onMessage`, `onMessageChunk`, …
+3. An async generator: `createMessageStream`
 
 All three are framework-agnostic and live in `@useago/sdk`.
 
@@ -14,7 +14,7 @@ All three are framework-agnostic and live in `@useago/sdk`.
 ## 1. Raw events
 
 ```ts
-client.on("message:chunk", ({ content }) => append(content));
+client.on("message:chunk", ({ content }) => append(content)); // append: your own render fn
 client.off("message:chunk", handler);
 client.once("message:complete", (m) => console.log(m.content));
 
@@ -25,11 +25,12 @@ const final = await client.waitFor("message:complete", { timeout: 10_000 });
 | --- | --- |
 | `message:start` | `{ conversationId, messageId }` |
 | `message:chunk` | `{ content, conversationId, messageId }` |
-| `message:answer-complete` | `AgoMessage` — the main answer text is done, but follow-up replies may still be pending; fires once, before `message:complete` |
+| `message:answer-complete` | `AgoMessage`: the main answer text is done, but follow-up replies may still be pending; fires once, before `message:complete` |
 | `message:complete` | `AgoMessage` |
-| `message:error` | `{ error, conversationId?, messageId? }` |
-| `conversation:loaded` | `Conversation` — a full conversation was loaded from the server (e.g. after a page reload), with messages and persisted tool calls |
-| `context:changed` | `ContextSnapshot \| null` — the client-side context changed (entry added/removed, or a stateful helper updated its store) |
+| `message:empty` | `{ conversationId, messageId }`: the reply completed as `DONE` with no content, tool calls, or follow-ups (usually an unknown `agent` slug). Fires after `message:complete` AND after `sendMessage` resolves, so subscribing right after the `await` still catches it. Both ids are `""` when the stream carried no message data at all. See [Empty replies](configuration.md#empty-replies). |
+| `message:error` | `{ error, code?, conversationId?, messageId? }`: `code` is the stable [error code](configuration.md#error-codes) when the failure was an `AgoError` |
+| `conversation:loaded` | `Conversation`: a full conversation was loaded from the server (e.g. after a page reload), with messages and persisted tool calls |
+| `context:changed` | `ContextSnapshot \| null`: the client-side context changed (entry added/removed, or a stateful helper updated its store) |
 | `toolCall:received` | `ToolCallData` |
 | `toolCall:form` | `ToolCallData` (only when the tool call is a form) |
 | `function:invoke` | `{ invocationId, functionName, arguments, conversationId }` |
@@ -42,7 +43,7 @@ const final = await client.waitFor("message:complete", { timeout: 10_000 });
 
 ## 2. Callback helpers
 
-Thin wrappers that return an **unsubscribe** function — handy when you don't want
+Thin wrappers that return an **unsubscribe** function, handy when you don't want
 to keep a reference to the handler.
 
 ```ts
@@ -77,7 +78,7 @@ onMessage(client, (msg) => console.log("complete:", msg.content));
 
 ## 3. Async generator
 
-`createMessageStream` fires a message and yields a typed event for each step —
+`createMessageStream` fires a message and yields a typed event for each step:
 no manual subscribe/unsubscribe, just `for await`.
 
 ```ts
@@ -107,7 +108,7 @@ status/progress indicator, it emits a tool call. Listen and respond:
 ```ts
 client.on("toolCall:form", async (toolCall) => {
   // toolCall.formSchema describes the fields to render
-  const values = await renderFormSomehow(toolCall.formSchema);
+  const values = await renderFormSomehow(toolCall.formSchema); // render your own form UI here
   await client.submitToolCallForm(toolCall.id, values);
 });
 
@@ -130,7 +131,7 @@ client.on("toolCall:received", async (toolCall) => {
 | Framework | How to subscribe |
 | --- | --- |
 | Core | `client.on(...)` or the helpers above |
-| React | `client.on(...)` in `useEffect` (get the client via `useAgoClient()`) — or rely on `useChat`/`useMessages` which manage this for you |
+| React | `client.on(...)` in `useEffect` (get the client via `useAgoClient()`), or rely on `useChat`/`useMessages` which manage this for you |
 | Vue | `useAgoEvents(event, handler)` (auto-cleanup) |
 | Angular | `messages$`, `chunks$`, `errors$`, `messageStart$` Observables, or `ago.on(...)` |
 

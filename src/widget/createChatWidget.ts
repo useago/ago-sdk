@@ -1,4 +1,5 @@
 import { AgoClient } from "../client/AgoClient";
+import { AgoError } from "../client/errors";
 import type { AgoConfig, AgoMessage, Conversation } from "../client/types";
 import {
   createFormCollector,
@@ -312,8 +313,9 @@ export function mountChatWidget(
   } = options;
 
   if (!options.client && !options.config?.baseUrl) {
-    throw new Error(
+    throw new AgoError(
       "mountChatWidget requires either `client` or `config` (with a baseUrl).",
+      "config_missing_base_url",
     );
   }
   const client = options.client ?? new AgoClient(options.config as AgoConfig);
