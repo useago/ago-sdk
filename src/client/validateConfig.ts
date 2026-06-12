@@ -3,7 +3,7 @@ import type { AgoConfig } from "./types";
 
 const BASE_URL_HINT =
   '`baseUrl` is required, e.g. new AgoClient({ baseUrl: "https://YOUR-DOMAIN.api.useago.com" }). ' +
-  "Try the live demo endpoint https://ago.api.useago.com. " +
+  "Try the live demo endpoint https://playground.api.useago.com. " +
   "See docs/general/configuration.md#error-codes (config_missing_base_url).";
 
 // Matches any explicit scheme (https://, capacitor://, chrome-extension://, ...).

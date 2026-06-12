@@ -35,7 +35,7 @@ import { AgoProvider, ChatWidget } from "@useago/sdk/react";
 
 export default function App() {
   return (
-    <AgoProvider baseUrl="https://ago.api.useago.com" agent="generic-guide">
+    <AgoProvider baseUrl="https://playground.api.useago.com" agent="generic-guide">
       <ChatWidget title="AGO" welcomeMessage="Ask me anything!" height={500} />
     </AgoProvider>
   );
