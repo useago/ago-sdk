@@ -345,9 +345,10 @@ Prefer callbacks over raw events? See the
 
 - `submitToolCallForm(toolCallId, formData)`
 - `confirmToolCall(toolCallId)` · `rejectToolCall(toolCallId)`
-- `submitFormCollector(destination, values)` → `Promise<unknown>`: relay form
-  values through the backend to a named destination tool (used by
-  `createFormCollector` in `{ via: "backend" }` mode)
+- `submitFormCollector(name, values)` → `Promise<unknown>`: relay form
+  values through the backend, which resolves the destination from the named
+  form's stored definition (used by `createFormCollector` in
+  `{ via: "backend" }` mode)
 - `submitFeedback(messageId, "positive" | "negative")`
 
 ### Events
@@ -409,7 +410,7 @@ const collector = createFormCollector({
     },
     required: ["email"],
   },
-  submit: { via: "backend", destination: "crm-webhook" }, // optional; default: collect only
+  submit: { via: "backend" }, // optional; default: collect only
   initialValues: { company: "ACME" },
 });
 
@@ -417,9 +418,9 @@ collector.install(ago); // register functions + context on a client
 ```
 
 - `submit` accepts `{ via: "client", url }` (a bare string is shorthand),
-  `{ via: "backend", destination }` (the browser never sees the destination
-  URL; the client calls `ago.submitFormCollector()`), or `false`/omitted to
-  only collect values.
+  `{ via: "backend" }` (the destination is resolved server-side from the
+  form's stored definition; the client calls `ago.submitFormCollector()`), or
+  `false`/omitted to only collect values.
 - Fields can declare `requiredWhen` conditions; requirements are re-evaluated
   as values change.
 - `deriveFormStatus(schema, values)` → `FormCollectorStatus` computes which

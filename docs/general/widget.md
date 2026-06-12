@@ -53,7 +53,7 @@ const widget = mountChatWidget("#chat", {
         required: ["name", "email", "company"],
       },
       // Relay to a server-configured destination (URL + secret stay server-side):
-      submit: { via: "backend", destination: "demo_webhook" },
+      submit: { via: "backend" },
     },
     // Or keep the schema in the backend and reference it by name:
     // { name: "demo_request" },

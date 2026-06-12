@@ -283,7 +283,7 @@ function resolveTarget(target: string | HTMLElement): HTMLElement {
  *       properties: { name: { type: "string" }, email: { type: "string" } },
  *       required: ["name", "email"],
  *     },
- *     submit: { via: "backend", destination: "demo_webhook" },
+ *     submit: { via: "backend" },
  *   }],
  * });
  * // later: widget.destroy();

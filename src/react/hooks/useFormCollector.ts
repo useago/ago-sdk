@@ -69,7 +69,7 @@ export function useFormCollector<V = Record<string, unknown>>(
     : typeof submit === "string"
       ? `client:${submit}`
       : submit.via === "backend"
-        ? `backend:${submit.destination}`
+        ? "backend"
         : "handler" in submit
           ? "client:handler"
           : `client:${submit.url}`;
