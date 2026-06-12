@@ -12,8 +12,8 @@ const DEFAULT_THREAD_KEY = "ago_last_thread";
 /** Default idle lifetime of a thread before it stops being resumed: 2 hours. */
 const DEFAULT_TTL_MS = 2 * 60 * 60 * 1000;
 
-/** Generate a random widget id, preferring `crypto.randomUUID` when available. */
-function generateWidgetId(): string {
+/** Generate a random anon id, preferring `crypto.randomUUID` when available. */
+function generateAnonId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
@@ -87,8 +87,8 @@ export interface ConversationSession {
 }
 
 /**
- * Identify a returning visitor with a single, stable widget id — the same model as
- * the frontend's `getOrGenerateWidgetId` — and resume their last active thread.
+ * Identify a returning visitor with a single, stable anon id (one id, generated
+ * once and reused forever) and resume their last active thread.
  *
  * There is no per-agent conversation id: the widget id is the identity, and the last
  * active thread (its id + the time of its last message) is cached locally so resuming
@@ -134,7 +134,7 @@ export function createConversationSession(
     }
   }
   if (!widgetId) {
-    widgetId = generateWidgetId();
+    widgetId = generateAnonId();
   }
   if (storage) {
     try {
