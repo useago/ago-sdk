@@ -38,10 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The `simple-html` examples import the published package from
   `https://esm.sh/@useago/sdk@1`, so opening the file directly in a browser
   works with no build step.
+- The visitor anonymous id is now sent as the `X-User-Anon-Id` header. The
+  `widgetId` config option and the `ago_widget_id` storage key are unchanged.
 
 ### Fixed
 
-- `generateWidgetId` no longer crashes on stock Node 18 (global
+- `generateAnonId` no longer crashes on stock Node 18 (global
   `crypto.randomUUID` is flag-gated there); it feature-detects and falls back.
 - `AgoProvider` no longer constructs a throwaway internal client when an
   external `client` prop is provided.

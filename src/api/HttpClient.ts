@@ -4,7 +4,7 @@ import { logger } from "../utils/logger";
 
 const WIDGET_ID_KEY = "ago_widget_id";
 
-function generateWidgetId(): string {
+function generateAnonId(): string {
   // Try to reuse a previously generated ID from localStorage
   if (typeof localStorage !== "undefined") {
     const stored = localStorage.getItem(WIDGET_ID_KEY);
@@ -13,7 +13,7 @@ function generateWidgetId(): string {
 
   // Global WebCrypto is flag-gated on Node 18 (unflagged in 19+), and this
   // must stay bundleable for browsers (no `node:crypto` import). The fallback
-  // only needs uniqueness for a widget id, not cryptographic strength.
+  // only needs uniqueness for an anon id, not cryptographic strength.
   const id =
     typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
@@ -40,7 +40,8 @@ export class HttpClient {
   constructor(config: AgoConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, "");
     this.headers = {
-      "X-Widget-Id": config.widgetId || generateWidgetId(),
+      // Header carrying the end-user's anonymous id.
+      "X-User-Anon-Id": config.widgetId || generateAnonId(),
     };
 
     if (config.userEmail) {
@@ -64,7 +65,7 @@ export class HttpClient {
       this.baseUrl = config.baseUrl.replace(/\/$/, "");
     }
     if (config.widgetId) {
-      this.headers["X-Widget-Id"] = config.widgetId;
+      this.headers["X-User-Anon-Id"] = config.widgetId;
     }
     if (config.userEmail) {
       this.headers["X-User-Email"] = config.userEmail;

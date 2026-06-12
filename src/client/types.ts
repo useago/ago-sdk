@@ -6,7 +6,7 @@ import type { ContextSnapshot } from "../state/ClientContextRegistry";
 export interface AgoConfig {
   /** API base URL (e.g., https://YOUR-DOMAIN.useago.com) */
   baseUrl: string;
-  /** Widget ID (X-Widget-Id header). Auto-generated if not provided. */
+  /** Per-visitor anonymous ID (X-User-Anon-Id header). Auto-generated if not provided. */
   widgetId?: string;
   /** Default agent (id or slug) for new conversations. Shorthand for `defaultAgentId`. */
   agent?: string;
