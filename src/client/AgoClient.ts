@@ -424,15 +424,16 @@ export class AgoClient {
    * Relay a completed form collector's values to a server-configured destination.
    *
    * Used by `createFormCollector` / `useFormCollector` in `{ via: "backend" }` mode:
-   * the browser never holds the destination URL or its secret — the backend resolves
-   * `destination` (a named, opted-in tool) and forwards the values from the server.
+   * the browser never holds the destination name, URL, or its secret — the backend
+   * resolves the destination from the named form's stored definition and forwards
+   * the values from the server.
    */
   async submitFormCollector(
-    destination: string,
+    name: string,
     values: Record<string, unknown>
   ): Promise<unknown> {
     return this.httpClient.post("/api/sdk/v1/forms/submit", {
-      destination,
+      name,
       values,
     });
   }

@@ -152,7 +152,7 @@ describe("createFormCollector", () => {
     await c.functions[0].handler({ product: "Widget", quantity: 5 });
     const result = await c.functions[1].handler({}); // submit_order
 
-    expect(spy).toHaveBeenCalledWith("order_webhook", {
+    expect(spy).toHaveBeenCalledWith("order", {
       product: "Widget",
       quantity: 5,
     });
@@ -581,7 +581,8 @@ describe("loadFormCollector", () => {
     name: "order",
     description: "The order the user wants to place.",
     schema,
-    submit: { via: "backend" as const, destination: "order_webhook" },
+    // Mirrors the backend response: the relay destination stays server-side.
+    submit: { via: "backend" as const },
   };
 
   it("builds a collector from the backend definition", async () => {

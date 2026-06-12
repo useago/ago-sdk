@@ -85,15 +85,16 @@ export interface FormSubmitResult {
  *   POSTs the values to that URL.
  * - `{ via: "client", url }` — same, written out.
  * - `{ via: "client", handler }` — the browser runs your own submit logic.
- * - `{ via: "backend", destination }` — the browser relays the values to the backend,
- *   which forwards them to the server-configured destination (URL + secret stay server-side).
+ * - `{ via: "backend" }` — the browser relays the values to the backend, which resolves
+ *   the destination from the form's backend-stored definition (name, URL and secret all
+ *   stay server-side). `destination` is deprecated and ignored.
  * - `false` — collect only, no submit function.
  */
 export type SubmitConfig<V = Record<string, unknown>> =
   | string
   | { via: "client"; url: string }
   | { via: "client"; handler: (values: V) => Promise<unknown> | unknown }
-  | { via: "backend"; destination: string }
+  | { via: "backend"; destination?: string }
   | false;
 
 export interface CreateFormCollectorOptions<V = Record<string, unknown>> {
@@ -382,7 +383,8 @@ export function createFormCollector<V = Record<string, unknown>>(
           result = await res.json().catch(() => undefined);
         }
       } else {
-        // via: "backend" — relay the exact object; the URL + secret stay server-side.
+        // via: "backend" — relay by form name; the backend resolves the destination
+        // from the stored definition, so the URL + secret stay server-side.
         if (!boundClient) {
           return {
             ok: false,
@@ -391,7 +393,7 @@ export function createFormCollector<V = Record<string, unknown>>(
           };
         }
         result = await boundClient.submitFormCollector(
-          submitConfig.destination,
+          name,
           submitValues as Record<string, unknown>,
         );
       }

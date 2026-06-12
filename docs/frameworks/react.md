@@ -145,7 +145,7 @@ the data collected so far, and which required fields are still missing.
         required: ["name", "email", "company"],
       },
       // Relay to a server-configured destination (URL + secret stay server-side):
-      submit: { via: "backend", destination: "demo_webhook" },
+      submit: { via: "backend" },
     },
   ]}
 />
