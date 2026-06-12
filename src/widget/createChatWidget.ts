@@ -640,7 +640,7 @@ export function mountChatWidget(
         btn.disabled = !followUpEnabled;
         css(btn, {
           padding: "6px 14px",
-          fontSize: "13px",
+          fontSize: "14px",
           borderRadius: MESSAGE_RADIUS,
           border: `1px solid ${BORDER_COLOR}`,
           backgroundColor: PANEL_BACKGROUND,
@@ -675,7 +675,7 @@ export function mountChatWidget(
         fontSize: "14px",
         lineHeight: "1.5",
       });
-      welcome.textContent = welcomeMessage;
+      welcome.appendChild(renderMarkdown(welcomeMessage));
       messagesEl.appendChild(welcome);
     } else {
       messages.forEach((message, index) => {
@@ -741,6 +741,9 @@ export function mountChatWidget(
       messages.push(message);
     }
     render();
+    // The answer is done and the input has just re-enabled — return the cursor to
+    // it so the user can reply without clicking back in.
+    focus();
   };
   const onComplete = (message: AgoMessage): void => {
     const idx = messages.findIndex(
