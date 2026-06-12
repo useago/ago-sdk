@@ -618,26 +618,13 @@ export function mountChatWidget(
     }
     wrap.appendChild(bubble);
 
-    // Follow-up replies are generated after the answer is done, so show the "..."
-    // indicator in their slot while we wait — without blocking the input.
-    if (
-      isLast &&
-      isLoading &&
-      message.role === "assistant" &&
-      message.status === "DONE" &&
-      !(message.followUpReplies && message.followUpReplies.length > 0)
-    ) {
-      // Match the assistant bubble's 8px left padding so the dots line up with
-      // the answer text above them.
-      const loading = div({ marginTop: "10px", paddingLeft: "8px" });
-      loading.className = "ago-message__followups-loading";
-      loading.appendChild(buildStreamingDots());
-      wrap.appendChild(loading);
-    }
-
     // Only on the last message, so stale suggestions disappear once the user
     // sends their next message.
-    if (isLast && message.followUpReplies && message.followUpReplies.length > 0) {
+    if (
+      isLast &&
+      message.followUpReplies &&
+      message.followUpReplies.length > 0
+    ) {
       const followups = div({
         display: "flex",
         flexWrap: "wrap",
@@ -653,7 +640,7 @@ export function mountChatWidget(
         btn.disabled = !followUpEnabled;
         css(btn, {
           padding: "6px 14px",
-          fontSize: "13px",
+          fontSize: "14px",
           borderRadius: MESSAGE_RADIUS,
           border: `1px solid ${BORDER_COLOR}`,
           backgroundColor: PANEL_BACKGROUND,
@@ -688,7 +675,7 @@ export function mountChatWidget(
         fontSize: "14px",
         lineHeight: "1.5",
       });
-      welcome.textContent = welcomeMessage;
+      welcome.appendChild(renderMarkdown(welcomeMessage));
       messagesEl.appendChild(welcome);
     } else {
       messages.forEach((message, index) => {
@@ -754,6 +741,9 @@ export function mountChatWidget(
       messages.push(message);
     }
     render();
+    // The answer is done and the input has just re-enabled — return the cursor to
+    // it so the user can reply without clicking back in.
+    focus();
   };
   const onComplete = (message: AgoMessage): void => {
     const idx = messages.findIndex(

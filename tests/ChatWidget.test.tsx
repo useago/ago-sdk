@@ -117,7 +117,7 @@ function setTextareaValue(textarea: HTMLTextAreaElement, value: string) {
 }
 
 describe("ChatWidget input blocking during a turn", () => {
-  it("blocks while the answer streams, then re-enables while follow-ups load", async () => {
+  it("blocks while the answer streams, re-enables once the answer is done, then shows chips", async () => {
     const { client, emit, resolveSend } = createDrivableClient();
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -156,15 +156,18 @@ describe("ChatWidget input blocking during a turn", () => {
       } satisfies AgoMessage);
     });
 
-    // Input re-enables, the answer is shown, and the "..." indicator marks the
-    // pending follow-up replies.
+    // Input re-enables and the answer is shown. No loading indicator is shown for
+    // the still-pending follow-up replies — they simply appear when ready.
     expect(textarea.disabled).toBe(false);
     expect(container.textContent).toContain("Answer");
     expect(
       container.querySelector(".ago-message__followups-loading"),
-    ).toBeTruthy();
+    ).toBeNull();
+    expect(
+      container.querySelectorAll(".ago-message__followup-btn"),
+    ).toHaveLength(0);
 
-    // Follow-up replies arrive and the stream closes.
+    // Follow-up replies arrive and the stream closes → the chips appear.
     const finalMessage: AgoMessage = {
       id: "m1",
       conversationId: "c1",

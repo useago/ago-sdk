@@ -186,37 +186,6 @@ describe("Message follow-up replies", () => {
     expect((html.match(/disabled/g) ?? []).length).toBe(2);
   });
 
-  it("shows the loading dots in the follow-up slot while suggestions are pending", () => {
-    const html = renderToStaticMarkup(
-      <Message
-        message={makeMessage({ content: "How can I help?" })}
-        isLast
-        isAwaitingFollowUps
-      />,
-    );
-    expect(html).toContain("ago-message__followups-loading");
-    expect(html).toContain("ago-pulse");
-    expect(html).not.toContain("ago-message__followup-btn");
-  });
-
-  it("hides the loading dots once the follow-up replies arrive", () => {
-    const html = renderToStaticMarkup(
-      <Message message={withReplies} isLast isAwaitingFollowUps />,
-    );
-    expect(html).not.toContain("ago-message__followups-loading");
-    expect((html.match(/ago-message__followup-btn/g) ?? []).length).toBe(2);
-  });
-
-  it("does not show the loading dots when not the last message", () => {
-    const html = renderToStaticMarkup(
-      <Message
-        message={makeMessage({ content: "Answer" })}
-        isAwaitingFollowUps
-      />,
-    );
-    expect(html).not.toContain("ago-message__followups-loading");
-  });
-
   it("calls onFollowUpClick with the reply text when a button is clicked", async () => {
     const clicked: string[] = [];
     const container = document.createElement("div");

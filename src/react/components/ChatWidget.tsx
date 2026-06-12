@@ -148,17 +148,12 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
   // The input is blocked only while the agent is generating the main answer.
   // Once the answer text is done (`status: "DONE"`) the input re-enables, even
   // though the stream stays open while follow-up replies are still being
-  // generated — surfaced as a "..." indicator under the answer.
+  // generated.
   const lastMessage = messages[messages.length - 1];
   const isAnswering =
     isLoading &&
     lastMessage?.role === "assistant" &&
     lastMessage.status === "IN_PROGRESS";
-  const isAwaitingFollowUps =
-    isLoading &&
-    lastMessage?.role === "assistant" &&
-    lastMessage.status === "DONE" &&
-    !lastMessage.followUpReplies?.length;
 
   // Default: clicking a suggested reply sends it as a new user message.
   // `onFollowUpClick={false}` disables interactivity; a function overrides it.
@@ -238,7 +233,6 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
               message={message}
               showAgentName={showAgentName}
               isLast={index === messages.length - 1}
-              isAwaitingFollowUps={isAwaitingFollowUps}
               onFollowUpClick={handleFollowUpClick}
             />
           ))
