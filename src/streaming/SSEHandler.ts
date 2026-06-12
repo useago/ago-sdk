@@ -7,6 +7,24 @@ import type {
 import { AgoStreamError } from "../client/errors";
 import { logger } from "../utils/logger";
 
+/**
+ * Deterministic JSON serialization with object keys sorted recursively, so the
+ * same arguments produce the same string regardless of key order across the two
+ * SSE shapes the backend emits for a client-function call.
+ */
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value) ?? "null";
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(",")}]`;
+  }
+  const entries = Object.keys(value as Record<string, unknown>)
+    .sort()
+    .map((k) => `${JSON.stringify(k)}:${stableStringify((value as Record<string, unknown>)[k])}`);
+  return `{${entries.join(",")}}`;
+}
+
 export interface SSEHandlerCallbacks {
   onStart?: (data: { conversationId: string; messageId: string }) => void;
   onChunk?: (data: { content: string; conversationId: string; messageId: string }) => void;
@@ -38,6 +56,10 @@ export class SSEHandler {
   private followUpReplies: string[] = [];
   private isFirstChunk = true;
   private answerCompleteEmitted = false;
+  // Client-function invocations already dispatched this stream, keyed by name +
+  // arguments. The backend emits the same call under two SSE shapes (see below),
+  // so this guards a handler from running twice (e.g. a duplicate form submit).
+  private firedClientFunctions = new Set<string>();
 
   constructor(private callbacks: SSEHandlerCallbacks) {}
 
@@ -185,14 +207,21 @@ export class SSEHandler {
 
     // Client-side function invocation — fires from either the tool_call_data UI
     // event or the raw state dict streamed by the backend (which has no
-    // tool_call_data flag). Either form is enough to run the registered handler.
+    // tool_call_data flag). Either form is enough to run the registered handler,
+    // but the backend can emit BOTH for one call, so dedupe to run it once.
+    // The id is absent on the raw-state form, so key on the stable function name
+    // + arguments rather than the invocation id.
     if (data.type === "client_function" && data.function_name) {
-      this.callbacks.onClientFunction?.({
-        invocationId: data.id || "",
-        functionName: data.function_name,
-        arguments: data.arguments || {},
-        conversationId: this.message.conversationId || "",
-      });
+      const key = `${data.function_name}::${stableStringify(data.arguments ?? {})}`;
+      if (!this.firedClientFunctions.has(key)) {
+        this.firedClientFunctions.add(key);
+        this.callbacks.onClientFunction?.({
+          invocationId: data.id || "",
+          functionName: data.function_name,
+          arguments: data.arguments || {},
+          conversationId: this.message.conversationId || "",
+        });
+      }
     }
 
     // Handle standard tool call UI events
