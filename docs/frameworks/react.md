@@ -322,6 +322,58 @@ function AppShell() {
 }
 ```
 
+### Define each route once
+
+React Router's `<Route>` has no `description` prop (it ignores unknown props, and
+TypeScript rejects them), so the path and the agent description live in two
+different places. Keep one route table and read both the router and
+`useAgoNavigation` off it: add or rename a page in a single spot and they stay in
+sync.
+
+```tsx
+import { Routes, Route, useNavigate } from "react-router-dom";
+import { useAgoNavigation } from "@useago/sdk/react";
+
+// One source of truth: path + the description the agent reads to pick the page.
+const ROUTES = {
+  dashboard: { name: "dashboard", path: "/dashboard", description: "KPIs and recent activity" },
+  invoices: { name: "invoices", path: "/invoices", description: "List and download invoices" },
+  settings: { name: "settings", path: "/settings", description: "Account, billing and team" },
+} as const;
+
+function AppShell() {
+  const navigate = useNavigate();
+
+  // The agent gets every route's path + description from the same object.
+  useAgoNavigation(navigate, Object.values(ROUTES));
+
+  return (
+    <Routes>
+      <Route path={ROUTES.dashboard.path} element={<Dashboard />} />
+      <Route path={ROUTES.invoices.path} element={<Invoices />} />
+      <Route path={ROUTES.settings.path} element={<Settings />} />
+    </Routes>
+  );
+}
+```
+
+For a detail page with a param (`/invoices/:id`), keep the `:id` route for
+rendering only and give the agent concrete paths derived from your data, so it can
+navigate to a specific record:
+
+```tsx
+const invoiceRoutes = invoices.map((inv) => ({
+  name: `invoice-${inv.id}`,
+  path: `/invoices/${inv.id}`,
+  description: `Invoice ${inv.number} for ${inv.customer}`,
+}));
+
+useAgoNavigation(navigate, [...Object.values(ROUTES), ...invoiceRoutes]);
+// <Route path="/invoices/:id" element={<Invoice />} /> stays render-only
+```
+
+A full version of this pattern is in [`examples/glacerie`](../../examples/glacerie).
+
 ---
 
 ## 6. Give the agent context: `useAgoContext`
