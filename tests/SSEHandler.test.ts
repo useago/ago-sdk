@@ -167,6 +167,43 @@ describe("SSEHandler", () => {
       expect(onToolCall).not.toHaveBeenCalled();
     });
 
+    it("runs a client_function once when the backend emits both SSE shapes for one call", async () => {
+      const onClientFunction = vi.fn();
+
+      const handler = new SSEHandler({
+        onClientFunction,
+      });
+
+      // The backend can emit the same invocation twice: once as the raw state
+      // dict (no tool_call_data, no id) and once as the tool_call_data UI event.
+      // The handler must fire only once so a form submit isn't POSTed twice.
+      const response = createMockSSEStream([
+        'data: {"type":"client_function","function_name":"submit_order","arguments":{},"thread":{"id":"t-1"}}\n\n',
+        'data: {"tool_call_data":true,"type":"client_function","id":"inv-9","function_name":"submit_order","arguments":{},"thread":{"id":"t-1"}}\n\n',
+      ]);
+
+      await handler.processStream(response);
+
+      expect(onClientFunction).toHaveBeenCalledTimes(1);
+    });
+
+    it("runs distinct client_function calls even when names repeat with different args", async () => {
+      const onClientFunction = vi.fn();
+
+      const handler = new SSEHandler({
+        onClientFunction,
+      });
+
+      const response = createMockSSEStream([
+        'data: {"type":"client_function","function_name":"update_order","arguments":{"qty":1},"thread":{"id":"t-1"}}\n\n',
+        'data: {"type":"client_function","function_name":"update_order","arguments":{"qty":2},"thread":{"id":"t-1"}}\n\n',
+      ]);
+
+      await handler.processStream(response);
+
+      expect(onClientFunction).toHaveBeenCalledTimes(2);
+    });
+
     it("should handle regular tool calls", async () => {
       const onToolCall = vi.fn();
 
