@@ -26,7 +26,7 @@ describe("validateConfig / AgoClient construction", () => {
       const err = e as AgoError;
       expect(err.code).toBe("config_missing_base_url");
       expect(err.message).toContain("baseUrl");
-      expect(err.message).toContain("https://ago.api.useago.com");
+      expect(err.message).toContain("https://playground.api.useago.com");
     }
   });
 

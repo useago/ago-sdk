@@ -9,7 +9,7 @@ Every snippet below points at a live, ready-to-use endpoint and demo agent so
 you can copy, paste, and run without setting anything up:
 
 ```
-baseUrl: https://ago.api.useago.com
+baseUrl: https://playground.api.useago.com
 agent:   generic-guide
 ```
 
@@ -31,7 +31,7 @@ events; `sendMessage` resolves with the finished message.
 import { AgoClient } from "@useago/sdk";
 
 const ago = new AgoClient({
-  baseUrl: "https://ago.api.useago.com",
+  baseUrl: "https://playground.api.useago.com",
   agent: "generic-guide",
 });
 
@@ -65,7 +65,7 @@ No bundler, no `npm install`. Drop a styled chat panel onto any page:
   import { mountChatWidget } from "https://esm.sh/@useago/sdk@1/widget";
 
   mountChatWidget("#chat", {
-    config: { baseUrl: "https://ago.api.useago.com", agent: "generic-guide" },
+    config: { baseUrl: "https://playground.api.useago.com", agent: "generic-guide" },
     title: "Ask me anything",
     welcomeMessage: "Hi! How can I help?",
   });
@@ -181,7 +181,7 @@ function Shell() {
 export default function App() {
   return (
     <BrowserRouter>
-      <AgoProvider baseUrl="https://ago.api.useago.com" agent="generic-guide">
+      <AgoProvider baseUrl="https://playground.api.useago.com" agent="generic-guide">
         <Shell />
       </AgoProvider>
     </BrowserRouter>
@@ -196,7 +196,7 @@ or navigate. `useAgoNavigation` auto-registers on mount and cleans up on unmount
 ### Or clone a running example
 
 The repo ships runnable examples pre-configured against the demo backend
-(`https://ago.api.useago.com`, agent `generic-guide`), so they answer
+(`https://playground.api.useago.com`, agent `generic-guide`), so they answer
 immediately:
 
 ```bash
@@ -268,7 +268,7 @@ same `AgoClient`.
 
 ## Next steps
 
-1. **Point it at your tenant.** Replace `https://ago.api.useago.com` with your
+1. **Point it at your tenant.** Replace `https://playground.api.useago.com` with your
    own `baseUrl` and (optionally) set a default `agent`. See [Configuration](configuration.md).
 2. **Give the agent powers.** Register a function or two so it can act, not just
    answer. See [Functions & context](functions-and-context.md).

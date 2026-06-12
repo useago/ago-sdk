@@ -172,7 +172,7 @@ may be reworded in any release.
 
 | Code | Thrown by | Meaning | Fix |
 | --- | --- | --- | --- |
-| `config_missing_base_url` | `AgoError` | `baseUrl` missing, empty, or not a string (also from `createAgo()` and `mountChatWidget`) | Pass `baseUrl`, e.g. `https://YOUR-DOMAIN.api.useago.com` (the live demo endpoint `https://ago.api.useago.com` works without a tenant) |
+| `config_missing_base_url` | `AgoError` | `baseUrl` missing, empty, or not a string (also from `createAgo()` and `mountChatWidget`) | Pass `baseUrl`, e.g. `https://YOUR-DOMAIN.api.useago.com` (the live demo endpoint `https://playground.api.useago.com` works without a tenant) |
 | `config_suspect_base_url` | console warning only | `baseUrl` has no protocol and is not a `/path` | Add `https://`, or use a `/path` for a same-origin proxy |
 | `network_error` | `AgoNetworkError` | fetch failed (offline, DNS, unreachable host) | Check `baseUrl` is reachable and includes the protocol |
 | `http_error` | `AgoApiError` | non-2xx without a structured error body | 401/403: check `userJwt`. 404: check `baseUrl` points at the API root |
