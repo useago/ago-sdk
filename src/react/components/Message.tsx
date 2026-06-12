@@ -124,12 +124,6 @@ export interface MessageProps {
    */
   isLast?: boolean;
   /**
-   * The main answer is done but its follow-up replies are still being generated.
-   * On the last message this renders the "..." indicator in the follow-up slot
-   * until the suggestions arrive. Defaults to `false`.
-   */
-  isAwaitingFollowUps?: boolean;
-  /**
    * Called when the user clicks a suggested follow-up reply. When omitted the
    * follow-up buttons render but are not interactive (backwards-compatible).
    */
@@ -141,7 +135,6 @@ export const Message: React.FC<MessageProps> = ({
   className = "",
   showAgentName = false,
   isLast = false,
-  isAwaitingFollowUps = false,
   onFollowUpClick,
 }) => {
   const isUser = message.role === "user";
@@ -215,17 +208,6 @@ export const Message: React.FC<MessageProps> = ({
           isStreaming && <StreamingDots />
         )}
       </div>
-
-      {/* Follow-up replies are generated after the answer is done, so show the
-          "..." indicator in their slot while we wait — without blocking input. */}
-      {isLast && isAwaitingFollowUps && !message.followUpReplies?.length && (
-        <div
-          className="ago-message__followups-loading"
-          style={{ marginTop: "10px", paddingLeft: "8px" }}
-        >
-          <StreamingDots />
-        </div>
-      )}
 
       {/* Follow-up replies — only on the last message, so stale suggestions
           disappear once the user sends their next message. */}

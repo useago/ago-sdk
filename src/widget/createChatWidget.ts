@@ -618,26 +618,13 @@ export function mountChatWidget(
     }
     wrap.appendChild(bubble);
 
-    // Follow-up replies are generated after the answer is done, so show the "..."
-    // indicator in their slot while we wait — without blocking the input.
-    if (
-      isLast &&
-      isLoading &&
-      message.role === "assistant" &&
-      message.status === "DONE" &&
-      !(message.followUpReplies && message.followUpReplies.length > 0)
-    ) {
-      // Match the assistant bubble's 8px left padding so the dots line up with
-      // the answer text above them.
-      const loading = div({ marginTop: "10px", paddingLeft: "8px" });
-      loading.className = "ago-message__followups-loading";
-      loading.appendChild(buildStreamingDots());
-      wrap.appendChild(loading);
-    }
-
     // Only on the last message, so stale suggestions disappear once the user
     // sends their next message.
-    if (isLast && message.followUpReplies && message.followUpReplies.length > 0) {
+    if (
+      isLast &&
+      message.followUpReplies &&
+      message.followUpReplies.length > 0
+    ) {
       const followups = div({
         display: "flex",
         flexWrap: "wrap",
