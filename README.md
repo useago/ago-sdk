@@ -46,6 +46,11 @@ Start your dev server. A chat panel renders on the page; type a message and
 watch the reply stream in. That's a complete integration. (`generic-guide` is a
 public demo agent; swap `baseUrl` and `agent` for your own once you have a tenant.)
 
+`ChatWidget` is the high-level component to get started in minutes. Everything it
+does is also exposed through hooks and APIs (`useChat`, `useMessages`, the raw
+client, events), so when you outgrow the default panel you can drop down and build
+the exact experience you want. The example below renders one piece of that.
+
 ## Let the agent drive your existing routes
 
 This is the part existing apps care about. You already have a router and pages;
@@ -75,6 +80,49 @@ uses to pick the right page. It calls **your** `navigate` function, so route
 guards, auth and layouts keep working exactly as they do today.
 `react-router-dom` here is *your* router, not an SDK dependency:
 `useAgoNavigation` accepts any `(path: string) => void` function.
+
+## Show the source docs the agent retrieved
+
+Each assistant message carries the knowledge sources it used in `m.sources`
+(each one is `{ id, title, url? }`). Build your own chat with `useChat` and
+render them as links to show the URL of every retrieved doc:
+
+```tsx
+import { useChat } from "@useago/sdk/react";
+
+function Chat() {
+  const { messages, sendMessage, isLoading } = useChat();
+
+  return (
+    <div>
+      {messages.map((m) => (
+        <div key={m.id}>
+          <p><b>{m.role}:</b> {m.content}</p>
+
+          {m.sources?.length ? (
+            <ul>
+              {m.sources.map((s) => (
+                <li key={s.id}>
+                  {s.url ? (
+                    <a href={s.url} target="_blank" rel="noreferrer">
+                      {s.title || s.url}
+                    </a>
+                  ) : (
+                    s.title
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ))}
+      <button onClick={() => sendMessage("Hello!")} disabled={isLoading}>
+        Send
+      </button>
+    </div>
+  );
+}
+```
 
 **Next: the [Getting started guide](docs/general/getting-started.md)** has both
 examples assembled into a running app, plus everything else the SDK can do, in

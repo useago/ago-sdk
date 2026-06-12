@@ -205,6 +205,47 @@ function Chat() {
 message included). `sendMessage(content, files?)` returns the final message or
 `null` on error.
 
+### Show the source docs the agent retrieved
+
+Each assistant message carries the knowledge sources it used in
+`m.sources` (an `AgoSource[]`, each `{ id, title, url? }`). Render them as links
+to display the URL of every retrieved doc:
+
+```tsx
+function Chat() {
+  const { messages, sendMessage, isLoading } = useChat();
+
+  return (
+    <div>
+      {messages.map((m) => (
+        <div key={m.id}>
+          <p><b>{m.role}:</b> {m.content}</p>
+
+          {m.sources?.length ? (
+            <ul>
+              {m.sources.map((s) => (
+                <li key={s.id}>
+                  {s.url ? (
+                    <a href={s.url} target="_blank" rel="noreferrer">
+                      {s.title || s.url}
+                    </a>
+                  ) : (
+                    s.title
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ))}
+      <button onClick={() => sendMessage("Hello!")} disabled={isLoading}>
+        Send
+      </button>
+    </div>
+  );
+}
+```
+
 ### Finer-grained hooks
 
 | Hook | Returns |
