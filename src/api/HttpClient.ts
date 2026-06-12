@@ -40,8 +40,7 @@ export class HttpClient {
   constructor(config: AgoConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, "");
     this.headers = {
-      // Canonical header for the end-user's anonymous id. The backend also
-      // accepts the legacy `X-Widget-Id` alias for older clients.
+      // Header carrying the end-user's anonymous id.
       "X-User-Anon-Id": config.widgetId || generateWidgetId(),
     };
 
