@@ -38,6 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The `simple-html` examples import the published package from
   `https://esm.sh/@useago/sdk@1`, so opening the file directly in a browser
   works with no build step.
+- The visitor anonymous id is now sent as the `X-User-Anon-Id` header (was
+  `X-Widget-Id`, which the backend still accepts as a legacy alias). The
+  `widgetId` config option and the `ago_widget_id` storage key are unchanged.
 
 ### Fixed
 

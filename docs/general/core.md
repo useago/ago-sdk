@@ -219,7 +219,7 @@ In React and Vue, read the same store reactively with `useAgoStore`
 ### Resume the visitor's last thread with `createConversationSession`
 
 A returning visitor is identified by a single, stable **widget id**: the same id the
-HTTP client sends as `X-Widget-Id`. This mirrors the frontend's `getOrGenerateWidgetId`:
+HTTP client sends as `X-User-Anon-Id` (legacy name `X-Widget-Id`). This mirrors the frontend's `getOrGenerateWidgetId`:
 one id, generated once and reused forever. Alongside it, the session caches the **last
 active thread** (its id + the time of its last message) so resuming on reload is a pure
 **front-side** decision: no backend call just to check whether the thread is still fresh.

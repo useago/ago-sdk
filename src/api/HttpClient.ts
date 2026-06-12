@@ -40,7 +40,9 @@ export class HttpClient {
   constructor(config: AgoConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, "");
     this.headers = {
-      "X-Widget-Id": config.widgetId || generateWidgetId(),
+      // Canonical header for the end-user's anonymous id. The backend also
+      // accepts the legacy `X-Widget-Id` alias for older clients.
+      "X-User-Anon-Id": config.widgetId || generateWidgetId(),
     };
 
     if (config.userEmail) {
@@ -64,7 +66,7 @@ export class HttpClient {
       this.baseUrl = config.baseUrl.replace(/\/$/, "");
     }
     if (config.widgetId) {
-      this.headers["X-Widget-Id"] = config.widgetId;
+      this.headers["X-User-Anon-Id"] = config.widgetId;
     }
     if (config.userEmail) {
       this.headers["X-User-Email"] = config.userEmail;

@@ -11,7 +11,7 @@ auto-detection, and error handling.
 ```ts
 interface AgoConfig {
   baseUrl: string;          // required, e.g. https://YOUR-DOMAIN.useago.com
-  widgetId?: string;        // X-Widget-Id header; auto-generated + persisted if omitted
+  widgetId?: string;        // X-User-Anon-Id header; auto-generated + persisted if omitted
   agent?: string;           // default agent (id or slug) for new conversations
   defaultAgentId?: string;  // same as `agent`; `agent` is preferred
   permission?: string;      // X-Widget-Permission header
@@ -25,7 +25,7 @@ interface AgoConfig {
 | Option | Required | Maps to | Notes |
 | --- | :---: | --- | --- |
 | `baseUrl` | ✅ | request URL | Trailing slash is trimmed automatically. Missing/empty throws `config_missing_base_url` at construct time. `/path` values (same-origin proxy) are allowed. |
-| `widgetId` | — | `X-Widget-Id` | If omitted, a UUID is generated and cached in `localStorage` (`ago_widget_id`) so a returning visitor keeps the same id. |
+| `widgetId` | — | `X-User-Anon-Id` | Per-visitor anonymous id (legacy header name `X-Widget-Id`, still accepted). If omitted, a UUID is generated and cached in `localStorage` (`ago_widget_id`) so a returning visitor keeps the same id. |
 | `agent` / `defaultAgentId` | — | `agent_id` in the body | Per-message `agentId` overrides it. `agent` wins if both are set. |
 | `permission` | — | `X-Widget-Permission` | Mirrors the widget's `window.AGO.permission`. |
 | `userEmail` | — | `X-User-Email` | Identifies the user to AGO. |

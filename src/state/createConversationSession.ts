@@ -1,8 +1,8 @@
 import { createStore, type StorageLike } from "./createStore";
 
 /**
- * Storage key for the visitor's widget id. Shared with the HTTP client
- * (`X-Widget-Id`) so the same persisted id identifies the visitor everywhere.
+ * Storage key for the visitor's anonymous id. Shared with the HTTP client
+ * (`X-User-Anon-Id`) so the same persisted id identifies the visitor everywhere.
  */
 const DEFAULT_WIDGET_ID_KEY = "ago_widget_id";
 
