@@ -1,7 +1,7 @@
 import type { AgoConfig } from "../client/types";
 import { AgoService } from "./ago.service";
 
-export interface AgoProvideOptions extends AgoConfig {}
+export type AgoProvideOptions = AgoConfig;
 
 /**
  * Factory function that returns an Angular-compatible provider.

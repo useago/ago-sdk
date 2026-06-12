@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AgoClient } from "../../client/AgoClient";
 import type { AgoConfig } from "../../client/types";
 
-export interface UseAgoOptions extends AgoConfig {}
+export type UseAgoOptions = AgoConfig;
 
 export interface UseAgoResult {
   /** The AGO client instance */

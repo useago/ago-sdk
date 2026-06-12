@@ -729,7 +729,11 @@ export class AgoClient {
     this.httpClient.updateConfig(cleaned);
 
     if (cleaned.debug !== undefined) {
-      cleaned.debug ? logger.enable() : logger.disable();
+      if (cleaned.debug) {
+        logger.enable();
+      } else {
+        logger.disable();
+      }
     }
   }
 

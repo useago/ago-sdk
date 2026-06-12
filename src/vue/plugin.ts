@@ -3,7 +3,7 @@ import { AgoClient } from "../client/AgoClient";
 import type { AgoConfig } from "../client/types";
 import { AGO_CLIENT_KEY } from "./symbols";
 
-export interface AgoPluginOptions extends AgoConfig {}
+export type AgoPluginOptions = AgoConfig;
 
 /**
  * Vue plugin that provides an AgoClient to the entire app via inject/provide.

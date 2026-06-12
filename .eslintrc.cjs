@@ -1,4 +1,4 @@
-/* ESLint config for the AGO SDK (eslint 8 + @typescript-eslint 7, eslintrc style). */
+/* ESLint config for the AGO SDK (eslint 8 + @typescript-eslint 8, eslintrc style). */
 module.exports = {
   root: true,
   parser: "@typescript-eslint/parser",
