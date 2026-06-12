@@ -69,12 +69,45 @@ export default function App() {
   const cartRef = useRef(cart);
   cartRef.current = cart;
 
+  // Expose the live order state as dynamic context. It is re-evaluated on every
+  // snapshot, so the dev panel's JSON pane shows it (and the agent receives it
+  // with every message instead of having to call getState).
+  useEffect(() => {
+    client.addDynamicContext('order', () => {
+      const cur = currentRef.current;
+      const items = cartRef.current;
+      return {
+        name: 'Commande',
+        description: 'Glace en cours de composition, panier et totaux (euros).',
+        data: {
+          current: cur,
+          cart: items,
+          currentPriceEuros: computePrice(cur),
+          cartTotalEuros: computeCartTotal(items),
+        },
+      };
+    });
+    return () => {
+      client.removeDynamicContext('order');
+    };
+  }, [client]);
+
   const fns = useMemo(
     () =>
       buildIceCreamFunctions({
         get: () => ({ current: currentRef.current, cart: cartRef.current }),
-        setCurrent: (next) => setCurrent(next),
-        setCart: (next) => setCart(next),
+        // Update the ref synchronously, then mirror into React state. The agent
+        // often fires several functions in the same tick (e.g. setCone +
+        // updateScoops); without the immediate ref write each handler reads the
+        // same stale value and the later setCurrent clobbers the earlier one.
+        setCurrent: (next) => {
+          currentRef.current = next;
+          setCurrent(next);
+        },
+        setCart: (next) => {
+          cartRef.current = next;
+          setCart(next);
+        },
       }),
     [],
   );
