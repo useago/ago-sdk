@@ -53,6 +53,9 @@ export function useMessages({
       setConversationId(initialConversationId);
       loadMessages(initialConversationId);
     }
+    // Intentionally keyed on the prop only: `conversationId` is compared inside
+    // the guard, and `loadMessages` is recreated every render (not memoized).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialConversationId]);
 
   const loadMessages = async (convId: string) => {

@@ -11,7 +11,7 @@ npm install @useago/sdk
 import { provideAgo, AgoService } from "@useago/sdk/angular";
 ```
 
-> The Angular bindings have **no hard dependency on Angular** — they ship a
+> The Angular bindings have **no hard dependency on Angular**: they ship a
 > minimal Observable shape compatible with RxJS, so the package stays
 > framework-light. You can also use `AgoService` outside Angular entirely.
 

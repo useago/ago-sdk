@@ -58,6 +58,8 @@ ago.on("message:start", ({ conversationId, messageId }) => {
   console.log("New message", messageId, "in", conversationId);
 });
 
+const outputEl = document.getElementById("output"); // any element on your page
+
 ago.on("message:chunk", ({ content }) => {
   outputEl.textContent += content; // token-by-token streaming
 });
@@ -85,7 +87,7 @@ await ago.sendMessage("Tell me more", { conversationId: first.conversationId });
 
 ```ts
 await ago.sendMessage("Summarise this", {
-  files: [fileInput.files[0]], // File[] — sent as multipart/form-data
+  files: [fileInput.files[0]], // File[], sent as multipart/form-data
   conversationId,
 });
 ```
@@ -115,7 +117,7 @@ const messages = await ago.getMessages(conversations[0].id);
 ## 4. Let the agent run code in the browser
 
 Register client-side functions and the agent can call them mid-conversation.
-This is the SDK's superpower — full guide in
+This is the SDK's superpower; full guide in
 [Client-side functions & context](functions-and-context.md).
 
 ```ts
@@ -157,7 +159,8 @@ ago.setContext("order-page", {
   data: { orderId: "123", status: "shipped" },
 });
 
-// Re-evaluated on every send — great for live stores:
+// Re-evaluated on every send, great for live stores
+// (cart / cartTotal() come from your outer scope or store):
 ago.addDynamicContext("cart", () => ({
   name: "Cart",
   data: { itemCount: cart.length, total: cartTotal() },
@@ -173,7 +176,7 @@ Full details in [Client context](functions-and-context.md#client-context).
 
 Dynamic context and client-side functions usually need to read and update some
 shared state (a form being filled in, a draft request, the current selection).
-`createStore` is a tiny observable holder — `get` / `set` / `subscribe` — so the
+`createStore` is a tiny observable holder (`get` / `set` / `subscribe`) so the
 agent's functions and your UI react to the same source of truth.
 
 ```ts
@@ -184,7 +187,7 @@ const store = createStore({ items: [] as string[] });
 // Push to your UI / analytics on every change:
 store.subscribe((state) => render(state));
 
-// Feed it to the agent — re-read on every send:
+// Feed it to the agent, re-read on every send:
 ago.addDynamicContext("cart", () => ({ name: "Cart", data: store.get() }));
 
 // A registered function can mutate it; subscribers fire synchronously:
@@ -194,7 +197,7 @@ store.set({ items: [...store.get().items, "SKU-1"] });
 #### Persist across reloads
 
 Pass a `persist` option with a storage `key` and the store hydrates from
-storage on creation and writes back on every `set` — no manual `subscribe`
+storage on creation and writes back on every `set`: no manual `subscribe`
 plumbing. It defaults to `localStorage`; unavailable storage degrades to an
 in-memory store, and a malformed saved snapshot falls back to the initial value.
 
@@ -203,7 +206,7 @@ const store = createStore({ items: [] as string[] }, { key: "cart" });
 ```
 
 Pass a `storage` backend (anything with `getItem` / `setItem`) to swap
-`localStorage` — e.g. `sessionStorage` or a test double:
+`localStorage`, e.g. `sessionStorage` or a test double:
 
 ```ts
 const store = createStore(initial, { key: "request", storage: sessionStorage });
@@ -215,34 +218,34 @@ In React and Vue, read the same store reactively with `useAgoStore`
 
 ### Resume the visitor's last thread with `createConversationSession`
 
-A returning visitor is identified by a single, stable **widget id** — the same id the
+A returning visitor is identified by a single, stable **widget id**: the same id the
 HTTP client sends as `X-Widget-Id`. This mirrors the frontend's `getOrGenerateWidgetId`:
 one id, generated once and reused forever. Alongside it, the session caches the **last
 active thread** (its id + the time of its last message) so resuming on reload is a pure
-**front-side** decision — no backend call just to check whether the thread is still fresh.
+**front-side** decision: no backend call just to check whether the thread is still fresh.
 
 ```ts
 import { createConversationSession } from "@useago/sdk";
 
 const session = createConversationSession();
 
-// Resume on load — front-only, no request (null when none / stale / undated):
+// Resume on load: front-only, no request (null when none / stale / undated):
 const conversationId = session.getLastActiveThread() ?? undefined;
 const reply = await ago.sendMessage(text, { conversationId });
 
 // Record the thread once a turn completes (drives the sliding TTL):
 session.setActiveThread(reply.conversationId, reply.createdAt);
 
-session.clear();          // forget it — e.g. a "new chat" button
+session.clear();          // forget it, e.g. a "new chat" button
 console.log(session.widgetId); // exposed for debugging / correlation
 ```
 
 The widget id is read from (or written to) `ago_widget_id`, generating a UUID on first
-use — **no per-agent key**. The cached thread lives under `ago_last_thread` and is only
+use, **no per-agent key**. The cached thread lives under `ago_last_thread` and is only
 resumed when its last message is within `ttlMs` (default **2h**, sliding); a thread that
-is older — **or has no recorded last-message time** — is treated as stale and
+is older (**or has no recorded last-message time**) is treated as stale and
 `getLastActiveThread` returns `null`. Like `createStore` it defaults to `localStorage`
-and is storage-injectable — pass `sessionStorage` for a tab-scoped session.
+and is storage-injectable: pass `sessionStorage` for a tab-scoped session.
 
 | Option      | Default            | Purpose                                                   |
 | ----------- | ------------------ | --------------------------------------------------------- |
@@ -252,7 +255,7 @@ and is storage-injectable — pass `sessionStorage` for a tab-scoped session.
 | `threadKey` | `"ago_last_thread"`| Storage key for the cached last active thread.            |
 | `ttlMs`     | `7200000` (2h)     | Max idle age (vs the recorded last-message time) to still resume, checked on the front. `Infinity` = never. |
 
-> The vanilla widget wires this up for you — set `persistConversation` on
+> The vanilla widget wires this up for you: set `persistConversation` on
 > [`mountChatWidget`](widget.md) and it resumes the last active thread automatically.
 
 ---
@@ -260,7 +263,7 @@ and is storage-injectable — pass `sessionStorage` for a tab-scoped session.
 ## 6. Tool calls, feedback and lifecycle
 
 ```ts
-// Tool calls the agent surfaces (forms, confirmations) — see events below
+// Tool calls the agent surfaces (forms, confirmations); see events below
 await ago.submitToolCallForm(toolCallId, { quantity: 3 });
 await ago.confirmToolCall(toolCallId);
 await ago.rejectToolCall(toolCallId);
@@ -292,11 +295,11 @@ const msg = await ago.waitFor("message:complete", { timeout: 10_000 });
 | ------------------- | ----------------------------------------------------------- |
 | `message:start`     | `{ conversationId, messageId }`                             |
 | `message:chunk`     | `{ content, conversationId, messageId }`                    |
-| `message:answer-complete` | `AgoMessage` — main answer done, follow-up replies may still be pending; fires before `message:complete` |
+| `message:answer-complete` | `AgoMessage`: main answer done, follow-up replies may still be pending; fires before `message:complete` |
 | `message:complete`  | `AgoMessage`                                                |
 | `message:error`     | `{ error, conversationId?, messageId? }`                    |
-| `conversation:loaded` | `Conversation` — full conversation loaded from the server (e.g. after a page reload) |
-| `context:changed`   | `ContextSnapshot \| null` — client-side context changed     |
+| `conversation:loaded` | `Conversation`: full conversation loaded from the server (e.g. after a page reload) |
+| `context:changed`   | `ContextSnapshot \| null`: client-side context changed     |
 | `toolCall:received` | `ToolCallData`                                              |
 | `toolCall:form`     | `ToolCallData` (only when `type === "form"`)                |
 | `function:invoke`   | `{ invocationId, functionName, arguments, conversationId }` |
@@ -324,7 +327,7 @@ Prefer callbacks over raw events? See the
 ### Functions
 
 - `registerFunction(definition)` / `registerFunction(name, handler, schema)`
-- `register(definitionOrArray)` — short alias, accepts an array
+- `register(definitionOrArray)`: short alias, accepts an array
 - `unregisterFunction(name)` → `boolean`
 - `getRegisteredFunctions()` → `ClientFunctionSchema[]`
 - `registerNavigationFunction(navigate, routes)`
@@ -335,14 +338,14 @@ Prefer callbacks over raw events? See the
 - `addDynamicContext(key, provider)` · `removeDynamicContext(key)`
 - `enableAutoPageContext()`
 - `getContextSnapshot()` → `ContextSnapshot | null`
-- `notifyContextChanged()` — re-emit `context:changed` with a fresh snapshot
+- `notifyContextChanged()`: re-emit `context:changed` with a fresh snapshot
   (for stateful helpers that mutate their own store)
 
 ### Tool calls & feedback
 
 - `submitToolCallForm(toolCallId, formData)`
 - `confirmToolCall(toolCallId)` · `rejectToolCall(toolCallId)`
-- `submitFormCollector(destination, values)` → `Promise<unknown>` — relay form
+- `submitFormCollector(destination, values)` → `Promise<unknown>`: relay form
   values through the backend to a named destination tool (used by
   `createFormCollector` in `{ via: "backend" }` mode)
 - `submitFeedback(messageId, "positive" | "negative")`
@@ -415,12 +418,12 @@ collector.install(ago); // register functions + context on a client
 
 - `submit` accepts `{ via: "client", url }` (a bare string is shorthand),
   `{ via: "backend", destination }` (the browser never sees the destination
-  URL — the client calls `ago.submitFormCollector()`), or `false`/omitted to
+  URL; the client calls `ago.submitFormCollector()`), or `false`/omitted to
   only collect values.
 - Fields can declare `requiredWhen` conditions; requirements are re-evaluated
   as values change.
 - `deriveFormStatus(schema, values)` → `FormCollectorStatus` computes which
-  required fields are still missing — useful for custom UIs.
+  required fields are still missing, useful for custom UIs.
 - React users: see `useFormCollector` in the [React guide](../frameworks/react.md).
 
 ---
@@ -430,12 +433,12 @@ collector.install(ago); // register functions + context on a client
 These are exported from `@useago/sdk` for advanced integrations; most apps
 never need them directly:
 
-- `FunctionRegistry` — the registry behind `registerFunction`; useful to manage
+- `FunctionRegistry`: the registry behind `registerFunction`; useful to manage
   a function set outside of a client instance.
-- `ClientContextRegistry` — the registry behind the context API
+- `ClientContextRegistry`: the registry behind the context API
   (`setContext`, dynamic providers, snapshots).
-- `EventEmitter` — the minimal typed emitter `AgoClient` extends.
-- `logger` — the SDK's internal logger (silent unless enabled via
+- `EventEmitter`: the minimal typed emitter `AgoClient` extends.
+- `logger`: the SDK's internal logger (silent unless enabled via
   `logger.enable()`; errors always log).
 
 ---

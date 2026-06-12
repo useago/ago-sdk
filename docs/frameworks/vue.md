@@ -155,7 +155,7 @@ useAgoEvents("message:complete", (msg) => {
 
 ## 6. Client context
 
-There is no dedicated Vue composable for context — use the core client API,
+There is no dedicated Vue composable for context: use the core client API,
 which is fully reactive-friendly:
 
 ```vue
@@ -183,7 +183,7 @@ See [Client context](../general/functions-and-context.md#client-context) for the
 ## 7. Reactive external state: `useAgoStore`
 
 Hold shared UI/request state in a core [`createStore`](../general/core.md#hold-live-state-with-createstore)
-— useful when client-side functions and your components mutate the same value —
+(useful when client-side functions and your components mutate the same value)
 and `useAgoStore` exposes it as a reactive ref. The ref's `.value` updates on
 every `store.set`, with auto-cleanup when the component is disposed.
 
@@ -195,7 +195,7 @@ import { useAgoStore } from "@useago/sdk/vue";
 const cart = createStore({ items: [] as string[] });
 const state = useAgoStore(cart);
 
-// Mutate through the store — from anywhere, including a registered AGO function:
+// Mutate through the store, from anywhere, including a registered AGO function:
 function add(sku: string) {
   cart.set({ items: [...cart.get().items, sku] });
 }
@@ -224,7 +224,7 @@ A runnable Vue example lives in [`examples/simple-vue`](../examples/simple-vue)
   `AgoSource`, `ToolCallData`, `AgoPluginOptions`
 
 > The polished `<ChatWidget>` component is React-only. In Vue, build your UI
-> from `useChat` (see the example) — it's a handful of lines.
+> from `useChat` (see the example); it's a handful of lines.
 
 See also: [Client functions & context](../general/functions-and-context.md) ·
 [Testing](../general/testing.md) · [Configuration](../general/configuration.md)

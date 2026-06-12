@@ -62,8 +62,12 @@
   <div id="chat"></div>
 
   <script type="module">
-    // Build the SDK first: `npm run build` from the sdk/ root.
-    import { mountChatWidget } from '../../dist/widget.js';
+    // No build step: open this file directly in a browser. The @1 pin floats
+    // patch/minor through a third-party CDN (no SRI possible) — fine for a demo.
+    import { mountChatWidget } from 'https://esm.sh/@useago/sdk@1/widget';
+    // Working on the SDK itself? Build it (`npm run build` at the repo root),
+    // serve the repo (`python3 -m http.server`), and swap the import for:
+    // import { mountChatWidget } from '../../dist/widget.js';
 
     let widget = null;
 

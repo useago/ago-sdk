@@ -1,4 +1,5 @@
 import { AgoClient } from "../client/AgoClient";
+import { AgoError } from "../client/errors";
 import type { AgoConfig } from "../client/types";
 
 /**
@@ -114,9 +115,10 @@ export function createAgo(overrides?: Partial<AgoConfig>): AgoClient {
   const config = autoDetectConfig(overrides);
 
   if (!config) {
-    throw new Error(
+    throw new AgoError(
       "createAgo(): could not detect AGO configuration. " +
-        "Set window.AGO, add <meta name=\"ago-base-url\">, or pass { baseUrl } explicitly."
+        "Set window.AGO, add <meta name=\"ago-base-url\">, or pass { baseUrl } explicitly.",
+      "config_missing_base_url"
     );
   }
 

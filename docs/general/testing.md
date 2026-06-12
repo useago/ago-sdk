@@ -78,7 +78,7 @@ and `on` / `off` / `once` / `waitFor` behave like the real client.
 
 | Member | Purpose |
 | --- | --- |
-| `mock.__calls` | `Array<{ method, args }>` — every recorded call, in order |
+| `mock.__calls` | `Array<{ method, args }>`: every recorded call, in order |
 | `mock.__callsFor(method)` | calls for one method |
 | `mock.__emitEvent(event, data)` | fire an event to subscribers |
 

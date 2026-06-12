@@ -115,11 +115,15 @@
   <div id="logs"></div>
 
   <script type="module">
-    // Built output of the SDK (run `npm run build` in sdk/ first).
-    import { AgoClient, createFormCollector, createConversationSession, deriveFormStatus } from '../../dist/index.js';
+    // No build step: open this file directly in a browser. The @1 pin floats
+    // patch/minor through a third-party CDN (no SRI possible) — fine for a demo.
+    import { AgoClient, createFormCollector, createConversationSession, deriveFormStatus } from 'https://esm.sh/@useago/sdk@1';
     // Dev panel: a floating widget showing the live client context (form values +
     // missing fields) and a log of client-function calls. Dev-only — never ship it.
-    import { initDevPanel } from '../../dist/devtools.js';
+    import { initDevPanel } from 'https://esm.sh/@useago/sdk@1/devtools';
+    // Working on the SDK itself? Build it (`npm run build` at the repo root),
+    // serve the repo (`python3 -m http.server`), and swap the imports for
+    // '../../dist/index.js' and '../../dist/devtools.js'.
 
     let client = null;
     let contact = null;

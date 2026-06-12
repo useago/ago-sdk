@@ -85,7 +85,11 @@
   <div id="logs"></div>
 
   <script type="module">
-    import { AgoClient } from '../dist/index.js';
+    // No build step: open this file directly in a browser. The @1 pin floats
+    // patch/minor through a third-party CDN (no SRI possible) — fine for a demo.
+    import { AgoClient } from 'https://esm.sh/@useago/sdk@1';
+    // Working on the SDK itself? Build it, serve the repo root, and swap for:
+    // import { AgoClient } from '../../dist/index.js';
 
     let client = null;
 

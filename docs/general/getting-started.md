@@ -35,7 +35,8 @@ const ago = new AgoClient({
   agent: "generic-guide",
 });
 
-// Stream the answer as it arrives
+// Stream the answer as it arrives (Node; in the browser use e.g.
+// outputEl.textContent += content, see the core guide)
 ago.on("message:chunk", ({ content }) => process.stdout.write(content));
 
 const reply = await ago.sendMessage("What can you do?");
@@ -61,7 +62,7 @@ No bundler, no `npm install`. Drop a styled chat panel onto any page:
 ```html
 <div id="chat"></div>
 <script type="module">
-  import { mountChatWidget } from "https://esm.sh/@useago/sdk/widget";
+  import { mountChatWidget } from "https://esm.sh/@useago/sdk@1/widget";
 
   mountChatWidget("#chat", {
     config: { baseUrl: "https://ago.api.useago.com", agent: "generic-guide" },

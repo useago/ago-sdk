@@ -31,7 +31,7 @@ swap that line for the released version and reinstall:
 
 ```jsonc
 // in the example's package.json
-"@useago/sdk": "^0.4.7"
+"@useago/sdk": "^1.0.0"
 ```
 
 ```bash
@@ -41,19 +41,15 @@ npm run dev
 
 ### Plain HTML / CDN
 
-The `simple-html/` examples import the local build (`../../dist/*.js`). To run one
-without any build step, import from a CDN instead with an import map:
+The `simple-html/` files import the published package from a CDN
+(`https://esm.sh/@useago/sdk@1/...`), so opening any of them directly in a
+browser works with no build step and no server.
 
-```html
-<script type="importmap">
-  {
-    "imports": {
-      "@useago/sdk/widget": "https://esm.sh/@useago/sdk/widget",
-      "@useago/sdk/devtools": "https://esm.sh/@useago/sdk/devtools"
-    }
-  }
-</script>
-```
+Working on the SDK source itself? Each file has a commented swap to the local
+build (`../../dist/*.js`). Build first (`npm install && npm run build` at the
+repo root), serve the repo (`python3 -m http.server`), and open
+`http://localhost:8000/examples/simple-html/chat-widget.html` — `file://` pages
+cannot import local modules.
 
 ## Building the SDK locally
 

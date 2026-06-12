@@ -1,5 +1,11 @@
 /**
  * Base error class for AGO SDK
+ *
+ * Error convention: every throw carries a stable `code` (snake_case), a
+ * one-line fix hint in the message, and a doc URL/anchor when one exists.
+ * `code` is the compatibility surface — match on it, never on message text,
+ * which may be reworded in any release. The code registry lives in
+ * docs/general/configuration.md#error-codes.
  */
 export class AgoError extends Error {
   constructor(
@@ -30,8 +36,13 @@ export class AgoApiError extends AgoError {
 
   static fromResponse(data: ApiErrorResponse, statusCode: number): AgoApiError {
     const error = data.error;
+    // Surface the doc link in the message itself: most developers see the
+    // message string (console, logs) long before they inspect `docUrl`.
+    const message = error.doc_url
+      ? `${error.message} See ${error.doc_url}`
+      : error.message;
     return new AgoApiError(
-      error.message,
+      message,
       error.code,
       statusCode,
       error.type,
@@ -63,10 +74,15 @@ export class AgoNetworkError extends AgoError {
 
 /**
  * SSE stream error
+ *
+ * `code` distinguishes failure classes without message parsing:
+ * - `stream_no_body`: the response had no streamable body (usually a
+ *   misconfigured endpoint or a proxy stripping the SSE stream)
+ * - `stream_error` (default): the stream failed mid-flight
  */
 export class AgoStreamError extends AgoError {
-  constructor(message: string) {
-    super(message, "stream_error");
+  constructor(message: string, code: string = "stream_error") {
+    super(message, code);
     this.name = "AgoStreamError";
   }
 }
