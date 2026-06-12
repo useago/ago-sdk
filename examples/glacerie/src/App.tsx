@@ -1,6 +1,7 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { ChatWidget, useAgoFunction, useAgoNavigation } from '@useago/sdk/react';
+import { ChatWidget, useAgoClient, useAgoFunction, useAgoNavigation } from '@useago/sdk/react';
+import { initDevPanel } from '@useago/sdk/devtools';
 import IceCream, { IceCreamSvg, IceCreamState } from './IceCream';
 import {
   buildIceCreamFunctions,
@@ -53,6 +54,15 @@ export default function App() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const navigate = useNavigate();
   const location = useLocation();
+  const client = useAgoClient();
+
+  // Dev panel: lists the registered functions, shows the live context snapshot,
+  // and logs every function the agent calls. Open the app with ?dev to enable it.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).has('dev')) {
+      initDevPanel({ client });
+    }
+  }, [client]);
 
   const currentRef = useRef(current);
   currentRef.current = current;

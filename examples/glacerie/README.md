@@ -20,9 +20,13 @@ npm install
 npm run dev
 ```
 
-It defaults to the public demo backend (`https://ago.api.useago.com`, agent
+It defaults to the public demo backend (`https://playground.api.useago.com`, agent
 `glacerie`), so it answers out of the box. Point `VITE_AGO_BASE_URL` at your own
 domain (e.g. `https://YOUR-DOMAIN.api.useago.com`) to use your own agents.
+
+Open the app with `?dev` (e.g. `http://localhost:5173/?dev`) to mount the dev
+panel: it lists the registered functions, shows the live context snapshot, and
+logs every function the agent calls. See [`initDevPanel`](../../docs/general/devtools.md).
 
 ## What to try
 
