@@ -63,20 +63,54 @@ function describeChunk(data: SSEChunkData): string {
 }
 
 const COLLAPSE_KEY = "ago_dev_panel_collapsed";
+const EVENTS_COLLAPSE_KEY = "ago_dev_events_collapsed";
 
-function setCollapsed(panel: HTMLElement, collapsed: boolean): void {
+function setCollapsed(
+  panel: HTMLElement,
+  collapsed: boolean,
+  storageKey: string,
+  label: string,
+): void {
   panel.classList.toggle("collapsed", collapsed);
   const toggle = panel.querySelector<HTMLButtonElement>(".dev-toggle");
   if (toggle) {
     toggle.textContent = collapsed ? "▢" : "—";
-    toggle.title = collapsed ? "Expand dev tools" : "Collapse dev tools";
+    toggle.title = collapsed ? `Expand ${label}` : `Collapse ${label}`;
     toggle.setAttribute("aria-expanded", String(!collapsed));
   }
   try {
-    localStorage.setItem(COLLAPSE_KEY, collapsed ? "1" : "0");
+    localStorage.setItem(storageKey, collapsed ? "1" : "0");
   } catch {
     // localStorage may be unavailable; collapse state just won't persist.
   }
+}
+
+// Wire a panel's toggle button + click-to-expand, and restore its persisted
+// collapse state. Shared by the main dev panel and the SSE events panel so each
+// collapses independently under its own storage key.
+function wireCollapse(
+  panel: HTMLElement,
+  storageKey: string,
+  label: string,
+): void {
+  const toggle = panel.querySelector<HTMLButtonElement>(".dev-toggle");
+  toggle?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    setCollapsed(panel, !panel.classList.contains("collapsed"), storageKey, label);
+  });
+  // When collapsed, the whole widget acts as an expand button.
+  panel.addEventListener("click", () => {
+    if (panel.classList.contains("collapsed"))
+      setCollapsed(panel, false, storageKey, label);
+  });
+
+  let startCollapsed = false;
+  try {
+    startCollapsed = localStorage.getItem(storageKey) === "1";
+  } catch {
+    // ignore
+  }
+  setCollapsed(panel, startCollapsed, storageKey, label);
 }
 
 export function initDevPanel(options: DevPanelOptions): void {
@@ -100,6 +134,7 @@ export function initDevPanel(options: DevPanelOptions): void {
         : document.body;
   const panel = document.createElement("aside");
   panel.id = "ago-dev-panel";
+  panel.className = "ago-dev-card";
   (host ?? document.body).appendChild(panel);
 
   const registered = client.getRegisteredFunctions?.() ?? [];
@@ -117,32 +152,31 @@ export function initDevPanel(options: DevPanelOptions): void {
       <pre class="dev-state" id="ago-dev-state"></pre>
       <div class="dev-section-label">Function calls</div>
       <div class="dev-log" id="ago-dev-log"></div>
-      <div class="dev-section-label">SSE events</div>
-      <div class="dev-log" id="ago-dev-event-log"></div>
     </div>
   `;
 
   stateEl = panel.querySelector<HTMLElement>("#ago-dev-state");
   logEl = panel.querySelector<HTMLElement>("#ago-dev-log");
-  eventLogEl = panel.querySelector<HTMLElement>("#ago-dev-event-log");
+  wireCollapse(panel, COLLAPSE_KEY, "dev tools");
 
-  const toggle = panel.querySelector<HTMLButtonElement>(".dev-toggle");
-  toggle?.addEventListener("click", (e) => {
-    e.stopPropagation();
-    setCollapsed(panel, !panel.classList.contains("collapsed"));
-  });
-  // When collapsed, the whole widget acts as an expand button.
-  panel.addEventListener("click", () => {
-    if (panel.classList.contains("collapsed")) setCollapsed(panel, false);
-  });
-
-  let startCollapsed = false;
-  try {
-    startCollapsed = localStorage.getItem(COLLAPSE_KEY) === "1";
-  } catch {
-    // ignore
-  }
-  setCollapsed(panel, startCollapsed);
+  // Separate panel for the raw SSE stream: it's high-volume, so keeping it out of
+  // the main panel stops it crowding the function/state views. Collapses on its own.
+  const eventsPanel = document.createElement("aside");
+  eventsPanel.id = "ago-dev-events";
+  eventsPanel.className = "ago-dev-card";
+  (host ?? document.body).appendChild(eventsPanel);
+  eventsPanel.innerHTML = `
+    <div class="dev-head">
+      <span class="dev-badge">SSE</span>
+      <span class="dev-title">SSE EVENT LOG · raw stream messages</span>
+      <button type="button" class="dev-toggle" aria-label="Toggle SSE event log">—</button>
+    </div>
+    <div class="dev-body">
+      <div class="dev-log" id="ago-dev-event-log"></div>
+    </div>
+  `;
+  eventLogEl = eventsPanel.querySelector<HTMLElement>("#ago-dev-event-log");
+  wireCollapse(eventsPanel, EVENTS_COLLAPSE_KEY, "SSE event log");
 
   // Log every raw SSE message as it arrives off the stream, so the exact wire
   // payload behind each higher-level event is traceable.
@@ -200,9 +234,8 @@ function injectStyles(): void {
 }
 
 const PANEL_CSS = `
-#ago-dev-panel {
+.ago-dev-card {
   position: fixed;
-  top: 16px;
   right: 16px;
   width: min(360px, calc(100vw - 32px));
   max-width: calc(100vw - 32px);
@@ -221,8 +254,11 @@ const PANEL_CSS = `
   font-size: 12px;
   z-index: 1000;
 }
-#ago-dev-panel .dev-head { display: flex; align-items: center; gap: 8px; }
-#ago-dev-panel .dev-toggle {
+/* The main panel pins to the top, the SSE log to the bottom, so they don't overlap. */
+#ago-dev-panel { top: 16px; }
+#ago-dev-events { bottom: 16px; }
+.ago-dev-card .dev-head { display: flex; align-items: center; gap: 8px; }
+.ago-dev-card .dev-toggle {
   margin-left: auto;
   flex: none;
   width: 22px;
@@ -238,19 +274,19 @@ const PANEL_CSS = `
   line-height: 1;
   cursor: pointer;
 }
-#ago-dev-panel .dev-toggle:hover { color: #d7e0e8; border-color: #3a4655; }
-#ago-dev-panel .dev-body { display: flex; flex-direction: column; gap: 8px; }
+.ago-dev-card .dev-toggle:hover { color: #d7e0e8; border-color: #3a4655; }
+.ago-dev-card .dev-body { display: flex; flex-direction: column; gap: 8px; }
 
-/* Collapsed: shrink to a small clickable widget showing only the DEV badge. */
-#ago-dev-panel.collapsed {
+/* Collapsed: shrink to a small clickable widget showing only the badge. */
+.ago-dev-card.collapsed {
   width: auto;
   cursor: pointer;
   padding: 8px 10px;
 }
-#ago-dev-panel.collapsed .dev-title,
-#ago-dev-panel.collapsed .dev-body { display: none; }
-#ago-dev-panel.collapsed .dev-toggle { margin-left: 6px; }
-#ago-dev-panel .dev-badge {
+.ago-dev-card.collapsed .dev-title,
+.ago-dev-card.collapsed .dev-body { display: none; }
+.ago-dev-card.collapsed .dev-toggle { margin-left: 6px; }
+.ago-dev-card .dev-badge {
   background: #f59e0b;
   color: #1c1206;
   font-weight: 700;
@@ -259,17 +295,17 @@ const PANEL_CSS = `
   padding: 2px 6px;
   border-radius: 5px;
 }
-#ago-dev-panel .dev-title { color: #f59e0b; font-size: 11px; line-height: 1.3; }
-#ago-dev-panel .dev-fns { color: #7c8a99; font-size: 11px; }
-#ago-dev-panel .dev-fns code { color: #9ecbff; }
-#ago-dev-panel .dev-section-label {
+.ago-dev-card .dev-title { color: #f59e0b; font-size: 11px; line-height: 1.3; }
+.ago-dev-card .dev-fns { color: #7c8a99; font-size: 11px; }
+.ago-dev-card .dev-fns code { color: #9ecbff; }
+.ago-dev-card .dev-section-label {
   color: #7c8a99;
   text-transform: uppercase;
   letter-spacing: .08em;
   font-size: 10px;
   margin-top: 4px;
 }
-#ago-dev-panel .dev-state {
+.ago-dev-card .dev-state {
   margin: 0;
   padding: 8px;
   background: #060a0e;
@@ -279,7 +315,7 @@ const PANEL_CSS = `
   white-space: pre;
   color: #c8e6c9;
 }
-#ago-dev-panel .dev-log {
+.ago-dev-card .dev-log {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -289,10 +325,12 @@ const PANEL_CSS = `
   border-radius: 8px;
   padding: 6px 8px;
 }
-#ago-dev-panel .dev-log-line { white-space: pre-wrap; word-break: break-word; line-height: 1.4; }
-#ago-dev-panel .dev-log-invoke { color: #9ecbff; }
-#ago-dev-panel .dev-log-result { color: #86efac; }
-#ago-dev-panel .dev-log-error { color: #fca5a5; }
-#ago-dev-panel .dev-log-hydrate { color: #d8b4fe; }
-#ago-dev-panel .dev-log-event { color: #7c8a99; }
+/* The SSE log is the events panel's only content, so give it more room. */
+#ago-dev-events .dev-log { max-height: 60vh; }
+.ago-dev-card .dev-log-line { white-space: pre-wrap; word-break: break-word; line-height: 1.4; }
+.ago-dev-card .dev-log-invoke { color: #9ecbff; }
+.ago-dev-card .dev-log-result { color: #86efac; }
+.ago-dev-card .dev-log-error { color: #fca5a5; }
+.ago-dev-card .dev-log-hydrate { color: #d8b4fe; }
+.ago-dev-card .dev-log-event { color: #7c8a99; }
 `;
