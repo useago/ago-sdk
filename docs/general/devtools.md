@@ -4,7 +4,9 @@
 client-side integration: it lists the registered functions, renders the client's
 live context snapshot as JSON (including every installed form collector's state),
 and logs every `function:invoke` / `function:result` event as it happens, plus a
-line each time a conversation is hydrated on reload.
+line each time a conversation is hydrated on reload. A separate "SSE events" log
+records every raw message off the stream, so you can see the exact wire payload
+behind each reply.
 
 > **Signature:** the panel reads everything from the client
 > (`client.getContextSnapshot()`). It takes **no `store` option**: pass only
@@ -39,7 +41,9 @@ The panel mounts a fixed-position overlay (top-right by default). The JSON pane 
 client's live context snapshot (including every installed form collector's state) and
 re-renders after each function the agent calls; it also appends a log line for each
 `function:invoke` and its result, and a `⟳ hydrated …` line whenever a conversation is
-restored on reload. Its collapsed/expanded state is remembered in `localStorage`.
+restored on reload. The "SSE events" log below it appends one line per raw stream
+message (a leading tag plus the verbatim JSON). Its collapsed/expanded state is
+remembered in `localStorage`.
 
 ### Reading the JSON pane
 

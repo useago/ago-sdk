@@ -229,6 +229,13 @@ export interface AgoClientEvents {
     messageId: string;
   };
   /**
+   * Every raw SSE message parsed off the stream, before the handler interprets it
+   * into the higher-level `message:*` / `toolCall:*` / `function:*` events. Carries
+   * the chunk verbatim so debugging tools (notably the dev panel) can log the exact
+   * wire payload. Heartbeat comments are not messages and don't fire this.
+   */
+  "stream:message": SSEChunkData;
+  /**
    * The main answer text is done (backend emitted `status: "DONE"`), but follow-up
    * replies may still be pending. Fires once, before `message:complete`.
    */

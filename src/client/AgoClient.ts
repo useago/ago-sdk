@@ -133,6 +133,9 @@ export class AgoClient {
     let sawClientFunction = false;
 
     const handler = new SSEHandler({
+      onRawChunk: (data) => {
+        this.eventEmitter.emit("stream:message", data);
+      },
       onStart: (data) => {
         this.eventEmitter.emit("message:start", data);
       },

@@ -171,6 +171,27 @@ describe("initDevPanel", () => {
     expect(hydrateLine?.textContent).toContain("2 tool calls");
   });
 
+  it("appends an event line for each raw SSE message", () => {
+    const client = createMockClient();
+
+    initDevPanel({ client });
+
+    client.__emitEvent("stream:message", {
+      type: "client_function",
+      function_name: "doThing",
+      arguments: { a: 1 },
+    });
+    client.__emitEvent("stream:message", { content: "Hello" });
+
+    const lines = document.querySelectorAll("#ago-dev-event-log .dev-log-event");
+    expect(lines).toHaveLength(2);
+    // The leading tag plus the verbatim payload are both shown.
+    expect(lines[0].textContent).toContain("client_function");
+    expect(lines[0].textContent).toContain("doThing");
+    expect(lines[1].textContent).toContain("content");
+    expect(lines[1].textContent).toContain("Hello");
+  });
+
   it("mounts into a target given as a CSS selector", () => {
     const host = document.createElement("div");
     host.id = "host";

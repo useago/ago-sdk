@@ -1,4 +1,5 @@
 import type { AgoClient } from "../client/AgoClient";
+import type { SSEChunkData } from "../client/types";
 
 /** Options for {@link initDevPanel}. */
 export interface DevPanelOptions {
@@ -17,6 +18,7 @@ export interface DevPanelOptions {
 
 let stateEl: HTMLElement | null;
 let logEl: HTMLElement | null;
+let eventLogEl: HTMLElement | null;
 let getStateFn: () => unknown = () => ({});
 
 // Re-render the JSON pane. Painted on init and after each function event.
@@ -25,17 +27,39 @@ function renderState(): void {
   stateEl.textContent = JSON.stringify(getStateFn(), null, 2);
 }
 
-function logLine(
+// Append one timestamped line to a log pane (the function-call log or the SSE
+// event log) and keep it scrolled to the newest entry.
+function appendLine(
+  el: HTMLElement | null,
   text: string,
-  kind: "invoke" | "result" | "error" | "hydrate",
+  kind: string,
 ): void {
-  if (!logEl) return;
+  if (!el) return;
   const line = document.createElement("div");
   line.className = `dev-log-line dev-log-${kind}`;
   const time = new Date().toLocaleTimeString();
   line.textContent = `${time}  ${text}`;
-  logEl.appendChild(line);
-  logEl.scrollTop = logEl.scrollHeight;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+function logLine(
+  text: string,
+  kind: "invoke" | "result" | "error" | "hydrate",
+): void {
+  appendLine(logEl, text, kind);
+}
+
+// One-line summary of a raw SSE chunk: a leading tag (its `type`, or what it
+// carries) plus the verbatim JSON, so the exact wire payload stays inspectable.
+function describeChunk(data: SSEChunkData): string {
+  let tag: string;
+  if (data.type) tag = data.type;
+  else if (data.content !== undefined) tag = "content";
+  else if (data.full_content !== undefined) tag = "full_content";
+  else if (data.status) tag = `status:${data.status}`;
+  else tag = "event";
+  return `${tag}  ${JSON.stringify(data)}`;
 }
 
 const COLLAPSE_KEY = "ago_dev_panel_collapsed";
@@ -93,11 +117,14 @@ export function initDevPanel(options: DevPanelOptions): void {
       <pre class="dev-state" id="ago-dev-state"></pre>
       <div class="dev-section-label">Function calls</div>
       <div class="dev-log" id="ago-dev-log"></div>
+      <div class="dev-section-label">SSE events</div>
+      <div class="dev-log" id="ago-dev-event-log"></div>
     </div>
   `;
 
   stateEl = panel.querySelector<HTMLElement>("#ago-dev-state");
   logEl = panel.querySelector<HTMLElement>("#ago-dev-log");
+  eventLogEl = panel.querySelector<HTMLElement>("#ago-dev-event-log");
 
   const toggle = panel.querySelector<HTMLButtonElement>(".dev-toggle");
   toggle?.addEventListener("click", (e) => {
@@ -116,6 +143,12 @@ export function initDevPanel(options: DevPanelOptions): void {
     // ignore
   }
   setCollapsed(panel, startCollapsed);
+
+  // Log every raw SSE message as it arrives off the stream, so the exact wire
+  // payload behind each higher-level event is traceable.
+  client.on("stream:message", (data) => {
+    appendLine(eventLogEl, describeChunk(data), "event");
+  });
 
   client.on("function:invoke", ({ functionName, arguments: args }) => {
     logLine(`→ ${functionName}(${JSON.stringify(args ?? {})})`, "invoke");
@@ -261,4 +294,5 @@ const PANEL_CSS = `
 #ago-dev-panel .dev-log-result { color: #86efac; }
 #ago-dev-panel .dev-log-error { color: #fca5a5; }
 #ago-dev-panel .dev-log-hydrate { color: #d8b4fe; }
+#ago-dev-panel .dev-log-event { color: #7c8a99; }
 `;
