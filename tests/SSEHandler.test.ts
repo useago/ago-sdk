@@ -45,6 +45,33 @@ describe("SSEHandler", () => {
       expect(result.status).toBe("DONE");
     });
 
+    it("fires onRawChunk once per parsed SSE message, with the verbatim payload", async () => {
+      const onRawChunk = vi.fn();
+
+      const handler = new SSEHandler({ onRawChunk });
+
+      const response = createMockSSEStream([
+        ': heartbeat\n\n',
+        'data: {"content":"Hi","message_id":"msg-1","thread":{"id":"thread-1"}}\n\n',
+        'data: {"status":"DONE","message_id":"msg-1","thread":{"id":"thread-1"}}\n\n',
+      ]);
+
+      await handler.processStream(response);
+
+      // The heartbeat comment is not a message, so only the two data lines fire.
+      expect(onRawChunk).toHaveBeenCalledTimes(2);
+      expect(onRawChunk).toHaveBeenNthCalledWith(1, {
+        content: "Hi",
+        message_id: "msg-1",
+        thread: { id: "thread-1" },
+      });
+      expect(onRawChunk).toHaveBeenNthCalledWith(2, {
+        status: "DONE",
+        message_id: "msg-1",
+        thread: { id: "thread-1" },
+      });
+    });
+
     it("fires onAnswerComplete on the DONE edge, before onComplete and without follow-ups", async () => {
       const order: string[] = [];
       const onAnswerComplete = vi.fn(() => order.push("answer-complete"));

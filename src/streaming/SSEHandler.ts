@@ -26,6 +26,11 @@ function stableStringify(value: unknown): string {
 }
 
 export interface SSEHandlerCallbacks {
+  /**
+   * Every raw SSE chunk parsed off the stream, fired before it's interpreted into
+   * the higher-level callbacks below. The verbatim payload, for debugging/logging.
+   */
+  onRawChunk?: (data: SSEChunkData) => void;
   onStart?: (data: { conversationId: string; messageId: string }) => void;
   onChunk?: (data: { content: string; conversationId: string; messageId: string }) => void;
   onToolCall?: (toolCall: ToolCallData) => void;
@@ -144,6 +149,10 @@ export class SSEHandler {
   }
 
   private handleChunk(data: SSEChunkData): void {
+    // Surface the raw message first, so a logger sees the exact wire payload
+    // regardless of which higher-level event (if any) it maps to below.
+    this.callbacks.onRawChunk?.(data);
+
     // Handle message ID and conversation ID
     if (data.message_id && !this.message.id) {
       this.message.id = data.message_id;

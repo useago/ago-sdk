@@ -171,6 +171,51 @@ describe("initDevPanel", () => {
     expect(hydrateLine?.textContent).toContain("2 tool calls");
   });
 
+  it("mounts the SSE event log in its own panel, separate from the main panel", () => {
+    initDevPanel({ client: createMockClient() });
+
+    const eventsPanel = document.getElementById("ago-dev-events");
+    expect(eventsPanel).not.toBeNull();
+    // The event log lives inside the dedicated panel, not the main one.
+    expect(eventsPanel?.querySelector("#ago-dev-event-log")).not.toBeNull();
+    expect(
+      document.getElementById("ago-dev-panel")?.querySelector("#ago-dev-event-log"),
+    ).toBeNull();
+  });
+
+  it("appends an event line for each raw SSE message", () => {
+    const client = createMockClient();
+
+    initDevPanel({ client });
+
+    client.__emitEvent("stream:message", {
+      type: "client_function",
+      function_name: "doThing",
+      arguments: { a: 1 },
+    });
+    client.__emitEvent("stream:message", { content: "Hello" });
+
+    const lines = document.querySelectorAll(
+      "#ago-dev-events #ago-dev-event-log .dev-log-event",
+    );
+    expect(lines).toHaveLength(2);
+    // The leading tag plus the verbatim payload are both shown.
+    expect(lines[0].textContent).toContain("client_function");
+    expect(lines[0].textContent).toContain("doThing");
+    expect(lines[1].textContent).toContain("content");
+    expect(lines[1].textContent).toContain("Hello");
+  });
+
+  it("collapses the SSE events panel independently of the main panel", () => {
+    localStorage.setItem("ago_dev_events_collapsed", "1");
+
+    initDevPanel({ client: createMockClient() });
+
+    // The events panel restores its own collapsed state; the main panel stays open.
+    expect(document.getElementById("ago-dev-events")?.classList.contains("collapsed")).toBe(true);
+    expect(document.getElementById("ago-dev-panel")?.classList.contains("collapsed")).toBe(false);
+  });
+
   it("mounts into a target given as a CSS selector", () => {
     const host = document.createElement("div");
     host.id = "host";
