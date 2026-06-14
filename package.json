@@ -100,7 +100,7 @@
     "url": "https://github.com/useago/ago-sdk/issues"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20.19.0"
   },
   "files": [
     "dist",

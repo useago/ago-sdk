@@ -23,11 +23,12 @@ jobs:
       # Needs dist/ — keep after the build step (publint/attw inspect the pack).
       - run: npm run check:package
 
-  # The dev toolchain (vite 8 / vitest 4) needs Node 20.19+, so the runtime
-  # claim in `engines` (>=18) is verified against the PACKED ARTIFACT instead:
-  # build on 24, install the tarball on stock Node 18, import (ESM), require
-  # (CJS) and instantiate.
-  node18-smoke:
+  # Verifies the `engines` runtime floor (>=20.19) against the PACKED ARTIFACT:
+  # build on 24, install the tarball on Node 20, import (ESM), require (CJS) and
+  # instantiate. 20.19 is the floor because requiring the SDK from CJS pulls in
+  # the react chunk, which requires ESM-only deps (react-markdown); the unflagged
+  # require(ESM) that makes that work landed in Node 20.19.
+  node-smoke:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -39,18 +40,17 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm pack
-      - name: Switch to Node 18
+      - name: Switch to Node 20
         uses: actions/setup-node@v5
         with:
-          node-version: 18
-      - name: Install tarball and smoke-test ESM + CJS on Node 18
+          node-version: 20
+      - name: Install tarball and smoke-test ESM + CJS on Node 20
         run: |
           node --version
           mkdir smoke && cd smoke
           npm init -y > /dev/null
           npm install ../useago-sdk-*.tgz
-          # ESM import + instantiate (exercises the crypto.randomUUID fallback:
-          # global WebCrypto is flag-gated on stock Node 18)
+          # ESM import + instantiate
           node --input-type=module -e "
             import { AgoClient } from '@useago/sdk';
             const c = new AgoClient({ baseUrl: 'https://smoke.invalid' });
