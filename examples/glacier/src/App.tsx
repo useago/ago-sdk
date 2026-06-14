@@ -140,11 +140,11 @@ export default function App() {
   const isShop = location.pathname === ROUTES.shop.path;
 
   return (
-    <div className="glacerie-shell">
+    <div className="glacier-shell">
       <AppHeader isShop={isShop} cart={cart} current={current} grandTotal={grandTotal} />
 
-      <main className="glacerie-main">
-        <aside className="glacerie-chat">
+      <main className="glacier-main">
+        <aside className="glacier-chat">
           <ChatWidget
             title="Glacière AGO"
             welcomeMessage="Bonjour ! Je suis votre glacier. Quelle glace vous tente aujourd'hui ? Je peux composer plusieurs glaces, les ajouter au panier, ou vous renseigner sur les ingrédients, les allergènes et l'origine de nos produits — dites-moi si vous avez une allergie ou si vous voulez en savoir plus sur la vanille de Tahiti."
@@ -154,7 +154,7 @@ export default function App() {
           />
         </aside>
 
-        <section className="glacerie-stage">
+        <section className="glacier-stage">
           <Routes>
             <Route
               path={ROUTES.shop.path}
@@ -196,22 +196,22 @@ function AppHeader({
 }) {
   if (isShop) {
     return (
-      <header className="glacerie-header">
-        <div className="glacerie-brand">
-          <span className="glacerie-logo">🍦</span>
+      <header className="glacier-header">
+        <div className="glacier-brand">
+          <span className="glacier-logo">🍦</span>
           <div>
-            <h1>La Glacerie AGO</h1>
-            <p className="glacerie-tagline">Composez vos glaces avec l'assistant — ajoutez-en plusieurs au panier.</p>
+            <h1>La Glacier AGO</h1>
+            <p className="glacier-tagline">Composez vos glaces avec l'assistant — ajoutez-en plusieurs au panier.</p>
           </div>
         </div>
-        <div className="glacerie-header-right">
+        <div className="glacier-header-right">
           <Link to={ROUTES.origins.path} className="nav-button">Origines</Link>
           <Link to={ROUTES.ingredients.path} className="nav-button">Ingrédients & allergènes</Link>
-          <div className="glacerie-price">
-            <span className="glacerie-price-label">
+          <div className="glacier-price">
+            <span className="glacier-price-label">
               Total {cart.length > 0 ? `(${cart.length} au panier${current.scoops.length > 0 ? ' + en cours' : ''})` : ''}
             </span>
-            <span className="glacerie-price-value">{grandTotal.toFixed(2)} €</span>
+            <span className="glacier-price-value">{grandTotal.toFixed(2)} €</span>
           </div>
         </div>
       </header>
@@ -219,15 +219,15 @@ function AppHeader({
   }
 
   return (
-    <header className="glacerie-header">
-      <div className="glacerie-brand">
-        <span className="glacerie-logo">🧾</span>
+    <header className="glacier-header">
+      <div className="glacier-brand">
+        <span className="glacier-logo">🧾</span>
         <div>
-          <h1>La Glacerie AGO</h1>
-          <p className="glacerie-tagline">Explorez nos ingrédients, allergènes et origines.</p>
+          <h1>La Glacier AGO</h1>
+          <p className="glacier-tagline">Explorez nos ingrédients, allergènes et origines.</p>
         </div>
       </div>
-      <div className="glacerie-header-right">
+      <div className="glacier-header-right">
         <Link to={ROUTES.ingredients.path} className="nav-button">Ingrédients</Link>
         <Link to={ROUTES.origins.path} className="nav-button">Origines</Link>
         <Link to={ROUTES.shop.path} className="nav-button nav-button--primary">← Retour à la boutique</Link>

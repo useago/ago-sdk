@@ -100,7 +100,7 @@
     "url": "https://github.com/useago/ago-sdk/issues"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20.19.0"
   },
   "files": [
     "dist",
@@ -148,7 +148,7 @@
     "@types/react-dom": "^18.0.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
-    "esbuild": "^0.28.0",
+    "esbuild": "^0.28.1",
     "eslint": "^8.0.0",
     "eslint-plugin-react-hooks": "^4.6.2",
     "jsdom": "^28.0.0",

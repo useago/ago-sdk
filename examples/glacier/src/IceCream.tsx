@@ -197,7 +197,7 @@ function Cup() {
         fontWeight="600"
         fill="#03182f"
       >
-        glacerie
+        glacier
       </text>
     </g>
   );

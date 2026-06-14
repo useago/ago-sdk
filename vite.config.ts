@@ -28,7 +28,19 @@ export default defineConfig({
       },
     },
     rollupOptions: {
-      external: ["react", "react-dom", "react/jsx-runtime", "vue"],
+      // react-markdown/remark-gfm stay external (they are runtime deps, not
+      // bundled). Bundling them pulls their CJS interop and a top-level
+      // document.createElement into the react chunk, and rolldown then hosts a
+      // shared helper there that the core chunks import, dragging react into the
+      // framework-agnostic `index` entry (breaks node import). Keep them external.
+      external: [
+        "react",
+        "react-dom",
+        "react/jsx-runtime",
+        "vue",
+        "react-markdown",
+        "remark-gfm",
+      ],
       output: {
         globals: {
           react: "React",

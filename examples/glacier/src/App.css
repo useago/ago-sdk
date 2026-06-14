@@ -12,7 +12,7 @@ body {
   min-height: 100vh;
 }
 
-.glacerie-shell {
+.glacier-shell {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -21,7 +21,7 @@ body {
 }
 
 /* Header */
-.glacerie-header {
+.glacier-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -31,31 +31,31 @@ body {
   box-shadow: 0 6px 28px rgba(218, 122, 70, 0.12);
 }
 
-.glacerie-brand {
+.glacier-brand {
   display: flex;
   align-items: center;
   gap: 16px;
 }
 
-.glacerie-logo {
+.glacier-logo {
   font-size: 40px;
   line-height: 1;
 }
 
-.glacerie-header h1 {
+.glacier-header h1 {
   font-family: 'Fraunces', serif;
   font-size: 26px;
   font-weight: 700;
   color: #03182f;
 }
 
-.glacerie-tagline {
+.glacier-tagline {
   font-size: 13px;
   color: #6b7280;
   margin-top: 2px;
 }
 
-.glacerie-price {
+.glacier-price {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -65,21 +65,21 @@ body {
   border-radius: 12px;
 }
 
-.glacerie-price-label {
+.glacier-price-label {
   font-size: 11px;
   letter-spacing: 1px;
   text-transform: uppercase;
   opacity: 0.7;
 }
 
-.glacerie-price-value {
+.glacier-price-value {
   font-family: 'Fraunces', serif;
   font-size: 22px;
   font-weight: 700;
 }
 
 /* Main */
-.glacerie-main {
+.glacier-main {
   flex: 1;
   display: grid;
   grid-template-columns: minmax(360px, 460px) 1fr;
@@ -87,7 +87,7 @@ body {
   min-height: 0;
 }
 
-.glacerie-chat {
+.glacier-chat {
   background: #fff;
   border-radius: 20px;
   box-shadow: 0 6px 28px rgba(218, 122, 70, 0.12);
@@ -97,7 +97,7 @@ body {
   min-height: 600px;
 }
 
-.glacerie-stage {
+.glacier-stage {
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -502,40 +502,40 @@ body {
 
 /* Responsive */
 @media (max-width: 960px) {
-  .glacerie-main {
+  .glacier-main {
     grid-template-columns: 1fr;
   }
 
-  .glacerie-chat {
+  .glacier-chat {
     min-height: 480px;
     order: 2;
   }
 
-  .glacerie-stage {
+  .glacier-stage {
     order: 1;
   }
 }
 
 @media (max-width: 600px) {
-  .glacerie-shell {
+  .glacier-shell {
     padding: 14px;
     gap: 14px;
   }
 
-  .glacerie-header {
+  .glacier-header {
     padding: 14px 18px;
     flex-direction: column;
     gap: 12px;
     align-items: flex-start;
   }
 
-  .glacerie-header h1 {
+  .glacier-header h1 {
     font-size: 22px;
   }
 }
 
 /* Header right cluster + nav button */
-.glacerie-header-right {
+.glacier-header-right {
   display: flex;
   align-items: center;
   gap: 16px;

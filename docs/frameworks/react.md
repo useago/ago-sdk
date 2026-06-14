@@ -372,7 +372,7 @@ useAgoNavigation(navigate, [...Object.values(ROUTES), ...invoiceRoutes]);
 // <Route path="/invoices/:id" element={<Invoice />} /> stays render-only
 ```
 
-A full version of this pattern is in [`examples/glacerie`](../../examples/glacerie).
+A full version of this pattern is in [`examples/glacier`](../../examples/glacier).
 
 ---
 

@@ -5,7 +5,7 @@ Runnable example apps for `@useago/sdk`, one per stack.
 | Example | Stack | Entry |
 | --- | --- | --- |
 | `simple-react/` | React + Vite | `npm run dev` |
-| `glacerie/` | React + Vite (ice-cream shop: functions + navigation) | `npm run dev` |
+| `glacier/` | React + Vite (ice-cream shop: functions + navigation) | `npm run dev` |
 | `simple-vue/` | Vue 3 + Vite | `npm run dev` |
 | `simple-angular/` | Angular | `npm run dev` |
 | `simple-ts/` | Vanilla TypeScript | `npm run dev` |
@@ -16,23 +16,13 @@ The examples default to the public demo backend (`https://ago.api.useago.com`,
 agent `generic-guide`), so they answer out of the box. Point `baseUrl` at your
 own domain (e.g. `https://YOUR-DOMAIN.api.useago.com`) to chat with your agents.
 
-## Two ways to depend on the SDK
+## How they depend on the SDK
 
-The bundled `package.json` files use a **local monorepo link** so the examples
-track your local source:
+The bundled `package.json` files use the **published package**, so each example
+runs the same way an external user would:
 
 ```json
-"@useago/sdk": "file:../.."
-```
-
-This requires building the SDK first (`npm install && npm run build` from `sdk/`).
-
-To run an example **as an external user would** (against the published package),
-swap that line for the released version and reinstall:
-
-```jsonc
-// in the example's package.json
-"@useago/sdk": "^1.0.0"
+"@useago/sdk": "^1.0.5"
 ```
 
 ```bash
@@ -46,20 +36,25 @@ The `simple-html/` files import the published package from a CDN
 (`https://esm.sh/@useago/sdk@1/...`), so opening any of them directly in a
 browser works with no build step and no server.
 
-Working on the SDK source itself? Each file has a commented swap to the local
-build (`../../dist/*.js`). Build first (`npm install && npm run build` at the
-repo root), serve the repo (`python3 -m http.server`), and open
-`http://localhost:8000/examples/simple-html/chat-widget.html` — `file://` pages
-cannot import local modules.
+## Working on the SDK source
 
-## Building the SDK locally
+To run an example against your local source instead of the published package,
+swap that line in the example's `package.json` for a local monorepo link, then
+build the SDK and reinstall:
 
-From the `sdk/` directory:
+```jsonc
+// in the example's package.json
+"@useago/sdk": "file:../.."
+```
 
 ```bash
-npm install
-npm run build      # produces dist/ consumed by the file:../.. examples
+npm install && npm run build   # from the repo root, produces dist/
 ```
+
+The `simple-html/` files each have a commented swap to the local build
+(`../../dist/*.js`). Serve the repo (`python3 -m http.server`) and open
+`http://localhost:8000/examples/simple-html/chat-widget.html` — `file://` pages
+cannot import local modules.
 
 See the [main README](../README.md) and the [docs](https://ago.mintlify.app) for the
 full API.
