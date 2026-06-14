@@ -1,4 +1,4 @@
-# Glacerie (React)
+# Glacier (React)
 
 An ice-cream shop where the AGO agent does the work: it composes ice creams scoop
 by scoop, picks the container and toppings, manages a cart, navigates between the
@@ -10,18 +10,14 @@ same in any language.
 
 ## Run it
 
-This example links the SDK from the monorepo (`"@useago/sdk": "file:../.."`), so
-build the SDK once from the repo root first:
-
 ```bash
-npm install && npm run build   # from the repo root
-cd examples/glacerie
+cd examples/glacier
 npm install
 npm run dev
 ```
 
 It defaults to the public demo backend (`https://playground.api.useago.com`, agent
-`glacerie`), so it answers out of the box. Point `VITE_AGO_BASE_URL` at your own
+`glacier`), so it answers out of the box. Point `VITE_AGO_BASE_URL` at your own
 domain (e.g. `https://YOUR-DOMAIN.api.useago.com`) to use your own agents.
 
 Open the app with `?dev` (e.g. `http://localhost:5173/?dev`) to mount the dev
@@ -46,4 +42,4 @@ logs every function the agent calls. See [`initDevPanel`](../../docs/general/dev
   `useAgoNavigation`, and renders the `<ChatWidget>` next to the live ice-cream
   preview and order recap.
 - `src/main.tsx` wraps the app in `<AgoProvider>`, which builds and shares the
-  `AgoClient` (base URL + `glacerie` agent).
+  `AgoClient` (base URL + `glacier` agent).

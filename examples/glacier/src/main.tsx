@@ -12,7 +12,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <AgoProvider
       baseUrl={import.meta.env.VITE_AGO_BASE_URL ?? 'https://playground.api.useago.com'}
-      defaultAgentId="glacerie"
+      defaultAgentId="glacier"
     >
       <BrowserRouter>
         <App />
