@@ -81,6 +81,59 @@ guards, auth and layouts keep working exactly as they do today.
 `react-router-dom` here is *your* router, not an SDK dependency:
 `useAgoNavigation` accepts any `(path: string) => void` function.
 
+## Turn a JavaScript function into an agent tool
+
+Keep your application logic as a regular JavaScript function, then describe its
+arguments with `defineFunction`. The description and JSON Schema tell the agent
+when and how to call it:
+
+```js
+import { defineFunction } from "@useago/sdk";
+
+async function getOrderStatus({ orderId }) {
+  const response = await fetch(`/api/orders/${orderId}`);
+  if (!response.ok) throw new Error("Order not found");
+
+  const order = await response.json();
+
+  return { orderId, status: order.status };
+}
+
+export const getOrderStatusTool = defineFunction({
+  name: "getOrderStatus",
+  description: "Get the current status of an order from its ID.",
+  parameters: {
+    type: "object",
+    properties: {
+      orderId: {
+        type: "string",
+        description: "The order ID shown to the user",
+      },
+    },
+    required: ["orderId"],
+  },
+  handler: getOrderStatus,
+});
+```
+
+Register the definition once to expose it to the agent. In React, pass it to
+the provider:
+
+```tsx
+<AgoProvider
+  baseUrl="https://api.example.com"
+  agent="support-agent"
+  tools={[getOrderStatusTool]}
+>
+  <ChatWidget />
+</AgoProvider>
+```
+
+With the core client, use `client.registerFunction(getOrderStatusTool)`.
+Whenever the agent calls the tool, the SDK runs your handler in the browser
+with the generated arguments and sends its return value back to the agent. Keep
+the return value small and structured so the agent can use it reliably.
+
 ## Show the source docs the agent retrieved
 
 Each assistant message carries the knowledge sources it used in `m.sources`
