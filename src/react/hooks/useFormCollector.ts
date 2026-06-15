@@ -83,7 +83,14 @@ export function useFormCollector<V = Record<string, unknown>>(
         : null,
     // Recreate only on identity-defining changes — see docstring.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [hasInlineSchema, options.name, schemaKey, submitKey, initialValuesKey],
+    [
+      hasInlineSchema,
+      options.name,
+      schemaKey,
+      submitKey,
+      initialValuesKey,
+      options.autoSubmit,
+    ],
   );
 
   // Fetched collector — loaded from the backend when no inline schema is given.
@@ -114,7 +121,14 @@ export function useFormCollector<V = Record<string, unknown>>(
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, hasInlineSchema, options.name, submitKey, initialValuesKey]);
+  }, [
+    client,
+    hasInlineSchema,
+    options.name,
+    submitKey,
+    initialValuesKey,
+    options.autoSubmit,
+  ]);
 
   const collector = hasInlineSchema ? inlineCollector : fetched.collector;
   const loading = hasInlineSchema ? false : fetched.loading;

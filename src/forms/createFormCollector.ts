@@ -61,6 +61,13 @@ export interface FormCollectorState<V = Record<string, unknown>> {
   values: Partial<V>;
   /** True once a submit succeeded. */
   submitted: boolean;
+  /**
+   * The submit response, set once `submitted` is true: the resolved value of the
+   * client `handler`, the parsed JSON of a client `url` POST, or the backend
+   * relay result. Lets a UI surface a server-returned message. Undefined until
+   * a submit succeeds (and after `reset()`).
+   */
+  submitResult?: unknown;
 }
 
 /** Completeness status derived from values + schema — computed on read, never stored. */
@@ -108,6 +115,16 @@ export interface CreateFormCollectorOptions<V = Record<string, unknown>> {
   submit?: SubmitConfig<V>;
   /** Pre-filled values. */
   initialValues?: Partial<V>;
+  /**
+   * Submit on its own as soon as every required field is filled, without waiting
+   * for the agent or a UI button. The form submits at most once. Defaults to
+   * `true` whenever a `submit` target is set: when on, no `submit_<name>` function
+   * is exposed, the form submits itself, and the agent never confirms a submit.
+   * Pass `autoSubmit: false` to keep the manual flow (expose `submit_<name>` and
+   * submit only on an explicit call). Has no effect on a collect-only form (no
+   * `submit` target); setting it `true` there is ignored with a warning.
+   */
+  autoSubmit?: boolean;
 }
 
 export interface FormCollector<V = Record<string, unknown>> {
@@ -151,6 +168,8 @@ export interface FormCollectorDefinition<V = Record<string, unknown>> {
   schema: FormCollectorSchema;
   /** Server-stored submit target, if any. Absent means collect-only. */
   submit?: SubmitConfig<V>;
+  /** Server-stored default for auto-submitting once the form is complete. */
+  autoSubmit?: boolean;
 }
 
 /**
@@ -303,6 +322,15 @@ export function createFormCollector<V = Record<string, unknown>>(
       ? { via: "client", url: options.submit }
       : false
     : (options.submit ?? false);
+  // Auto-submit is the default once a submit target exists: the form submits
+  // itself when complete. Pass autoSubmit: false to keep the manual submit_<name>
+  // flow. An explicit autoSubmit on a collect-only form is a no-op (warned).
+  if (options.autoSubmit === true && !submitConfig) {
+    logger.warn(
+      `FormCollector "${name}": autoSubmit is ignored because no submit target is configured.`,
+    );
+  }
+  const autoSubmit = (options.autoSubmit ?? true) && Boolean(submitConfig);
   const properties = schema.properties ?? {};
 
   // Keep only known fields and coerce them to their declared type.
@@ -397,13 +425,24 @@ export function createFormCollector<V = Record<string, unknown>>(
           submitValues as Record<string, unknown>,
         );
       }
-      store.set({ ...store.get(), submitted: true });
+      store.set({ ...store.get(), submitted: true, submitResult: result });
       return { ok: true, result };
     } catch (err) {
       const error = err instanceof Error ? err.message : "Submit failed";
       logger.error(`FormCollector "${name}" submit failed:`, err);
       return { ok: false, error };
     }
+  };
+
+  // When autoSubmit is on, submit as soon as the form is complete — at most once.
+  // Re-reads the store so it sees the patch that was just applied; the `submitted`
+  // guard stops a second fill (or setValues) from submitting again.
+  const maybeAutoSubmit = async (): Promise<FormSubmitResult | null> => {
+    if (!autoSubmit || !submitConfig) return null;
+    const { values, submitted } = store.get();
+    if (submitted) return null;
+    if (!deriveFormStatus(schema, values).complete) return null;
+    return doSubmit();
   };
 
   const updateFn: ClientFunctionDefinition = {
@@ -415,16 +454,29 @@ export function createFormCollector<V = Record<string, unknown>>(
     // Wire-only shape: SDK-only keys (e.g. requiredWhen) stripped and required
     // emptied so the agent can fill incrementally — see toWireParameters.
     parameters: toWireParameters(schema),
-    handler: (args) => {
+    handler: async (args) => {
       const next = applyPatch(coerce(args));
       const { missing } = deriveFormStatus(schema, next.values);
-      return { ok: true, values: next.values, missing };
+      const submission = await maybeAutoSubmit();
+      if (!submission) return { ok: true, values: next.values, missing };
+      // Tell the agent the form auto-submitted so it stops asking for fields.
+      return submission.ok
+        ? { ok: true, values: next.values, missing, submitted: true }
+        : {
+            ok: true,
+            values: next.values,
+            missing,
+            submitted: false,
+            submitError: submission.error,
+          };
     },
   };
 
   const functions: ClientFunctionDefinition[] = [updateFn];
 
-  if (submitConfig) {
+  // With autoSubmit the form submits itself on completion, so no submit tool is
+  // exposed; the `submit()` method (e.g. a UI button) still works.
+  if (submitConfig && !autoSubmit) {
     functions.push({
       name: `submit_${name}`,
       description:
@@ -477,9 +529,11 @@ export function createFormCollector<V = Record<string, unknown>>(
   const contextProvider = (): ContextEntry => {
     const { values, submitted } = store.get();
     const { missing, complete } = deriveFormStatus(schema, values);
-    const submitHint = submitConfig
-      ? ` When nothing is missing and the user confirms, call submit_${name}.`
-      : "";
+    const submitHint = !submitConfig
+      ? ""
+      : autoSubmit
+        ? ` The form is submitted automatically as soon as every required field is filled, so there is no submit function to call.`
+        : ` When nothing is missing and the user confirms, call submit_${name}.`;
     const phase = submitted
       ? `The "${name}" form has been submitted.`
       : `You are currently collecting information from the user to fill the "${name}" form.`;
@@ -545,6 +599,9 @@ export function createFormCollector<V = Record<string, unknown>>(
     getValues: () => store.get().values,
     setValues: (patch: Partial<V>) => {
       applyPatch(coerce(patch as Record<string, unknown>));
+      // Fire-and-forget: a UI-driven fill that completes the form auto-submits
+      // too. doSubmit never throws (it returns a result), so void is safe.
+      void maybeAutoSubmit();
     },
     reset: () => {
       store.set({
@@ -581,5 +638,6 @@ export async function loadFormCollector<V = Record<string, unknown>>(
     schema: options.schema ?? def.schema,
     submit: options.submit ?? def.submit,
     initialValues: options.initialValues,
+    autoSubmit: options.autoSubmit ?? def.autoSubmit,
   });
 }

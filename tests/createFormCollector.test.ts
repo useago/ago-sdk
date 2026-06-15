@@ -6,6 +6,7 @@ import {
   loadFormCollector,
   type FormCollectorSchema,
 } from "../src/forms/createFormCollector";
+import { logger } from "../src/utils/logger";
 
 const schema: FormCollectorSchema = {
   type: "object",
@@ -17,14 +18,19 @@ const schema: FormCollectorSchema = {
   required: ["product", "quantity"],
 };
 
+// autoSubmit defaults to true once a submit target is set; these tests exercise
+// the manual submit_<name> flow, so they opt out with autoSubmit: false. The
+// default (auto-submit) is covered by the dedicated "autoSubmit" tests below.
 function makeCollector(
-  submit?: Parameters<typeof createFormCollector>[0]["submit"]
+  submit?: Parameters<typeof createFormCollector>[0]["submit"],
+  autoSubmit = false
 ) {
   return createFormCollector({
     name: "order",
     description: "The order the user wants to place.",
     schema,
     submit,
+    autoSubmit,
   });
 }
 
@@ -108,6 +114,12 @@ describe("createFormCollector", () => {
     expect(handler).toHaveBeenCalledWith({ product: "Widget", quantity: 2 });
     expect(ok).toEqual({ ok: true, result: { id: 42 } });
     expect(c.store.get().submitted).toBe(true);
+    // The response is kept in the store so a UI can echo a server message.
+    expect(c.store.get().submitResult).toEqual({ id: 42 });
+
+    // reset clears it again.
+    c.reset();
+    expect(c.store.get().submitResult).toBeUndefined();
   });
 
   it("accepts a bare URL string as shorthand for client submit", async () => {
@@ -122,6 +134,7 @@ describe("createFormCollector", () => {
       description: "An order.",
       schema,
       submit: "/api/orders",
+      autoSubmit: false,
     });
     expect(c.functions.map((f) => f.name)).toEqual(["update_order", "submit_order"]);
 
@@ -160,6 +173,96 @@ describe("createFormCollector", () => {
 
     uninstall();
     client.destroy();
+  });
+
+  it("auto-submits by default once complete and exposes no submit function", async () => {
+    const handler = vi.fn(async () => ({ id: 7 }));
+    // autoSubmit omitted on purpose: it defaults to true when a submit target is set.
+    const c = createFormCollector({
+      name: "order",
+      description: "An order.",
+      schema,
+      submit: { via: "client", handler },
+    });
+
+    // No submit_ tool — the form submits itself.
+    expect(c.functions.map((f) => f.name)).toEqual(["update_order"]);
+
+    // An incomplete fill does not submit.
+    const partial = await c.functions[0].handler({ product: "Widget" });
+    expect(handler).not.toHaveBeenCalled();
+    expect(partial).toEqual({
+      ok: true,
+      values: { product: "Widget" },
+      missing: ["quantity"],
+    });
+
+    // The fill that completes the form triggers the submit and reports it.
+    const done = await c.functions[0].handler({ quantity: 2 });
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith({ product: "Widget", quantity: 2 });
+    expect(done).toMatchObject({ ok: true, submitted: true });
+    expect(c.store.get().submitted).toBe(true);
+
+    // A later fill does not submit again.
+    await c.functions[0].handler({ express: true });
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("autoSubmit also fires on a UI-driven setValues that completes the form", async () => {
+    const handler = vi.fn(async () => ({ id: 1 }));
+    const c = createFormCollector({
+      name: "order",
+      description: "An order.",
+      schema,
+      submit: { via: "client", handler },
+      autoSubmit: true,
+    });
+
+    c.setValues({ product: "Widget", quantity: 3 });
+    // setValues is fire-and-forget; let the microtask flush.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(handler).toHaveBeenCalledWith({ product: "Widget", quantity: 3 });
+    expect(c.store.get().submitted).toBe(true);
+  });
+
+  it("autoSubmit warns and stays inert without a submit target", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    logger.enable();
+    const c = createFormCollector({
+      name: "order",
+      description: "An order.",
+      schema,
+      autoSubmit: true,
+    });
+    logger.disable();
+    expect(warn).toHaveBeenCalled();
+    expect(c.functions.map((f) => f.name)).toEqual(["update_order"]);
+
+    const res = await c.functions[0].handler({ product: "Widget", quantity: 2 });
+    // No submit happened; just the normal update result.
+    expect(res).toEqual({
+      ok: true,
+      values: { product: "Widget", quantity: 2 },
+      missing: [],
+    });
+    expect(c.store.get().submitted).toBe(false);
+
+    warn.mockRestore();
+  });
+
+  it("autoSubmit tells the agent in context that the form submits itself", () => {
+    const c = createFormCollector({
+      name: "order",
+      description: "An order.",
+      schema,
+      submit: { via: "backend" },
+      autoSubmit: true,
+    });
+    expect(c.contextProvider().description).toContain("submitted automatically");
+    expect(c.contextProvider().description).not.toContain("call submit_order");
   });
 
   it("install registers functions + dynamic context, uninstall removes them", () => {
@@ -588,7 +691,8 @@ describe("loadFormCollector", () => {
   it("builds a collector from the backend definition", async () => {
     const client = { getFormCollector: vi.fn().mockResolvedValue(definition) };
 
-    const c = await loadFormCollector(client, { name: "order" });
+    // autoSubmit: false keeps the manual submit_ flow (it defaults to true).
+    const c = await loadFormCollector(client, { name: "order", autoSubmit: false });
 
     expect(client.getFormCollector).toHaveBeenCalledWith("order");
     expect(c.name).toBe("order");

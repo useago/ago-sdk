@@ -421,6 +421,11 @@ collector.install(ago); // register functions + context on a client
   `{ via: "backend" }` (the destination is resolved server-side from the
   form's stored definition; the client calls `ago.submitFormCollector()`), or
   `false`/omitted to only collect values.
+- `autoSubmit` (default `true` when a `submit` target is set) submits the form
+  on its own as soon as every required field is filled (at most once), so there
+  is no confirmation step and no `submit_<name>` function is exposed. Pass
+  `autoSubmit: false` to keep the manual flow (the agent calls `submit_<name>`
+  after the user confirms). Collect-only forms never auto-submit.
 - Fields can declare `requiredWhen` conditions; requirements are re-evaluated
   as values change.
 - `deriveFormStatus(schema, values)` → `FormCollectorStatus` computes which

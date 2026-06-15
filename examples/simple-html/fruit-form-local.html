@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script type="importmap">
+      {
+        "imports": {
+          "@useago/sdk/widget": "../../dist/widget.js",
+          "@useago/sdk/devtools": "../../dist/devtools.js"
+        }
+      }
+    </script>
+    <title>AGO · Rachat de crédits (schéma défini dans le backend)</title>
+
+    <style>
+      /* Minimal: just center the widget. Everything inside #ago-chat is AGO's. */
+      #ago-chat {
+        max-width: 560px;
+        margin: 40px auto;
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- The widget owns everything inside this element (header, stream, input). -->
+    <div id="ago-chat"></div>
+
+    <!--
+      Same credit-consolidation flow as `credit-form-simple.html`, but the form's
+      schema is NOT written here. It lives in the backend ("credit" form collector,
+      created under AI Studio → Form Collectors) and the SDK fetches it by name when
+      the widget mounts (GET /api/sdk/v1/forms/credit, via loadFormCollector).
+
+      So the page carries no field list: change a field in the admin and every page
+      that references { name: "credit" } picks it up on the next load — no redeploy.
+
+      Imports come from the LOCAL build in `dist/` (run `npm run build` at the repo
+      root first) so this page exercises the in-tree SDK changes, e.g. `autoSubmit`.
+    -->
+    <script type="module">
+      import { mountChatWidget } from "@useago/sdk/widget";
+      import { initDevPanel } from "@useago/sdk/devtools";
+
+      // ─── Configuration ────────────────────────────────────────────────
+      const AGENT_ID = "fruit";
+
+      // ─── Mount the widget ─────────────────────────────────────────────
+      // mountChatWidget builds its own AgoClient from `config`, renders the full
+      // chat panel, streams replies, and installs the "credit" form collector —
+      // here resolved from the backend because the entry is just `{ name: "credit" }`
+      // (no inline `schema`). A full config with `schema` would define it inline.
+      const widget = mountChatWidget("#ago-chat", {
+        config: {
+          baseUrl: window.AGO_BASE_URL ?? "http://localhost:8000",
+          agent: AGENT_ID,
+        },
+        persistConversation: true,
+        title: "Rachat de crédits",
+        welcomeMessage:
+          "Bonjour 👋 Je vous accompagne dans votre demande d'achat de fruits",
+        placeholder: "Écris un message…",
+        // Visual confirmation shown in the chat once the form auto-submits. The
+        // widget shows a `message` from the submit response when the backend
+        // returns one; otherwise it falls back to this string.
+        formSubmittedMessage: "Votre demande a bien été envoyée",
+        // Backend-defined: the description, schema and submit target all come from
+        // the "fruit_seller" definition stored in AGO. The form auto-submits by
+        // default once every required field is filled (pass autoSubmit: false to
+        // keep the manual submit step instead).
+        forms: [{ name: "fruit_seller" }],
+      });
+
+      // ─── Dev panel (opt-in via ?dev) ──────────────────────────────────
+      // Once the definition loads and the collector installs, the panel renders its
+      // live state (values, missing, complete) and logs each update_credit call.
+      const DEV = new URLSearchParams(location.search).has("dev");
+      if (DEV) initDevPanel({ client: widget.client });
+    </script>
+  </body>
+</html>
