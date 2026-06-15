@@ -84,6 +84,24 @@ describe("mountChatWidget", () => {
     client.destroy();
   });
 
+  it("renders the message input at >=16px so iOS Safari does not zoom on focus", () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+
+    const widget = mountChatWidget(root, { client, title: "Helpdesk" });
+
+    const textarea = root.querySelector("textarea");
+    expect(textarea).not.toBeNull();
+    // A focused field under 16px makes iOS zoom the whole page in, which causes
+    // horizontal scrolling and pushes the Send button off-screen on mobile.
+    expect(parseFloat(textarea!.style.fontSize)).toBeGreaterThanOrEqual(16);
+
+    widget.destroy();
+    root.remove();
+    client.destroy();
+  });
+
   it("installs form collectors on mount and removes them on destroy", () => {
     const client = new AgoClient({ baseUrl: "https://example.test" });
     const root = document.createElement("div");

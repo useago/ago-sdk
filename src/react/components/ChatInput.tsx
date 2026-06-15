@@ -170,7 +170,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             resize: "none",
             outline: "none",
             fontFamily: "inherit",
-            fontSize: "14px",
+            fontSize: "16px",
             color: "#30373e",
             backgroundColor: "#f8f8f8",
             transition: "border-color 0.15s",
@@ -196,7 +196,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             cursor:
               disabled || !canSend ? "not-allowed" : "pointer",
             fontWeight: 500,
-            fontSize: "14px",
+            fontSize: "16px",
             transition: "background-color 0.15s",
           }}
         >

@@ -198,7 +198,7 @@ export const Message: React.FC<MessageProps> = ({
           backgroundColor: isUser ? "#03182f" : "transparent",
           color: isUser ? "#fff" : "#30373e",
           wordBreak: "break-word",
-          fontSize: "14px",
+          fontSize: "16px",
           lineHeight: "1.6",
         }}
       >
