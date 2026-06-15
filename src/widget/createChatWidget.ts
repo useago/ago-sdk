@@ -605,7 +605,7 @@ export function mountChatWidget(
       backgroundColor: isUser ? BRAND_COLOR : "transparent",
       color: isUser ? BRAND_TEXT_COLOR : TEXT_COLOR,
       wordBreak: "break-word",
-      fontSize: "14px",
+      fontSize: "16px",
       lineHeight: "1.6",
     });
     bubble.className = "ago-message__content";
@@ -672,7 +672,7 @@ export function mountChatWidget(
         textAlign: "center",
         color: MUTED_TEXT_COLOR,
         padding: "24px 16px",
-        fontSize: "14px",
+        fontSize: "16px",
         lineHeight: "1.5",
       });
       welcome.appendChild(renderMarkdown(welcomeMessage));
@@ -1024,7 +1024,9 @@ function buildInput(args: BuildInputArgs): {
     padding: "10px 12px",
     border: `1px solid ${BORDER_COLOR}`,
     borderRadius: "12px",
-    fontSize: "14px",
+    // Keep at >=16px: iOS Safari auto-zooms the page when a focused field is
+    // smaller
+    fontSize: "16px",
     fontFamily: FONT_VAR,
     lineHeight: "1.4",
     maxHeight: "120px",
@@ -1040,7 +1042,7 @@ function buildInput(args: BuildInputArgs): {
     borderRadius: "12px",
     backgroundColor: BRAND_COLOR,
     color: BRAND_TEXT_COLOR,
-    fontSize: "14px",
+    fontSize: "16px",
     fontWeight: "500",
     cursor: "pointer",
   });

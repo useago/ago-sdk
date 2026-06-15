@@ -220,7 +220,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
               textAlign: "center",
               color: "#6b6d6f",
               padding: "24px 16px",
-              fontSize: "14px",
+              fontSize: "16px",
               lineHeight: "1.5",
             }}
           >
