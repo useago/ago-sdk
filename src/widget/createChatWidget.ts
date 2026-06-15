@@ -5,6 +5,7 @@ import {
   createFormCollector,
   loadFormCollector,
   type CreateFormCollectorOptions,
+  type FormCollector,
   type LoadFormCollectorOptions,
 } from "../forms/createFormCollector";
 import {
@@ -131,6 +132,16 @@ export interface MountChatWidgetOptions {
    */
   forms?: Array<CreateFormCollectorOptions | LoadFormCollectorOptions>;
   /**
+   * The confirmation notice shown in the chat once a form is submitted (auto-submit
+   * or a manual `submit_<name>`), a small success block appended below the
+   * conversation. By default the notice shows a `message` string returned by the
+   * submit response (POST body / handler result / backend relay) when present, and
+   * otherwise falls back to this string ("Form submitted." by default). Pass a
+   * function to build the text from the raw submit response yourself; return a
+   * nullish value to fall back to the default text.
+   */
+  formSubmittedMessage?: string | ((result: unknown) => string | null | undefined);
+  /**
    * How clicking a suggested follow-up reply behaves. Defaults to sending the
    * reply as a new user message. Pass a handler to override, or `false` to
    * render the suggestions as non-interactive.
@@ -232,6 +243,31 @@ function div(styles: Partial<CSSStyleDeclaration> = {}): HTMLDivElement {
   return el;
 }
 
+/** Fallback text for the form-submitted notice when the response carries none. */
+const DEFAULT_FORM_SUBMITTED_MESSAGE = "Form submitted.";
+
+/**
+ * Pull a human message out of a submit response so the notice can echo what the
+ * server said. Handles a bare string, a top-level `{ message }`, and the backend
+ * relay's `{ status, result }` wrapper (message nested under `result`). Returns
+ * null when there's nothing usable, so the caller can fall back to a default.
+ */
+function messageFromResult(result: unknown): string | null {
+  if (typeof result === "string") return result || null;
+  if (!result || typeof result !== "object") return null;
+  const record = result as Record<string, unknown>;
+  if (typeof record.message === "string" && record.message) {
+    return record.message;
+  }
+  const inner = record.result;
+  if (typeof inner === "string" && inner) return inner;
+  if (inner && typeof inner === "object") {
+    const nested = (inner as Record<string, unknown>).message;
+    if (typeof nested === "string" && nested) return nested;
+  }
+  return null;
+}
+
 const KEYFRAMES_ID = "ago-chat-widget-keyframes";
 
 /** Inject the streaming-dot keyframes once per document. */
@@ -307,6 +343,7 @@ export function mountChatWidget(
     theme,
     loadThreads = false,
     forms,
+    formSubmittedMessage = DEFAULT_FORM_SUBMITTED_MESSAGE,
     onFollowUpClick,
     onMessageSent,
     onMessageReceived,
@@ -342,6 +379,23 @@ export function mountChatWidget(
   let messages: AgoMessage[] = [];
   let isLoading = false;
   let errorMessage: string | null = null;
+  // Resolved confirmation text for each submitted form, in submit order — each
+  // renders a "form submitted" notice appended below the conversation.
+  const formNotices: string[] = [];
+
+  // Build the notice text for a submit response: a custom function wins, else a
+  // server-returned `message`, else the configured/default fallback string.
+  function resolveNoticeText(result: unknown): string {
+    if (typeof formSubmittedMessage === "function") {
+      const custom = formSubmittedMessage(result);
+      if (typeof custom === "string" && custom) return custom;
+    }
+    const fromResponse = messageFromResult(result);
+    if (fromResponse) return fromResponse;
+    return typeof formSubmittedMessage === "string"
+      ? formSubmittedMessage
+      : DEFAULT_FORM_SUBMITTED_MESSAGE;
+  }
   // The visitor's conversation list, exposed on the handle. Loaded on mount and
   // kept in place (same array reference) so consumers can hold onto `widget.threads`.
   const threads: Conversation[] = [];
@@ -665,6 +719,33 @@ export function mountChatWidget(
     return wrap;
   }
 
+  // A success notice confirming a form was sent — mirrors the error block's shape
+  // (a styled block appended to the message area) but in green.
+  function renderFormNotice(text: string): HTMLElement {
+    const el = div({
+      display: "flex",
+      alignItems: "center",
+      gap: "8px",
+      padding: "10px 14px",
+      backgroundColor: "#f0fdf4",
+      color: "#15803d",
+      borderRadius: MESSAGE_RADIUS,
+      marginTop: "8px",
+      fontSize: "13px",
+      border: "1px solid #bbf7d0",
+    });
+    el.className = "ago-form-notice";
+    el.setAttribute("role", "status");
+    const check = document.createElement("span");
+    check.textContent = "✓";
+    check.setAttribute("aria-hidden", "true");
+    css(check, { fontWeight: "700" });
+    const label = document.createElement("span");
+    label.textContent = text;
+    el.append(check, label);
+    return el;
+  }
+
   function render(): void {
     messagesEl.replaceChildren();
     if (messages.length === 0) {
@@ -683,6 +764,10 @@ export function mountChatWidget(
           renderMessage(message, index === messages.length - 1),
         );
       });
+    }
+    // One confirmation per submitted form, below the conversation.
+    for (const text of formNotices) {
+      messagesEl.appendChild(renderFormNotice(text));
     }
     if (errorMessage) {
       const err = div({
@@ -780,16 +865,28 @@ export function mountChatWidget(
   // fetched from the backend and installed once they resolve.
   const uninstallForms: Array<() => void> = [];
   let formsDestroyed = false;
+  // Install a collector and watch its store: when `submitted` flips to true (auto-
+  // submit or a manual submit_<name>), append a confirmation notice to the chat.
+  const installForm = (collector: FormCollector): void => {
+    if (formsDestroyed) return;
+    uninstallForms.push(collector.install(client));
+    let wasSubmitted = collector.store.get().submitted;
+    const unsubscribe = collector.store.subscribe((state) => {
+      if (state.submitted && !wasSubmitted) {
+        // Echo the server's message when the submit response carries one.
+        formNotices.push(resolveNoticeText(state.submitResult));
+        render();
+      }
+      wasSubmitted = state.submitted;
+    });
+    uninstallForms.push(unsubscribe);
+  };
   for (const f of forms ?? []) {
     if (f.schema != null) {
-      uninstallForms.push(
-        createFormCollector(f as CreateFormCollectorOptions).install(client),
-      );
+      installForm(createFormCollector(f as CreateFormCollectorOptions));
     } else {
       loadFormCollector(client, f as LoadFormCollectorOptions)
-        .then((collector) => {
-          if (!formsDestroyed) uninstallForms.push(collector.install(client));
-        })
+        .then((collector) => installForm(collector))
         // A missing/failed form definition shouldn't break the widget.
         .catch(() => {});
     }

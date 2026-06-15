@@ -100,6 +100,69 @@ describe("mountChatWidget", () => {
     client.destroy();
   });
 
+  // Drives a form to completion through its registered update_ function, the way
+  // the agent would, which auto-submits it (the default).
+  async function completeOrderForm(client: AgoClient): Promise<void> {
+    const registry = (
+      client as unknown as {
+        functionRegistry: {
+          execute: (name: string, args: Record<string, unknown>) => Promise<unknown>;
+        };
+      }
+    ).functionRegistry;
+    await registry.execute("update_order", { product: "Widget", quantity: 2 });
+  }
+
+  it("shows a confirmation notice with the configured fallback text on submit", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+
+    // Response carries no `message`, so the fallback string is used.
+    const handler = vi.fn(async () => ({ ok: true }));
+    const widget = mountChatWidget(root, {
+      client,
+      formSubmittedMessage: "Votre demande a bien été envoyée.",
+      forms: [{ ...orderForm, submit: { via: "client", handler } }],
+    });
+
+    expect(root.querySelector(".ago-form-notice")).toBeNull();
+    await completeOrderForm(client);
+
+    expect(handler).toHaveBeenCalledWith({ product: "Widget", quantity: 2 });
+    const notice = root.querySelector(".ago-form-notice");
+    expect(notice?.textContent).toContain("Votre demande a bien été envoyée.");
+
+    widget.destroy();
+    root.remove();
+    client.destroy();
+  });
+
+  it("echoes the message returned by the submit response", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+
+    // The POST handler returns a server message — the notice should show it,
+    // overriding the static fallback.
+    const handler = vi.fn(async () => ({ message: "Commande #1234 confirmée." }));
+    const widget = mountChatWidget(root, {
+      client,
+      formSubmittedMessage: "Form submitted.",
+      forms: [{ ...orderForm, submit: { via: "client", handler } }],
+    });
+
+    await completeOrderForm(client);
+
+    const notice = root.querySelector(".ago-form-notice");
+    expect(notice?.textContent).toContain("Commande #1234 confirmée.");
+    expect(notice?.textContent).not.toContain("Form submitted.");
+
+    widget.destroy();
+    root.remove();
+    client.destroy();
+  });
+
   it("renders clickable suggested replies that send the reply", async () => {
     const client = new AgoClient({ baseUrl: "https://example.test" });
     const sent: string[] = [];

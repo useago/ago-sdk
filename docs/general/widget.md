@@ -87,6 +87,7 @@ widget.destroy(); // removes listeners, uninstalls forms, clears the DOM
 | `showAgentName?`       | `boolean`                                        | `false`                          |
 | `theme?`               | `WidgetTheme`                                    | — (see [Theming](#theming))      |
 | `forms?`               | `Array<CreateFormCollectorOptions \| LoadFormCollectorOptions>` | —                  |
+| `formSubmittedMessage?`| `string \| ((result) => string \| null)`         | server `message`, else `"Form submitted."` |
 | `onFollowUpClick?`     | `((reply) => void) \| false`                     | sends the reply                  |
 | `onMessageSent?`       | `(content) => void`                              | —                                |
 | `onMessageReceived?`   | `({ id, content }) => void`                      | —                                |
@@ -100,6 +101,10 @@ mount and refreshes after each turn only when `loadThreads: true`; otherwise it 
 until you call `refreshThreads()`. To debug, hand `widget.client` to the [dev panel](devtools.md)
 (`initDevPanel({ client: widget.client })`); it shows the installed forms' live state and every
 function the agent calls.
+
+> When a form is submitted (forms auto-submit once complete by default), the widget
+> appends a green confirmation notice below the conversation. It shows a `message`
+> string from the submit response when present, otherwise `formSubmittedMessage`.
 
 > Message content is rendered as **GitHub-flavored markdown** (headings, bold,
 > italic, strikethrough, inline + fenced code, links, images, ordered/nested

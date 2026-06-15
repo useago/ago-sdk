@@ -55,7 +55,7 @@ describe("ChatWidget forms integration", () => {
     client.destroy();
   });
 
-  it("registers a submit function when a submit target is configured", async () => {
+  it("registers a submit function when a submit target is configured (manual mode)", async () => {
     const client = new AgoClient({ baseUrl: "https://example.test" });
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -65,7 +65,14 @@ describe("ChatWidget forms integration", () => {
       root.render(
         <AgoProvider client={client}>
           <ChatWidget
-            forms={[{ ...orderForm, submit: { via: "client", url: "/api/orders" } }]}
+            // autoSubmit: false keeps the manual submit_ flow (it defaults to true).
+            forms={[
+              {
+                ...orderForm,
+                submit: { via: "client", url: "/api/orders" },
+                autoSubmit: false,
+              },
+            ]}
           />
         </AgoProvider>,
       );
