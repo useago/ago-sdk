@@ -379,7 +379,22 @@ export function createFormCollector<V = Record<string, unknown>>(
 
   let boundClient: AgoClient | null = null;
 
-  const doSubmit = async (): Promise<FormSubmitResult> => {
+  // Surface a submit failure on the client event bus (no-op until installed).
+  const emitFormError = (values: V, error: string): void => {
+    boundClient?.emitFormEvent("form:error", {
+      name,
+      values: values as Record<string, unknown>,
+      error,
+    });
+  };
+
+  // De-dupe concurrent submissions: while one is in flight every caller shares the
+  // same promise, so parallel agent update_ calls / rapid setValues / a double-clicked
+  // button collapse to a single request. The latch clears when the request settles;
+  // the `submitted` guard in maybeAutoSubmit then stops any later auto-submit.
+  let pendingSubmit: Promise<FormSubmitResult> | null = null;
+
+  const runSubmit = async (): Promise<FormSubmitResult> => {
     const { values } = store.get();
     const { complete, missing } = deriveFormStatus(schema, values);
     if (!complete) {
@@ -406,7 +421,9 @@ export function createFormCollector<V = Record<string, unknown>>(
             body: JSON.stringify(submitValues),
           });
           if (!res.ok) {
-            return { ok: false, error: `Submit failed: HTTP ${res.status}` };
+            const error = `Submit failed: HTTP ${res.status}`;
+            emitFormError(submitValues, error);
+            return { ok: false, error };
           }
           result = await res.json().catch(() => undefined);
         }
@@ -426,12 +443,30 @@ export function createFormCollector<V = Record<string, unknown>>(
         );
       }
       store.set({ ...store.get(), submitted: true, submitResult: result });
+      boundClient?.emitFormEvent("form:submitted", {
+        name,
+        values: submitValues as Record<string, unknown>,
+        result,
+      });
       return { ok: true, result };
     } catch (err) {
       const error = err instanceof Error ? err.message : "Submit failed";
       logger.error(`FormCollector "${name}" submit failed:`, err);
+      emitFormError(submitValues, error);
       return { ok: false, error };
     }
+  };
+
+  const doSubmit = (): Promise<FormSubmitResult> => {
+    if (pendingSubmit) return pendingSubmit;
+    pendingSubmit = (async () => {
+      try {
+        return await runSubmit();
+      } finally {
+        pendingSubmit = null;
+      }
+    })();
+    return pendingSubmit;
   };
 
   // When autoSubmit is on, submit as soon as the form is complete — at most once.

@@ -181,6 +181,73 @@ describe("mountChatWidget", () => {
     client.destroy();
   });
 
+  it("forwards a successful submit to onFormSubmitted with the result", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+
+    const onFormSubmitted = vi.fn();
+    const widget = mountChatWidget(root, {
+      client,
+      forms: [
+        {
+          ...orderForm,
+          submit: { via: "client", handler: async () => ({ id: 42 }) },
+        },
+      ],
+      onFormSubmitted,
+    });
+
+    await completeOrderForm(client);
+
+    expect(onFormSubmitted).toHaveBeenCalledWith({
+      name: "order",
+      values: { product: "Widget", quantity: 2 },
+      result: { id: 42 },
+    });
+
+    widget.destroy();
+    root.remove();
+    client.destroy();
+  });
+
+  it("forwards a failed submit to onFormError and shows no notice", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+
+    const onFormError = vi.fn();
+    const widget = mountChatWidget(root, {
+      client,
+      forms: [
+        {
+          ...orderForm,
+          submit: {
+            via: "client",
+            handler: async () => {
+              throw new Error("boom");
+            },
+          },
+        },
+      ],
+      onFormError,
+    });
+
+    await completeOrderForm(client);
+
+    expect(onFormError).toHaveBeenCalledWith({
+      name: "order",
+      values: { product: "Widget", quantity: 2 },
+      error: "boom",
+    });
+    // Failures fire the event only; the chat shows no notice.
+    expect(root.querySelector(".ago-form-notice")).toBeNull();
+
+    widget.destroy();
+    root.remove();
+    client.destroy();
+  });
+
   it("renders clickable suggested replies that send the reply", async () => {
     const client = new AgoClient({ baseUrl: "https://example.test" });
     const sent: string[] = [];

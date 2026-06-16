@@ -91,6 +91,8 @@ widget.destroy(); // removes listeners, uninstalls forms, clears the DOM
 | `onFollowUpClick?`     | `((reply) => void) \| false`                     | sends the reply                  |
 | `onMessageSent?`       | `(content) => void`                              | —                                |
 | `onMessageReceived?`   | `({ id, content }) => void`                      | —                                |
+| `onFormSubmitted?`     | `({ name, values, result }) => void`             | —                                |
+| `onFormError?`         | `({ name, values, error }) => void`              | —                                |
 
 `mountChatWidget` returns a handle:
 `{ client, element, sendMessage, session, threads, refreshThreads, destroy }` (`session` is
@@ -105,6 +107,27 @@ function the agent calls.
 > When a form is submitted (forms auto-submit once complete by default), the widget
 > appends a green confirmation notice below the conversation. It shows a `message`
 > string from the submit response when present, otherwise `formSubmittedMessage`.
+
+To run your own logic on submit (and to catch failures, which show no notice), pass
+`onFormSubmitted` / `onFormError`. `result` is the raw submit response (the
+third-party API's answer):
+
+```js
+mountChatWidget("#ago-chat", {
+  config: { baseUrl: "https://YOUR-DOMAIN.api.useago.com" },
+  forms: [{ name: "credit" }],
+  onFormSubmitted: ({ name, values, result }) => {
+    console.log(name, "submitted", result);
+  },
+  onFormError: ({ name, error }) => {
+    console.warn(name, "submit failed:", error);
+  },
+});
+```
+
+These forward the client's `form:submitted` / `form:error` events, so
+`widget.client.on("form:submitted", ...)` works too (see
+[Events](events-and-streaming.md)).
 
 > Message content is rendered as **GitHub-flavored markdown** (headings, bold,
 > italic, strikethrough, inline + fenced code, links, images, ordered/nested

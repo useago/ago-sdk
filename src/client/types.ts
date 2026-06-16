@@ -275,6 +275,27 @@ export interface AgoClientEvents {
     result: unknown;
     error?: string;
   };
+  /**
+   * A form collector submitted successfully. `result` is the raw submit response
+   * (POST body / handler return value / backend relay result) — the third-party
+   * API's answer. `values` is the submitted field set, `name` the collector name.
+   */
+  "form:submitted": {
+    name: string;
+    values: Record<string, unknown>;
+    result: unknown;
+  };
+  /**
+   * A form collector submit was attempted and failed at the network/server level
+   * (HTTP non-2xx, or a thrown handler/fetch). `error` is the message. Validation
+   * pre-checks (missing required fields, no submit target) are NOT errors and do
+   * not fire this — they are returned to the caller as `{ ok: false }`.
+   */
+  "form:error": {
+    name: string;
+    values: Record<string, unknown>;
+    error: string;
+  };
   "connection:status": {
     connected: boolean;
   };

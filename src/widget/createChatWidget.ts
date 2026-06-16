@@ -1,6 +1,11 @@
 import { AgoClient } from "../client/AgoClient";
 import { AgoError } from "../client/errors";
-import type { AgoConfig, AgoMessage, Conversation } from "../client/types";
+import type {
+  AgoClientEvents,
+  AgoConfig,
+  AgoMessage,
+  Conversation,
+} from "../client/types";
 import {
   createFormCollector,
   loadFormCollector,
@@ -151,6 +156,25 @@ export interface MountChatWidgetOptions {
   onMessageSent?: (content: string) => void;
   /** Called when an assistant message completes. */
   onMessageReceived?: (message: { id: string; content: string }) => void;
+  /**
+   * Called when a form collector submits successfully. `result` is the raw submit
+   * response (the third-party API's answer); `values` are the submitted fields.
+   * Forwards the client's `form:submitted` event.
+   */
+  onFormSubmitted?: (data: {
+    name: string;
+    values: Record<string, unknown>;
+    result: unknown;
+  }) => void;
+  /**
+   * Called when a form collector submit fails at the network/server level.
+   * Forwards the client's `form:error` event. No notice is shown in the chat.
+   */
+  onFormError?: (data: {
+    name: string;
+    values: Record<string, unknown>;
+    error: string;
+  }) => void;
 }
 
 /** Handle returned by {@link mountChatWidget}. */
@@ -347,6 +371,8 @@ export function mountChatWidget(
     onFollowUpClick,
     onMessageSent,
     onMessageReceived,
+    onFormSubmitted,
+    onFormError,
   } = options;
 
   if (!options.client && !options.config?.baseUrl) {
@@ -860,6 +886,17 @@ export function mountChatWidget(
   client.on("message:complete", onComplete);
   client.on("message:error", onError);
 
+  // Forward form submit outcomes to the optional callbacks. The success notice is
+  // still driven by the collector store below; these are additive (and the only
+  // way to observe a failure, which never touches the store).
+  const onFormSubmittedEvent = (
+    data: AgoClientEvents["form:submitted"],
+  ): void => onFormSubmitted?.(data);
+  const onFormErrorEvent = (data: AgoClientEvents["form:error"]): void =>
+    onFormError?.(data);
+  if (onFormSubmitted) client.on("form:submitted", onFormSubmittedEvent);
+  if (onFormError) client.on("form:error", onFormErrorEvent);
+
   // ── Form collectors ────────────────────────────────────────────────
   // Inline configs (with `schema`) install synchronously; name-only entries are
   // fetched from the backend and installed once they resolve.
@@ -1011,6 +1048,8 @@ export function mountChatWidget(
       client.off("message:answer-complete", onAnswerComplete);
       client.off("message:complete", onComplete);
       client.off("message:error", onError);
+      if (onFormSubmitted) client.off("form:submitted", onFormSubmittedEvent);
+      if (onFormError) client.off("form:error", onFormErrorEvent);
       formsDestroyed = true;
       uninstallForms.forEach((fn) => fn());
       mountInto.remove();

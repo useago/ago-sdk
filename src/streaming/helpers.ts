@@ -73,6 +73,35 @@ export function onToolCall(
 }
 
 /**
+ * Subscribe to successful form collector submissions. `result` is the submit
+ * response (the third-party API's answer). Returns an unsubscribe function.
+ *
+ * ```ts
+ * const unsub = onFormSubmitted(client, ({ name, result }) => {
+ *   console.log(name, "submitted", result);
+ * });
+ * ```
+ */
+export function onFormSubmitted(
+  client: AgoClient,
+  callback: (data: AgoClientEvents["form:submitted"]) => void
+): () => void {
+  client.on("form:submitted", callback);
+  return () => client.off("form:submitted", callback);
+}
+
+/**
+ * Subscribe to failed form collector submissions (network/server failures).
+ */
+export function onFormError(
+  client: AgoClient,
+  callback: (data: AgoClientEvents["form:error"]) => void
+): () => void {
+  client.on("form:error", callback);
+  return () => client.off("form:error", callback);
+}
+
+/**
  * Subscribe to client function invocations.
  */
 export function onFunctionInvoke(
