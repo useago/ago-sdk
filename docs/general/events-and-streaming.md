@@ -35,6 +35,8 @@ const final = await client.waitFor("message:complete", { timeout: 10_000 });
 | `toolCall:form` | `ToolCallData` (only when the tool call is a form) |
 | `function:invoke` | `{ invocationId, functionName, arguments, conversationId }` |
 | `function:result` | `{ invocationId, result, error? }` |
+| `form:submitted` | `{ name, values, result }`: a form collector submitted successfully; `result` is the submit response (the third-party API's answer) |
+| `form:error` | `{ name, values, error }`: a form collector submit failed at the network/server level (HTTP non-2xx or a thrown handler/fetch). Validation pre-checks (missing fields, no submit target) do not fire this |
 | `connection:status` | `{ connected }` |
 
 `waitFor` rejects if the optional `timeout` (ms) elapses first.
@@ -73,6 +75,8 @@ onMessage(client, (msg) => console.log("complete:", msg.content));
 | `onMessageError(client, cb)` | `message:error` |
 | `onToolCall(client, cb)` | `toolCall:received` |
 | `onFunctionInvoke(client, cb)` | `function:invoke` |
+| `onFormSubmitted(client, cb)` | `form:submitted` |
+| `onFormError(client, cb)` | `form:error` |
 
 ---
 

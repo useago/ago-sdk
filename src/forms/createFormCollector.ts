@@ -379,6 +379,15 @@ export function createFormCollector<V = Record<string, unknown>>(
 
   let boundClient: AgoClient | null = null;
 
+  // Surface a submit failure on the client event bus (no-op until installed).
+  const emitFormError = (values: V, error: string): void => {
+    boundClient?.emitFormEvent("form:error", {
+      name,
+      values: values as Record<string, unknown>,
+      error,
+    });
+  };
+
   const doSubmit = async (): Promise<FormSubmitResult> => {
     const { values } = store.get();
     const { complete, missing } = deriveFormStatus(schema, values);
@@ -406,7 +415,9 @@ export function createFormCollector<V = Record<string, unknown>>(
             body: JSON.stringify(submitValues),
           });
           if (!res.ok) {
-            return { ok: false, error: `Submit failed: HTTP ${res.status}` };
+            const error = `Submit failed: HTTP ${res.status}`;
+            emitFormError(submitValues, error);
+            return { ok: false, error };
           }
           result = await res.json().catch(() => undefined);
         }
@@ -426,10 +437,16 @@ export function createFormCollector<V = Record<string, unknown>>(
         );
       }
       store.set({ ...store.get(), submitted: true, submitResult: result });
+      boundClient?.emitFormEvent("form:submitted", {
+        name,
+        values: submitValues as Record<string, unknown>,
+        result,
+      });
       return { ok: true, result };
     } catch (err) {
       const error = err instanceof Error ? err.message : "Submit failed";
       logger.error(`FormCollector "${name}" submit failed:`, err);
+      emitFormError(submitValues, error);
       return { ok: false, error };
     }
   };

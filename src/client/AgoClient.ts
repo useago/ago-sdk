@@ -641,6 +641,19 @@ export class AgoClient {
   }
 
   /**
+   * @internal Surface a form collector's submit outcome on the client event bus.
+   * Used by {@link createFormCollector} so consumers can listen via
+   * `client.on("form:submitted" | "form:error", ...)` without exposing a generic
+   * `emit`.
+   */
+  emitFormEvent<K extends "form:submitted" | "form:error">(
+    event: K,
+    data: AgoClientEvents[K],
+  ): void {
+    this.eventEmitter.emit(event, data);
+  }
+
+  /**
    * Enable automatic capture of the current browser page (URL + title).
    * Injected as a dynamic context entry named `browser-page`.
    */

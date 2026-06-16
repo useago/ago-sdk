@@ -723,6 +723,130 @@ describe("loadFormCollector", () => {
   });
 });
 
+describe("createFormCollector submit events", () => {
+  const completeSchema: FormCollectorSchema = {
+    type: "object",
+    properties: {
+      product: { type: "string" },
+      quantity: { type: "number" },
+    },
+    required: ["product", "quantity"],
+  };
+
+  it("emits form:submitted with name, values, and result on success", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const c = createFormCollector({
+      name: "order",
+      description: "An order.",
+      schema: completeSchema,
+      submit: { via: "client", handler: async () => ({ id: 42 }) },
+    });
+    const onSubmitted = vi.fn();
+    const onError = vi.fn();
+    client.on("form:submitted", onSubmitted);
+    client.on("form:error", onError);
+    const uninstall = c.install(client);
+
+    // The fill that completes the form auto-submits.
+    await c.functions[0].handler({ product: "Widget", quantity: 2 });
+
+    expect(onSubmitted).toHaveBeenCalledTimes(1);
+    expect(onSubmitted).toHaveBeenCalledWith({
+      name: "order",
+      values: { product: "Widget", quantity: 2 },
+      result: { id: 42 },
+    });
+    expect(onError).not.toHaveBeenCalled();
+
+    uninstall();
+    client.destroy();
+  });
+
+  it("emits form:error when the submit handler throws", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const c = createFormCollector({
+      name: "order",
+      description: "An order.",
+      schema: completeSchema,
+      submit: {
+        via: "client",
+        handler: async () => {
+          throw new Error("boom");
+        },
+      },
+    });
+    const onSubmitted = vi.fn();
+    const onError = vi.fn();
+    client.on("form:submitted", onSubmitted);
+    client.on("form:error", onError);
+    const uninstall = c.install(client);
+
+    await c.functions[0].handler({ product: "Widget", quantity: 2 });
+
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith({
+      name: "order",
+      values: { product: "Widget", quantity: 2 },
+      error: "boom",
+    });
+    expect(onSubmitted).not.toHaveBeenCalled();
+
+    uninstall();
+    client.destroy();
+  });
+
+  it("emits form:error on a non-2xx HTTP submit response", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: false, status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const c = createFormCollector({
+      name: "order",
+      description: "An order.",
+      schema: completeSchema,
+      submit: { via: "client", url: "/api/orders" },
+    });
+    const onError = vi.fn();
+    client.on("form:error", onError);
+    const uninstall = c.install(client);
+
+    await c.functions[0].handler({ product: "Widget", quantity: 2 });
+
+    expect(onError).toHaveBeenCalledWith({
+      name: "order",
+      values: { product: "Widget", quantity: 2 },
+      error: "Submit failed: HTTP 500",
+    });
+
+    uninstall();
+    client.destroy();
+    vi.unstubAllGlobals();
+  });
+
+  it("fires neither event for an incomplete submit (validation pre-check)", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const c = createFormCollector({
+      name: "order",
+      description: "An order.",
+      schema: completeSchema,
+      submit: { via: "client", handler: async () => ({ id: 1 }) },
+      autoSubmit: false,
+    });
+    const onSubmitted = vi.fn();
+    const onError = vi.fn();
+    client.on("form:submitted", onSubmitted);
+    client.on("form:error", onError);
+    const uninstall = c.install(client);
+
+    const res = await c.submit();
+    expect(res).toEqual({ ok: false, missing: ["product", "quantity"] });
+    expect(onSubmitted).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+
+    uninstall();
+    client.destroy();
+  });
+});
+
 describe("AgoClient.getFormCollector", () => {
   it("fetches the definition and normalizes a null submit to undefined", async () => {
     const fetchMock = vi.fn(async () => ({

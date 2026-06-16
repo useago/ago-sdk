@@ -92,6 +92,8 @@ export type { AgoWidgetColors, AgoWidgetConfig } from "./widget/types";
 // Streaming helpers
 export {
   createMessageStream,
+  onFormError,
+  onFormSubmitted,
   onFunctionInvoke,
   onMessage,
   onMessageChunk,
