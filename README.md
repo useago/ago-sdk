@@ -3,9 +3,20 @@
 [![npm version](https://img.shields.io/npm/v/@useago/sdk.svg)](https://www.npmjs.com/package/@useago/sdk)
 [![types](https://img.shields.io/npm/types/@useago/sdk.svg)](https://www.npmjs.com/package/@useago/sdk)
 
-**The agent layer for your frontend stack.** AGO's agents plug into React, Vue,
-Angular or plain TypeScript like any other dependency: send a message, stream
-the reply, and let the agent call **your** code and navigate **your** UI.
+**The customer-facing agent platform for your product.**
+
+AGO embeds AI agents directly into your frontend stack: React, Vue, Angular or
+plain TypeScript. Send messages, stream responses, expose frontend actions, and
+let agents guide users, trigger workflows, or operate **your** UI.
+
+Internal agent platforms help employees work faster. Customer-facing agents are
+a different problem. They have to be reliable, safe, measurable, brand-aligned,
+and integrated into the product experience.
+
+AGO provides the operating layer behind the SDK: business and user context, tool
+orchestration, evaluations, quality monitoring, security controls, human
+fallback, and continuous improvement. Your team ships product-native agents that
+resolve customer needs, without rebuilding the full customer-facing agent platform.
 
 In two minutes you'll have a working chat on your page and an agent that can
 navigate your app. The quickstart below uses **React**; every other stack gets
