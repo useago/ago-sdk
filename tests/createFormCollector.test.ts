@@ -228,6 +228,28 @@ describe("createFormCollector", () => {
     expect(c.store.get().submitted).toBe(true);
   });
 
+  it("auto-submit de-dupes concurrent completing calls into one submission", async () => {
+    // A deferred handler keeps the first submit in flight so the second call
+    // observes !submitted; without the in-flight latch this would submit twice.
+    let resolveSubmit!: (v: unknown) => void;
+    const handler = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveSubmit = resolve;
+        })
+    );
+    const c = makeCollector({ via: "client", handler }, true);
+
+    await c.functions[0].handler({ product: "Widget" }); // not yet complete
+    const p1 = c.functions[0].handler({ quantity: 2 }); // completes the form
+    const p2 = c.functions[0].handler({ quantity: 2 }); // races p1
+    resolveSubmit({ id: 1 });
+    await Promise.all([p1, p2]);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(c.store.get().submitted).toBe(true);
+  });
+
   it("autoSubmit warns and stays inert without a submit target", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     logger.enable();

@@ -388,7 +388,13 @@ export function createFormCollector<V = Record<string, unknown>>(
     });
   };
 
-  const doSubmit = async (): Promise<FormSubmitResult> => {
+  // De-dupe concurrent submissions: while one is in flight every caller shares the
+  // same promise, so parallel agent update_ calls / rapid setValues / a double-clicked
+  // button collapse to a single request. The latch clears when the request settles;
+  // the `submitted` guard in maybeAutoSubmit then stops any later auto-submit.
+  let pendingSubmit: Promise<FormSubmitResult> | null = null;
+
+  const runSubmit = async (): Promise<FormSubmitResult> => {
     const { values } = store.get();
     const { complete, missing } = deriveFormStatus(schema, values);
     if (!complete) {
@@ -449,6 +455,18 @@ export function createFormCollector<V = Record<string, unknown>>(
       emitFormError(submitValues, error);
       return { ok: false, error };
     }
+  };
+
+  const doSubmit = (): Promise<FormSubmitResult> => {
+    if (pendingSubmit) return pendingSubmit;
+    pendingSubmit = (async () => {
+      try {
+        return await runSubmit();
+      } finally {
+        pendingSubmit = null;
+      }
+    })();
+    return pendingSubmit;
   };
 
   // When autoSubmit is on, submit as soon as the form is complete — at most once.
