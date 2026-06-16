@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Use Node.js 24
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: npm
@@ -33,7 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Build on Node 24
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: npm
@@ -41,7 +41,7 @@ jobs:
       - run: npm run build
       - run: npm pack
       - name: Switch to Node 20
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v6
         with:
           node-version: 20
       - name: Install tarball and smoke-test ESM + CJS on Node 20
