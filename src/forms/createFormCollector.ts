@@ -9,17 +9,14 @@ import { createStore, type Store } from "../state/createStore";
 import { logger } from "../utils/logger";
 
 /**
- * A field's conditional-requiredness rule. The field becomes required exactly
- * when the controlling `property` matches `value` against the answers collected
- * so far:
+ * A single leaf comparison. The field it guards becomes required exactly when the
+ * controlling `property` matches `value` against the answers collected so far:
  * - a single `value`, no `op` — equality (compared as strings);
  * - a single `value` with `op` — numeric comparison (both sides coerced to numbers);
  * - an array `value`, no `op` — "one of": matches when the property equals any
  *   listed value.
- *
- * SDK-only — it is stripped from the schema before it reaches the LLM tool
  */
-export interface FormFieldCondition {
+export interface FormFieldLeafCondition {
   /** The controlling field whose value the rule tests. */
   property: string;
   /** Comparison operator; omitted means equality. Ignored when `value` is an array. */
@@ -32,6 +29,23 @@ export interface FormFieldCondition {
   value: string | number | Array<string | number>;
 }
 
+/**
+ * A field's conditional-requiredness rule: either a single {@link FormFieldLeafCondition}
+ * or a boolean combination of rules. `anyOf` is OR (true when any nested rule
+ * holds); `allOf` is AND (true when every nested rule holds). Both nest
+ * arbitrarily, so you can mix them, e.g.
+ * `{ anyOf: [{ property: "a", op: ">=", value: 1 }, { property: "b", value: "1" }] }`.
+ * An empty `anyOf` is never required; an empty `allOf` is always required.
+ *
+ * Stripped from the LLM tool's `parameters` (see {@link toWireParameters}), but the
+ * full schema, `requiredWhen` included, still reaches the agent via the dynamic
+ * context so it knows when each field becomes required.
+ */
+export type FormFieldCondition =
+  | FormFieldLeafCondition
+  | { anyOf: FormFieldCondition[] }
+  | { allOf: FormFieldCondition[] };
+
 /** A single field's schema: the wire-legal keys plus the SDK-only `requiredWhen`. */
 export interface FormFieldSchema {
   type: string;
@@ -40,14 +54,15 @@ export interface FormFieldSchema {
   default?: unknown;
   /**
    * Makes the field required only while this condition holds. Drives the dynamic
-   * `missing` list; stripped before the LLM tool — see {@link toWireParameters}.
+   * `missing` list; stripped from the LLM tool's `parameters` (still sent to the
+   * agent via dynamic context). See {@link toWireParameters}.
    */
   requiredWhen?: FormFieldCondition;
 }
 
 /**
  * Shape of a form's fields. Mirrors a client function's `parameters` (so the same
- * object feeds the store, the update function, and the dynamic context). Additionally allows the SDK-only per-field `requiredWhen`, which {@link toWireParameters} removes before the schema reaches the LLM.
+ * object feeds the store, the update function, and the dynamic context). Additionally allows the SDK-only per-field `requiredWhen`, which {@link toWireParameters} removes from the LLM tool's `parameters` (the full schema still reaches the agent via dynamic context).
  */
 export interface FormCollectorSchema {
   type: "object";
@@ -190,16 +205,20 @@ const isEmpty = (v: unknown): boolean =>
   v === undefined || v === null || v === "";
 
 /**
- * Evaluate a {@link FormFieldCondition} against the values collected so far. An
- * empty/unset controlling value is never a match (the field isn't relevant yet).
- * An array `value` is an "is one of" test; equality compares as strings; the
- * comparison operators coerce both sides to numbers and fail closed on
- * non-numeric input.
+ * Evaluate a {@link FormFieldCondition} against the values collected so far.
+ * `anyOf`/`allOf` recurse (OR / AND); for a leaf, an empty/unset controlling
+ * value is never a match (the field isn't relevant yet), an array `value` is an
+ * "is one of" test, equality compares as strings, and the comparison operators
+ * coerce both sides to numbers and fail closed on non-numeric input.
  */
 function evaluateCondition(
   cond: FormFieldCondition,
   values: Partial<Record<string, unknown>>,
 ): boolean {
+  if ("anyOf" in cond)
+    return cond.anyOf.some((c) => evaluateCondition(c, values));
+  if ("allOf" in cond)
+    return cond.allOf.every((c) => evaluateCondition(c, values));
   const actual = (values as Record<string, unknown>)[cond.property];
   if (isEmpty(actual)) return false;
   // "one of": an array value matches when the field equals any listed value.
@@ -262,10 +281,11 @@ export function deriveFormStatus(
 /**
  * Build the LLM-facing tool `parameters` from a form schema: keep only the
  * wire-legal property keys (`type`/`description`/`enum`/`default`) — dropping the
- * SDK-only `requiredWhen` so the LLM never sees a non-standard keyword — and set
+ * SDK-only `requiredWhen` so the tool schema stays JSON-Schema-legal — and set
  * `required: []` so the agent can fill the form incrementally. The form's real
  * requiredness lives in `schema.required` + `requiredWhen` and reaches the agent
- * through the dynamic-context `missing` list, not this per-call `required`.
+ * through the dynamic context (the full schema plus the `missing` list), not this
+ * per-call `required`.
  */
 function toWireParameters(
   schema: FormCollectorSchema,
@@ -576,7 +596,7 @@ export function createFormCollector<V = Record<string, unknown>>(
       name: `Form: ${name}`,
       description:
         `${phase} ${description} ` +
-        `There are conditionnals questions/values to collected, you can find this information with the requiredWhen field in the form. ` +
+        `Some fields are conditionally required; the requiredWhen field in the schema tells you when each becomes required. ` +
         `The form schema is the following: ${JSON.stringify(schema)}. ` +
         `Data collected so far: ${JSON.stringify(values)}. ` +
         `Call update_${name} with any fields the user provides; ask only for what is still missing.${submitHint}`,

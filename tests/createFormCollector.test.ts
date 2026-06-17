@@ -699,6 +699,135 @@ describe("createFormCollector with requiredWhen conditions", () => {
     c.setValues({ product: "Widget", quantity: 3 });
     expect(c.getStatus()).toEqual({ missing: [], complete: true });
   });
+
+  // assurance is required when the applicant has a property loan OR is a tenant:
+  // nb_credit_immo >= 1 OR locataire == 1.
+  const anyOfSchema: FormCollectorSchema = {
+    type: "object",
+    properties: {
+      nb_credit_immo: { type: "number", description: "Property loans" },
+      locataire: { type: "string", enum: ["0", "1"], description: "Tenant?" },
+      assurance: {
+        type: "string",
+        description: "Insurance",
+        requiredWhen: {
+          anyOf: [
+            { property: "nb_credit_immo", op: ">=", value: "1" },
+            { property: "locataire", value: "1" },
+          ],
+        },
+      },
+    },
+    required: ["nb_credit_immo", "locataire"],
+  };
+
+  it("requires a field when any branch of an anyOf condition holds", () => {
+    // Neither branch holds → assurance stays optional.
+    expect(
+      deriveFormStatus(anyOfSchema, { nb_credit_immo: 0, locataire: "0" }).missing
+    ).toEqual([]);
+
+    // First branch (nb_credit_immo >= 1) holds.
+    expect(
+      deriveFormStatus(anyOfSchema, { nb_credit_immo: 2, locataire: "0" }).missing
+    ).toEqual(["assurance"]);
+
+    // Second branch (locataire == 1) holds.
+    expect(
+      deriveFormStatus(anyOfSchema, { nb_credit_immo: 0, locataire: "1" }).missing
+    ).toEqual(["assurance"]);
+
+    // Filling the field clears it.
+    expect(
+      deriveFormStatus(anyOfSchema, {
+        nb_credit_immo: 0,
+        locataire: "1",
+        assurance: "yes",
+      }).complete
+    ).toBe(true);
+  });
+
+  it("requires a field only when every branch of an allOf condition holds", () => {
+    const allOfSchema: FormCollectorSchema = {
+      type: "object",
+      properties: {
+        owner: { type: "string", enum: ["1", "2"] },
+        nb_loans: { type: "number" },
+        refinance: {
+          type: "string",
+          requiredWhen: {
+            allOf: [
+              { property: "owner", value: "2" },
+              { property: "nb_loans", op: ">=", value: "1" },
+            ],
+          },
+        },
+      },
+      required: ["owner", "nb_loans"],
+    };
+
+    // Only one branch holds → not required.
+    expect(
+      deriveFormStatus(allOfSchema, { owner: "2", nb_loans: 0 }).missing
+    ).toEqual([]);
+    expect(
+      deriveFormStatus(allOfSchema, { owner: "1", nb_loans: 3 }).missing
+    ).toEqual([]);
+    // Both branches hold → required.
+    expect(
+      deriveFormStatus(allOfSchema, { owner: "2", nb_loans: 3 }).missing
+    ).toEqual(["refinance"]);
+  });
+
+  it("evaluates nested anyOf/allOf conditions", () => {
+    const nestedSchema: FormCollectorSchema = {
+      type: "object",
+      properties: {
+        a: { type: "string" },
+        b: { type: "string" },
+        c: { type: "string" },
+        target: {
+          type: "string",
+          // a == "1" OR (b == "1" AND c == "1")
+          requiredWhen: {
+            anyOf: [
+              { property: "a", value: "1" },
+              {
+                allOf: [
+                  { property: "b", value: "1" },
+                  { property: "c", value: "1" },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    expect(deriveFormStatus(nestedSchema, { a: "0", b: "1", c: "0" }).missing).toEqual(
+      []
+    );
+    expect(deriveFormStatus(nestedSchema, { a: "1" }).missing).toEqual(["target"]);
+    expect(
+      deriveFormStatus(nestedSchema, { a: "0", b: "1", c: "1" }).missing
+    ).toEqual(["target"]);
+  });
+
+  it("strips a composite requiredWhen from the update tool params", () => {
+    const c = createFormCollector({
+      name: "credit",
+      description: "A credit form.",
+      schema: anyOfSchema,
+    });
+    const params = c.functions[0].parameters;
+
+    expect(params.required).toEqual([]);
+    expect(params.properties.assurance).not.toHaveProperty("requiredWhen");
+    expect(params.properties.assurance).toEqual({
+      type: "string",
+      description: "Insurance",
+    });
+  });
 });
 
 describe("loadFormCollector", () => {
