@@ -1,6 +1,6 @@
 {
   "name": "@useago/sdk",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Create In-APP AI agents that answers question and performs actions. Works with React, Vue, Angular and vanilla JS/TS.",
   "type": "module",
   "sideEffects": false,
