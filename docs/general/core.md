@@ -427,7 +427,22 @@ collector.install(ago); // register functions + context on a client
   `autoSubmit: false` to keep the manual flow (the agent calls `submit_<name>`
   after the user confirms). Collect-only forms never auto-submit.
 - Fields can declare `requiredWhen` conditions; requirements are re-evaluated
-  as values change.
+  as values change. A condition is a single leaf (`{ property, op?, value }`) or
+  a boolean combination via `anyOf` (OR) / `allOf` (AND), which nest. For
+  example, require `assurance` when the applicant has a property loan or is a
+  tenant:
+
+  ```ts
+  assurance: {
+    type: "string",
+    requiredWhen: {
+      anyOf: [
+        { property: "nb_credit_immo", op: ">=", value: "1" },
+        { property: "locataire", value: "1" },
+      ],
+    },
+  },
+  ```
 - `deriveFormStatus(schema, values)` → `FormCollectorStatus` computes which
   required fields are still missing, useful for custom UIs.
 - React users: see `useFormCollector` in the [React guide](../frameworks/react.md).
