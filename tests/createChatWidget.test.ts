@@ -345,6 +345,74 @@ describe("mountChatWidget", () => {
     client.destroy();
   });
 
+  describe("styling options", () => {
+    it("renders the header by default and omits it with showHeader: false", () => {
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+
+      const widget = mountChatWidget(root, { client, title: "Helpdesk" });
+      expect(root.querySelector(".ago-chat-widget__header")).not.toBeNull();
+      widget.destroy();
+
+      const hidden = mountChatWidget(root, {
+        client,
+        title: "Helpdesk",
+        showHeader: false,
+      });
+      expect(root.querySelector(".ago-chat-widget__header")).toBeNull();
+      // The rest of the panel still renders.
+      expect(root.querySelector(".ago-chat-widget__messages")).not.toBeNull();
+      expect(root.querySelector("textarea")).not.toBeNull();
+
+      hidden.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("renders assistant messages as plain text by default", async () => {
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      vi.spyOn(client, "sendMessage").mockResolvedValue(makeAssistantMessage());
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+
+      const widget = mountChatWidget(root, { client });
+      await widget.sendMessage("hi");
+
+      const bubble = root.querySelector<HTMLElement>(
+        ".ago-message--assistant .ago-message__content"
+      );
+      expect(bubble).not.toBeNull();
+      expect(bubble!.style.padding).toBe("2px 8px");
+      expect(bubble!.style.backgroundColor).toBe("transparent");
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("wraps assistant messages in a filled bubble with agentBubble: true", async () => {
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      vi.spyOn(client, "sendMessage").mockResolvedValue(makeAssistantMessage());
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+
+      const widget = mountChatWidget(root, { client, agentBubble: true });
+      await widget.sendMessage("hi");
+
+      const bubble = root.querySelector<HTMLElement>(
+        ".ago-message--assistant .ago-message__content"
+      );
+      expect(bubble).not.toBeNull();
+      expect(bubble!.style.padding).toBe("10px 14px");
+      expect(bubble!.style.backgroundColor).not.toBe("transparent");
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+  });
+
   describe("placement (side panel)", () => {
     it("renders a fixed side wrapper + launcher, closed by default", () => {
       const client = new AgoClient({ baseUrl: "https://example.test" });

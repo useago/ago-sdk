@@ -85,6 +85,8 @@ widget.destroy(); // removes listeners, uninstalls forms, clears the DOM
 | `defaultOpen?`         | `boolean`                                         | `false` (side panels only)       |
 | `logoUrl?`             | `string`                                         | —                                |
 | `showAgentName?`       | `boolean`                                        | `false`                          |
+| `agentBubble?`         | `boolean`                                        | `false`                          |
+| `showHeader?`          | `boolean`                                        | `true`                           |
 | `theme?`               | `WidgetTheme`                                    | — (see [Theming](#theming))      |
 | `forms?`               | `Array<CreateFormCollectorOptions \| LoadFormCollectorOptions>` | —                  |
 | `formSubmittedMessage?`| `string \| ((result) => string \| null)`         | server `message`, else `"Form submitted."` |
@@ -276,6 +278,7 @@ so no media queries or hover); CSS variables override it if both are present.
 | `--ago-muted-text-color`    | `mutedText`     | `#6b6d6f`           | Empty-state welcome message                                       |
 | `--ago-border-color`        | `border`        | `#dee3e8`           | Panel, input, pills, cards (set transparent to hide)              |
 | `--ago-accent-color`        | `accent`        | `#1b5fc4`           | Source badges + suggested-reply hover outline                     |
+| `--ago-agent-bubble-background` | `agentBubbleBg` | `#f1f3f5`       | Assistant message bubble fill (when `agentBubble` is on)          |
 
 Error messages stay red by design, and a couple of incidental tints (file/source
 chip background, streaming dots) are fixed neutrals that read on any light surface.
