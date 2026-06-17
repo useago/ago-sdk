@@ -51,6 +51,8 @@ export interface WidgetTheme {
   border?: string;
   /** Secondary accent: source badges and suggested-reply hover outline. (`--ago-accent-color`) */
   accent?: string;
+  /** Background of assistant message bubbles when `agentBubble` is on. Defaults to a light gray. (`--ago-agent-bubble-background`) */
+  agentBubbleBg?: string;
 }
 
 /**
@@ -116,6 +118,16 @@ export interface MountChatWidgetOptions {
   logoUrl?: string;
   /** Show the agent name above assistant messages. Defaults to `false`. */
   showAgentName?: boolean;
+  /** Render assistant messages inside a filled bubble (themed via `agentBubbleBg`). Defaults to `false`. */
+  agentBubble?: boolean;
+  /**
+   * Show the header bar (title, logo, and the side-panel close "×"). Set `false`
+   * to drop it, e.g. when the host page already frames the widget. Defaults to
+   * `true`. Note: with the built-in launcher in side placement, the close "×"
+   * lives in the header, so hiding it leaves the launcher (and `widget.close()`)
+   * as the way to dismiss the panel.
+   */
+  showHeader?: boolean;
   /**
    * Theme overrides so the panel blends into the host page.
    */
@@ -232,6 +244,7 @@ const THEME_VARS: Record<keyof WidgetTheme, string> = {
   mutedText: "--ago-muted-text-color",
   border: "--ago-border-color",
   accent: "--ago-accent-color",
+  agentBubbleBg: "--ago-agent-bubble-background",
 };
 
 const BRAND_COLOR = "var(--ago-brand-color, #03182f)";
@@ -245,6 +258,7 @@ const TEXT_COLOR = "var(--ago-text-color, #30373e)";
 const MUTED_TEXT_COLOR = "var(--ago-muted-text-color, #6b6d6f)";
 const BORDER_COLOR = "var(--ago-border-color, #dee3e8)";
 const ACCENT_COLOR = "var(--ago-accent-color, #1b5fc4)";
+const AGENT_BUBBLE_BACKGROUND = "var(--ago-agent-bubble-background, #f1f3f5)";
 const RADIUS = "var(--ago-radius, 16px)";
 const MESSAGE_RADIUS = "var(--ago-message-radius, 16px)";
 
@@ -364,6 +378,8 @@ export function mountChatWidget(
     defaultOpen = false,
     logoUrl,
     showAgentName = false,
+    agentBubble = false,
+    showHeader = true,
     theme,
     loadThreads = false,
     forms,
@@ -448,47 +464,50 @@ export function mountChatWidget(
   // throughout the panel resolve against them (and host-page CSS can set them too).
   applyTheme(container, theme);
 
-  const header = div({
-    padding: "14px 16px",
-    borderBottom: `1px solid ${BORDER_COLOR}`,
-    backgroundColor: HEADER_BACKGROUND,
-    color: HEADER_TEXT_COLOR,
-    display: "flex",
-    alignItems: "center",
-    gap: "10px",
-  });
-  header.className = "ago-chat-widget__header";
-  if (logoUrl) {
-    const logo = document.createElement("img");
-    logo.src = logoUrl;
-    logo.alt = "Logo";
-    css(logo, { height: "24px", width: "auto" });
-    header.appendChild(logo);
-  }
-  const titleEl = document.createElement("h3");
-  titleEl.textContent = title;
-  css(titleEl, { margin: "0", fontSize: "15px", fontWeight: "600" });
-  header.appendChild(titleEl);
-
-  // Side panels get a close affordance in the header (the launcher reopens them).
-  if (isSide) {
-    const closeBtn = document.createElement("button");
-    closeBtn.type = "button";
-    closeBtn.className = "ago-chat-widget__close";
-    closeBtn.setAttribute("aria-label", "Close");
-    closeBtn.textContent = "×";
-    css(closeBtn, {
-      marginLeft: "auto",
-      background: "transparent",
-      border: "none",
+  let header: HTMLDivElement | undefined;
+  if (showHeader) {
+    header = div({
+      padding: "14px 16px",
+      borderBottom: `1px solid ${BORDER_COLOR}`,
+      backgroundColor: HEADER_BACKGROUND,
       color: HEADER_TEXT_COLOR,
-      fontSize: "22px",
-      lineHeight: "1",
-      cursor: "pointer",
-      padding: "0 2px",
+      display: "flex",
+      alignItems: "center",
+      gap: "10px",
     });
-    closeBtn.addEventListener("click", () => closePanel());
-    header.appendChild(closeBtn);
+    header.className = "ago-chat-widget__header";
+    if (logoUrl) {
+      const logo = document.createElement("img");
+      logo.src = logoUrl;
+      logo.alt = "Logo";
+      css(logo, { height: "24px", width: "auto" });
+      header.appendChild(logo);
+    }
+    const titleEl = document.createElement("h3");
+    titleEl.textContent = title;
+    css(titleEl, { margin: "0", fontSize: "15px", fontWeight: "600" });
+    header.appendChild(titleEl);
+
+    // Side panels get a close affordance in the header (the launcher reopens them).
+    if (isSide) {
+      const closeBtn = document.createElement("button");
+      closeBtn.type = "button";
+      closeBtn.className = "ago-chat-widget__close";
+      closeBtn.setAttribute("aria-label", "Close");
+      closeBtn.textContent = "×";
+      css(closeBtn, {
+        marginLeft: "auto",
+        background: "transparent",
+        border: "none",
+        color: HEADER_TEXT_COLOR,
+        fontSize: "22px",
+        lineHeight: "1",
+        cursor: "pointer",
+        padding: "0 2px",
+      });
+      closeBtn.addEventListener("click", () => closePanel());
+      header.appendChild(closeBtn);
+    }
   }
 
   const messagesEl = div({
@@ -507,7 +526,7 @@ export function mountChatWidget(
 
   ensureKeyframes();
 
-  container.append(header, messagesEl, inputRow);
+  container.append(...(header ? [header] : []), messagesEl, inputRow);
 
   // In side mode the panel lives inside a fixed, full-height wrapper pinned to the
   // chosen edge; otherwise it's mounted inline as before. `mountInto` is whatever
@@ -679,10 +698,14 @@ export function mountChatWidget(
     }
 
     const bubble = div({
-      maxWidth: isUser ? "75%" : "100%",
-      padding: isUser ? "10px 14px" : "2px 8px",
-      borderRadius: isUser ? MESSAGE_RADIUS : "0",
-      backgroundColor: isUser ? BRAND_COLOR : "transparent",
+      maxWidth: isUser ? "75%" : agentBubble ? "85%" : "100%",
+      padding: isUser || agentBubble ? "10px 14px" : "2px 8px",
+      borderRadius: isUser || agentBubble ? MESSAGE_RADIUS : "0",
+      backgroundColor: isUser
+        ? BRAND_COLOR
+        : agentBubble
+          ? AGENT_BUBBLE_BACKGROUND
+          : "transparent",
       color: isUser ? BRAND_TEXT_COLOR : TEXT_COLOR,
       wordBreak: "break-word",
       fontSize: "16px",
