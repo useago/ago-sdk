@@ -83,6 +83,10 @@ interface DevPanelOptions {
   client: Pick<AgoClient, "on" | "getRegisteredFunctions" | "getContextSnapshot">;
   /** Where to mount: a CSS selector, an Element, or document.body (default). */
   target?: string | Element;
+  /** Which edge to pin to: "right" (default) or "left". Panels on the same side stack beside each other. */
+  side?: "left" | "right";
+  /** Caption shown in the header. Use it to tell panels apart when a page has several. */
+  label?: string;
 }
 ```
 
@@ -113,3 +117,25 @@ const widget = mountChatWidget("#chat", {
 const DEV = new URLSearchParams(location.search).has("dev");
 if (DEV) initDevPanel({ client: widget.client });
 ```
+
+---
+
+## Multiple widgets on one page
+
+Call `initDevPanel` once per client. Each call gets its own panel. Pass a `label` to tell
+them apart, and a `side` to dock each panel next to its widget:
+
+```ts
+const a = mountChatWidget("#chat-a", { config: { agent: "sales" } });
+const b = mountChatWidget("#chat-b", { config: { agent: "support" } });
+
+const DEV = new URLSearchParams(location.search).has("dev");
+if (DEV) {
+  initDevPanel({ client: a.client, label: "sales", side: "left" });
+  initDevPanel({ client: b.client, label: "support", side: "right" });
+}
+```
+
+If two panels land on the same side, the second one shifts over so they do not overlap.
+Each panel tracks only its own client (state, function calls, SSE log) and remembers its
+collapsed state separately.
