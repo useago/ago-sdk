@@ -121,6 +121,14 @@ export interface MountChatWidgetOptions {
   /** Render assistant messages inside a filled bubble (themed via `agentBubbleBg`). Defaults to `false`. */
   agentBubble?: boolean;
   /**
+   * Bubble shape preset. `"imessage"` bubbles both sides (assistant messages get
+   * the filled `agentBubbleBg` bubble too) and draws the iMessage "tail" curl on
+   * the last bubble of each same-sender run. Defaults to `"default"` (current
+   * look). Colors stay themed: user bubble `brand`, assistant bubble
+   * `agentBubbleBg`, and the tail mask follows `messagesBg`.
+   */
+  bubbleStyle?: "default" | "imessage";
+  /**
    * Show the header bar (title, logo, and the side-panel close "×"). Set `false`
    * to drop it, e.g. when the host page already frames the widget. Defaults to
    * `true`. Note: with the built-in launcher in side placement, the close "×"
@@ -379,6 +387,7 @@ export function mountChatWidget(
     logoUrl,
     showAgentName = false,
     agentBubble = false,
+    bubbleStyle = "default",
     showHeader = true,
     theme,
     loadThreads = false,
@@ -614,13 +623,19 @@ export function mountChatWidget(
       ? undefined
       : (onFollowUpClick ?? ((reply: string) => void send(reply)));
 
-  function renderMessage(message: AgoMessage, isLast: boolean): HTMLElement {
+  function renderMessage(
+    message: AgoMessage,
+    isLast: boolean,
+    isLastOfBlock = true,
+  ): HTMLElement {
     const isUser = message.role === "user";
+    const imessage = bubbleStyle === "imessage";
     const wrap = div({
       display: "flex",
       flexDirection: "column",
       alignItems: isUser ? "flex-end" : "flex-start",
-      marginBottom: "16px",
+      // Tighter stack within a same-sender block, full gap after it (iMessage).
+      marginBottom: imessage && !isLastOfBlock ? "2px" : "16px",
     });
     wrap.className = `ago-message ago-message--${message.role}`;
 
@@ -697,13 +712,15 @@ export function mountChatWidget(
       wrap.appendChild(sources);
     }
 
+    const bubbled = isUser || agentBubble || imessage;
+
     const bubble = div({
-      maxWidth: isUser ? "75%" : agentBubble ? "85%" : "100%",
-      padding: isUser || agentBubble ? "10px 14px" : "2px 8px",
-      borderRadius: isUser || agentBubble ? MESSAGE_RADIUS : "0",
+      maxWidth: imessage ? "75%" : isUser ? "75%" : bubbled ? "85%" : "100%",
+      padding: bubbled ? "10px 14px" : "2px 8px",
+      borderRadius: bubbled ? MESSAGE_RADIUS : "0",
       backgroundColor: isUser
         ? BRAND_COLOR
-        : agentBubble
+        : bubbled
           ? AGENT_BUBBLE_BACKGROUND
           : "transparent",
       color: isUser ? BRAND_TEXT_COLOR : TEXT_COLOR,
@@ -712,6 +729,42 @@ export function mountChatWidget(
       lineHeight: "1.6",
     });
     bubble.className = "ago-message__content";
+    // iMessage tail on the last bubble of a same-sender block: a colored bulge
+    // (fill) at the bottom corner, masked by a shape in the messages-area color
+    // to carve out the curl (technique from CodePen swards/gxQmbj).
+    if (imessage && isLastOfBlock) {
+      bubble.style.position = "relative";
+      const fill = div({
+        position: "absolute",
+        zIndex: "0",
+        bottom: "0",
+        width: "20px",
+        height: "20px",
+        background: isUser ? BRAND_COLOR : AGENT_BUBBLE_BACKGROUND,
+      });
+      fill.className = "ago-message__tail";
+      const mask = div({
+        position: "absolute",
+        zIndex: "1",
+        bottom: "0",
+        width: "10px",
+        height: "20px",
+        background: MESSAGES_BACKGROUND,
+      });
+      mask.className = "ago-message__tail-mask";
+      if (isUser) {
+        fill.style.right = "-8px";
+        fill.style.borderBottomLeftRadius = "15px";
+        mask.style.right = "-10px";
+        mask.style.borderBottomLeftRadius = "10px";
+      } else {
+        fill.style.left = "-7px";
+        fill.style.borderBottomRightRadius = "15px";
+        mask.style.left = "-10px";
+        mask.style.borderBottomRightRadius = "10px";
+      }
+      bubble.append(fill, mask);
+    }
     if (message.content) {
       // GitHub-flavored markdown, rendered by a dependency-free parser that
       // escapes all message text before it reaches the DOM (see renderMarkdown).
@@ -809,8 +862,12 @@ export function mountChatWidget(
       messagesEl.appendChild(welcome);
     } else {
       messages.forEach((message, index) => {
+        // Last bubble of a same-sender block (gets the iMessage tail).
+        const isLastOfBlock =
+          index === messages.length - 1 ||
+          messages[index + 1].role !== message.role;
         messagesEl.appendChild(
-          renderMessage(message, index === messages.length - 1),
+          renderMessage(message, index === messages.length - 1, isLastOfBlock),
         );
       });
     }

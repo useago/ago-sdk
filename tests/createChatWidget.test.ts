@@ -411,6 +411,42 @@ describe("mountChatWidget", () => {
       root.remove();
       client.destroy();
     });
+
+    it("bubbles both sides with a tail corner for bubbleStyle: 'imessage'", async () => {
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      vi.spyOn(client, "sendMessage").mockResolvedValue(makeAssistantMessage());
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+
+      const widget = mountChatWidget(root, { client, bubbleStyle: "imessage" });
+      await widget.sendMessage("hi");
+
+      // Assistant message: filled bubble with the tail on the bottom-left.
+      const assistant = root.querySelector<HTMLElement>(
+        ".ago-message--assistant .ago-message__content"
+      );
+      expect(assistant).not.toBeNull();
+      expect(assistant!.style.padding).toBe("10px 14px");
+      expect(assistant!.style.backgroundColor).not.toBe("transparent");
+      expect(assistant!.style.borderBottomLeftRadius).not.toBe("");
+      expect(assistant!.style.borderBottomLeftRadius).not.toBe(
+        assistant!.style.borderTopLeftRadius
+      );
+
+      // User message: tail on the bottom-right.
+      const user = root.querySelector<HTMLElement>(
+        ".ago-message--user .ago-message__content"
+      );
+      expect(user).not.toBeNull();
+      expect(user!.style.borderBottomRightRadius).not.toBe("");
+      expect(user!.style.borderBottomRightRadius).not.toBe(
+        user!.style.borderTopRightRadius
+      );
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
   });
 
   describe("placement (side panel)", () => {
