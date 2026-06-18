@@ -86,6 +86,7 @@ widget.destroy(); // removes listeners, uninstalls forms, clears the DOM
 | `logoUrl?`             | `string`                                         | —                                |
 | `showAgentName?`       | `boolean`                                        | `false`                          |
 | `agentBubble?`         | `boolean`                                        | `false`                          |
+| `bubbleStyle?`         | `"default" \| "imessage"`                        | `"default"`                      |
 | `showHeader?`          | `boolean`                                        | `true`                           |
 | `theme?`               | `WidgetTheme`                                    | — (see [Theming](#theming))      |
 | `forms?`               | `Array<CreateFormCollectorOptions \| LoadFormCollectorOptions>` | —                  |
