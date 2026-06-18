@@ -14,17 +14,17 @@ export interface DevPanelOptions {
   >;
   /** Where to mount: a CSS selector, an Element, or `document.body` (default). */
   target?: string | Element;
-}
-
-let stateEl: HTMLElement | null;
-let logEl: HTMLElement | null;
-let eventLogEl: HTMLElement | null;
-let getStateFn: () => unknown = () => ({});
-
-// Re-render the JSON pane. Painted on init and after each function event.
-function renderState(): void {
-  if (!stateEl) return;
-  stateEl.textContent = JSON.stringify(getStateFn(), null, 2);
+  /**
+   * Which screen edge the panels pin to: `"right"` (default) or `"left"`. With
+   * several widgets on a page, give each panel the same side as its widget. Panels
+   * on the same side stack beside each other automatically.
+   */
+  side?: "left" | "right";
+  /**
+   * Optional caption shown in the panel header. Handy when several panels share a
+   * page (one per widget): pass e.g. the agent or widget name to tell them apart.
+   */
+  label?: string;
 }
 
 // Append one timestamped line to a log pane (the function-call log or the SSE
@@ -41,13 +41,6 @@ function appendLine(
   line.textContent = `${time}  ${text}`;
   el.appendChild(line);
   el.scrollTop = el.scrollHeight;
-}
-
-function logLine(
-  text: string,
-  kind: "invoke" | "result" | "error" | "hydrate",
-): void {
-  appendLine(logEl, text, kind);
 }
 
 // One-line summary of a raw SSE chunk: a leading tag (its `type`, or what it
@@ -114,9 +107,28 @@ function wireCollapse(
 }
 
 export function initDevPanel(options: DevPanelOptions): void {
-  const { client, target } = options;
-  // Live JSON pane: the client's context snapshot
-  getStateFn = () => {
+  const { client, target, label, side = "right" } = options;
+
+  // Count the panels already mounted by reading the DOM (not a module-level
+  // counter), so initDevPanel keeps no shared state: two widgets on one page each
+  // get an independent panel instead of clobbering each other.
+  const mounted = document.querySelectorAll("#ago-dev-panel").length;
+  // Unique collapse-key suffix per panel; the first/only panel keeps the bare keys.
+  const suffix = mounted === 0 ? "" : `-${mounted + 1}`;
+  // How many panels already pin to this side, so a second one on the same side
+  // shifts over (card width 360 + 16 gap) instead of stacking on top of it.
+  const sideIndex = document.querySelectorAll(
+    `#ago-dev-panel[data-ago-dev-side="${side}"]`,
+  ).length;
+  const inset = sideIndex > 0 ? `${16 + sideIndex * 376}px` : "";
+
+  // Per-instance DOM refs: a second panel never overwrites the first's elements.
+  let stateEl: HTMLElement | null = null;
+  let logEl: HTMLElement | null = null;
+  let eventLogEl: HTMLElement | null = null;
+
+  // Live JSON pane: the client's context snapshot.
+  const getState = () => {
     const entries = client.getContextSnapshot()?.entries ?? {};
     return Object.fromEntries(
       Object.entries(entries).map(([key, { name, data }]) => [
@@ -125,6 +137,17 @@ export function initDevPanel(options: DevPanelOptions): void {
       ]),
     );
   };
+  // Re-render the JSON pane. Painted on init and after each function event.
+  const renderState = (): void => {
+    if (stateEl) stateEl.textContent = JSON.stringify(getState(), null, 2);
+  };
+  const logLine = (
+    text: string,
+    kind: "invoke" | "result" | "error" | "hydrate",
+  ): void => {
+    appendLine(logEl, text, kind);
+  };
+
   injectStyles();
   const host =
     typeof target === "string"
@@ -132,18 +155,38 @@ export function initDevPanel(options: DevPanelOptions): void {
       : target instanceof Element
         ? target
         : document.body;
+  // Pin a panel to the chosen side. The CSS default is right:16px, so a first
+  // right-side panel needs no inline style; left or stacked panels set it inline.
+  // The data attribute lets the next call count panels already on this side.
+  const place = (el: HTMLElement): void => {
+    el.dataset.agoDevSide = side;
+    if (side === "left") {
+      el.style.right = "auto";
+      el.style.left = inset || "16px";
+    } else if (inset) {
+      el.style.right = inset;
+    }
+  };
+
   const panel = document.createElement("aside");
   panel.id = "ago-dev-panel";
   panel.className = "ago-dev-card";
+  place(panel);
   (host ?? document.body).appendChild(panel);
 
   const registered = client.getRegisteredFunctions?.() ?? [];
   const fnNames = registered.map((f) => f.name).join(", ") || "—";
 
+  // A label (e.g. the agent/widget name) replaces the default caption so two
+  // panels on one page are tellable apart.
+  const mainTitle = label
+    ? `DEV TOOLS · ${label}`
+    : "DEV TOOLS · client-side function state — not for production";
+
   panel.innerHTML = `
     <div class="dev-head">
       <span class="dev-badge">DEV</span>
-      <span class="dev-title">DEV TOOLS · client-side function state — not for production</span>
+      <span class="dev-title">${mainTitle}</span>
       <button type="button" class="dev-toggle" aria-label="Toggle dev tools">—</button>
     </div>
     <div class="dev-body">
@@ -155,28 +198,34 @@ export function initDevPanel(options: DevPanelOptions): void {
     </div>
   `;
 
-  stateEl = panel.querySelector<HTMLElement>("#ago-dev-state");
-  logEl = panel.querySelector<HTMLElement>("#ago-dev-log");
-  wireCollapse(panel, COLLAPSE_KEY, "dev tools");
+  // Look up by class, not id: two panels on one page share the same ids, so an
+  // id query could resolve to the wrong panel. Each class is unique within a panel.
+  stateEl = panel.querySelector<HTMLElement>(".dev-state");
+  logEl = panel.querySelector<HTMLElement>(".dev-log");
+  wireCollapse(panel, COLLAPSE_KEY + suffix, "dev tools");
 
   // Separate panel for the raw SSE stream: it's high-volume, so keeping it out of
   // the main panel stops it crowding the function/state views. Collapses on its own.
   const eventsPanel = document.createElement("aside");
   eventsPanel.id = "ago-dev-events";
   eventsPanel.className = "ago-dev-card";
+  place(eventsPanel);
   (host ?? document.body).appendChild(eventsPanel);
+  const sseTitle = label
+    ? `SSE EVENT LOG · ${label}`
+    : "SSE EVENT LOG · raw stream messages";
   eventsPanel.innerHTML = `
     <div class="dev-head">
       <span class="dev-badge">SSE</span>
-      <span class="dev-title">SSE EVENT LOG · raw stream messages</span>
+      <span class="dev-title">${sseTitle}</span>
       <button type="button" class="dev-toggle" aria-label="Toggle SSE event log">—</button>
     </div>
     <div class="dev-body">
       <div class="dev-log" id="ago-dev-event-log"></div>
     </div>
   `;
-  eventLogEl = eventsPanel.querySelector<HTMLElement>("#ago-dev-event-log");
-  wireCollapse(eventsPanel, EVENTS_COLLAPSE_KEY, "SSE event log");
+  eventLogEl = eventsPanel.querySelector<HTMLElement>(".dev-log");
+  wireCollapse(eventsPanel, EVENTS_COLLAPSE_KEY + suffix, "SSE event log");
 
   // Log every raw SSE message as it arrives off the stream, so the exact wire
   // payload behind each higher-level event is traceable.

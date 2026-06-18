@@ -234,4 +234,98 @@ describe("initDevPanel", () => {
 
     expect(document.getElementById("ago-dev-panel")?.parentElement).toBe(host);
   });
+
+  it("mounts two independent panels, each bound to its own client", () => {
+    const a = createMockClient({
+      overrides: {
+        getContextSnapshot: () => ({ entries: { x: { name: "x", data: { v: "A" } } } }),
+      },
+    });
+    const b = createMockClient({
+      overrides: {
+        getContextSnapshot: () => ({ entries: { x: { name: "x", data: { v: "B" } } } }),
+      },
+    });
+
+    initDevPanel({ client: a, label: "A" });
+    initDevPanel({ client: b, label: "B" });
+
+    // Two main panels + two SSE panels, in mount order: [mainA, sseA, mainB, sseB].
+    const panels = document.querySelectorAll<HTMLElement>("aside.ago-dev-card");
+    expect(panels).toHaveLength(4);
+    expect(panels[0].querySelector(".dev-state")?.textContent).toContain('"v": "A"');
+    expect(panels[2].querySelector(".dev-state")?.textContent).toContain('"v": "B"');
+    // The labels surface in each header; the second panel is offset so it does
+    // not stack on top of the first.
+    expect(panels[0].querySelector(".dev-title")?.textContent).toContain("A");
+    expect(panels[2].querySelector(".dev-title")?.textContent).toContain("B");
+    expect(panels[0].style.right).toBe("");
+    expect(panels[2].style.right).not.toBe("");
+  });
+
+  it("re-renders only the panel whose client fired the event", () => {
+    let aValues: Record<string, unknown> = {};
+    const a = createMockClient({
+      overrides: { getContextSnapshot: () => ({ entries: { x: { data: aValues } } }) },
+    });
+    const b = createMockClient({
+      overrides: { getContextSnapshot: () => ({ entries: { x: { data: {} } } }) },
+    });
+
+    initDevPanel({ client: a, label: "A" });
+    initDevPanel({ client: b, label: "B" });
+
+    const panels = document.querySelectorAll<HTMLElement>("aside.ago-dev-card");
+    const mainA = panels[0];
+    const mainB = panels[2];
+
+    aValues = { filled: 1 };
+    a.__emitEvent("context:changed", {});
+
+    // Only A's panel repaints; B's stays put. (The old singleton bug would have
+    // leaked A's state into B's panel and frozen A's.)
+    expect(mainA.querySelector(".dev-state")?.textContent).toContain("filled");
+    expect(mainB.querySelector(".dev-state")?.textContent).not.toContain("filled");
+  });
+
+  it("pins to the left edge when side is \"left\"", () => {
+    initDevPanel({ client: createMockClient(), side: "left" });
+
+    const panel = document.getElementById("ago-dev-panel")!;
+    const events = document.getElementById("ago-dev-events")!;
+    expect(panel.style.left).toBe("16px");
+    expect(panel.style.right).toBe("auto");
+    expect(events.style.left).toBe("16px");
+    expect(events.style.right).toBe("auto");
+  });
+
+  it("keeps the default right edge without inline positioning", () => {
+    // side defaults to right, where the CSS already pins to right:16px, so the
+    // first/only panel needs no inline override.
+    initDevPanel({ client: createMockClient() });
+
+    const panel = document.getElementById("ago-dev-panel")!;
+    expect(panel.style.left).toBe("");
+    expect(panel.style.right).toBe("");
+  });
+
+  it("docks each widget on its own side without offsetting", () => {
+    // One panel left, one right: each is the first on its side, so neither shifts.
+    initDevPanel({ client: createMockClient(), side: "left", label: "A" });
+    initDevPanel({ client: createMockClient(), side: "right", label: "B" });
+
+    const panels = document.querySelectorAll<HTMLElement>("aside.ago-dev-card");
+    expect(panels[0].style.left).toBe("16px"); // mainA, left edge
+    expect(panels[2].style.right).toBe(""); // mainB, default right edge (no offset)
+    expect(panels[2].style.left).toBe("");
+  });
+
+  it("shifts a second panel over when both land on the same side", () => {
+    initDevPanel({ client: createMockClient(), side: "left" });
+    initDevPanel({ client: createMockClient(), side: "left" });
+
+    const panels = document.querySelectorAll<HTMLElement>("aside.ago-dev-card");
+    expect(panels[0].style.left).toBe("16px"); // first left panel
+    expect(panels[2].style.left).toBe("392px"); // second left panel shifts over
+  });
 });
