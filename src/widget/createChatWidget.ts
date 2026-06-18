@@ -734,6 +734,13 @@ export function mountChatWidget(
     // to carve out the curl (technique from CodePen swards/gxQmbj).
     if (imessage && isLastOfBlock) {
       bubble.style.position = "relative";
+      // Flatten the corner the tail attaches to so the curl reads as part of the
+      // bubble (bottom-right for the user, bottom-left for the assistant).
+      if (isUser) {
+        bubble.style.borderBottomRightRadius = "4px";
+      } else {
+        bubble.style.borderBottomLeftRadius = "4px";
+      }
       const fill = div({
         position: "absolute",
         zIndex: "0",
