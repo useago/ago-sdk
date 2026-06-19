@@ -1244,6 +1244,7 @@ function buildInput(args: BuildInputArgs): {
   css(textarea, {
     flex: "1",
     resize: "none",
+    boxSizing: "border-box",
     padding: "10px 12px",
     border: `1px solid ${BORDER_COLOR}`,
     borderRadius: "12px",
@@ -1252,9 +1253,24 @@ function buildInput(args: BuildInputArgs): {
     fontSize: "16px",
     fontFamily: FONT_VAR,
     lineHeight: "1.4",
-    maxHeight: "120px",
+    // Grow with content up to 4 lines (16px * 1.4 * 4 + 20px padding), then scroll
+    maxHeight: "110px",
+    overflowY: "hidden",
     outline: "none",
   });
+
+  // Auto-grow the textarea to fit its content, capped at maxHeight (4 lines).
+  // Leaves the resting (single-line) size untouched: it only sets an explicit
+  // height once the content has actually been measured in the DOM. The +2 keeps
+  // the border-box height matching the natural height (1px border top + bottom).
+  const autoResize = (): void => {
+    const max = 110;
+    textarea.style.height = "auto";
+    const target = Math.min(textarea.scrollHeight + 2, max);
+    textarea.style.height = `${target}px`;
+    textarea.style.overflowY = textarea.scrollHeight + 2 > max ? "auto" : "hidden";
+  };
+  textarea.addEventListener("input", autoResize);
 
   const sendBtn = document.createElement("button");
   sendBtn.type = "submit";
@@ -1333,6 +1349,7 @@ function buildInput(args: BuildInputArgs): {
     const content = textarea.value;
     const collected = files;
     textarea.value = "";
+    autoResize();
     files = [];
     renderFiles();
     return { content, files: collected };
