@@ -421,27 +421,32 @@ describe("mountChatWidget", () => {
       const widget = mountChatWidget(root, { client, bubbleStyle: "imessage" });
       await widget.sendMessage("hi");
 
-      // Assistant message: filled bubble with the tail on the bottom-left.
+      // Assistant message: filled bubble with the tail bulge on the bottom-left
+      // (a `.ago-message__tail` overlay positioned to the left of the bubble).
       const assistant = root.querySelector<HTMLElement>(
         ".ago-message--assistant .ago-message__content"
       );
       expect(assistant).not.toBeNull();
       expect(assistant!.style.padding).toBe("10px 14px");
       expect(assistant!.style.backgroundColor).not.toBe("transparent");
-      expect(assistant!.style.borderBottomLeftRadius).not.toBe("");
-      expect(assistant!.style.borderBottomLeftRadius).not.toBe(
-        assistant!.style.borderTopLeftRadius
+      const assistantTail = assistant!.querySelector<HTMLElement>(
+        ".ago-message__tail"
       );
+      expect(assistantTail).not.toBeNull();
+      expect(assistantTail!.style.left).not.toBe("");
+      expect(assistantTail!.style.right).toBe("");
+      expect(assistantTail!.style.borderBottomRightRadius).not.toBe("");
 
-      // User message: tail on the bottom-right.
+      // User message: tail bulge on the bottom-right.
       const user = root.querySelector<HTMLElement>(
         ".ago-message--user .ago-message__content"
       );
       expect(user).not.toBeNull();
-      expect(user!.style.borderBottomRightRadius).not.toBe("");
-      expect(user!.style.borderBottomRightRadius).not.toBe(
-        user!.style.borderTopRightRadius
-      );
+      const userTail = user!.querySelector<HTMLElement>(".ago-message__tail");
+      expect(userTail).not.toBeNull();
+      expect(userTail!.style.right).not.toBe("");
+      expect(userTail!.style.left).toBe("");
+      expect(userTail!.style.borderBottomLeftRadius).not.toBe("");
 
       widget.destroy();
       root.remove();

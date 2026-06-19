@@ -56,6 +56,22 @@ export interface WidgetTheme {
 }
 
 /**
+ * The greeting shown before any conversation has started. Pass a plain string
+ * for the classic centered empty-state placeholder, or an object to control how
+ * it is presented:
+ *
+ * - `mode: "static"` (default): the centered, muted empty-state text. It is not
+ *   a real message and disappears once the conversation starts.
+ * - `mode: "streaming"`: the greeting is delivered as a real assistant message
+ *   bubble, typed out token-by-token, that stays in the thread. It only plays on
+ *   a fresh visit (skipped when a thread is being resumed), and `speed` sets the
+ *   per-token interval in milliseconds (default `45`).
+ */
+export type WelcomeMessage =
+  | string
+  | { message: string; mode?: "static" | "streaming"; speed?: number };
+
+/**
  * Options for {@link mountChatWidget} — the framework-agnostic (pure TS/JS)
  * equivalent of the React `<ChatWidget>` component. Same features: conversational
  * forms (form creator) and clickable suggested replies.
@@ -78,8 +94,13 @@ export interface MountChatWidgetOptions {
   persistConversation?: boolean | Partial<ConversationSessionOptions>;
   /** Widget title shown in the header. */
   title?: string;
-  /** Message shown before any conversation has started. */
-  welcomeMessage?: string;
+  /**
+   * Greeting shown before any conversation has started. A plain string renders
+   * the classic centered empty-state; pass a {@link WelcomeMessage} object with
+   * `mode: "streaming"` to type it out as a real assistant bubble on a fresh
+   * visit instead.
+   */
+  welcomeMessage?: WelcomeMessage;
   /** Input placeholder. */
   placeholder?: string;
   /** Enable file attachments. */
@@ -404,6 +425,17 @@ export function mountChatWidget(
     onFormError,
   } = options;
 
+  // Normalize the greeting into a string + presentation. A bare string (or the
+  // default) is the classic centered empty-state; the object form opts into the
+  // streamed assistant-bubble intro.
+  const wm =
+    typeof welcomeMessage === "string"
+      ? { message: welcomeMessage, mode: "static" as const }
+      : welcomeMessage;
+  const welcomeText = wm.message;
+  const welcomeMode = wm.mode ?? "static";
+  const welcomeSpeed = ("speed" in wm && wm.speed) || 45;
+
   if (!options.client && !options.config?.baseUrl) {
     throw new AgoError(
       "mountChatWidget requires either `client` or `config` (with a baseUrl).",
@@ -434,6 +466,9 @@ export function mountChatWidget(
   let messages: AgoMessage[] = [];
   let isLoading = false;
   let errorMessage: string | null = null;
+  // Handle for the streamed-welcome typewriter, so it can be canceled when the
+  // user sends a message mid-stream or the widget is destroyed.
+  let introTimer: ReturnType<typeof setInterval> | undefined;
   // Resolved confirmation text for each submitted form, in submit order — each
   // renders a "form submitted" notice appended below the conversation.
   const formNotices: string[] = [];
@@ -859,15 +894,20 @@ export function mountChatWidget(
   function render(): void {
     messagesEl.replaceChildren();
     if (messages.length === 0) {
-      const welcome = div({
-        textAlign: "center",
-        color: MUTED_TEXT_COLOR,
-        padding: "24px 16px",
-        fontSize: "16px",
-        lineHeight: "1.5",
-      });
-      welcome.appendChild(renderMarkdown(welcomeMessage));
-      messagesEl.appendChild(welcome);
+      // In streaming mode the empty state stays blank: the greeting plays as a
+      // real assistant bubble (see streamWelcome), so there are no messages to
+      // show only for the brief moment before the first token arrives.
+      if (welcomeMode === "static") {
+        const welcome = div({
+          textAlign: "center",
+          color: MUTED_TEXT_COLOR,
+          padding: "24px 16px",
+          fontSize: "16px",
+          lineHeight: "1.5",
+        });
+        welcome.appendChild(renderMarkdown(welcomeText));
+        messagesEl.appendChild(welcome);
+      }
     } else {
       messages.forEach((message, index) => {
         // Last bubble of a same-sender block (gets the iMessage tail).
@@ -968,6 +1008,38 @@ export function mountChatWidget(
     render();
   };
 
+  // Type a synthetic greeting out as a real assistant bubble (welcomeMessage in
+  // streaming mode). Driven straight off the widget's own `messages`/`render()`
+  // rather than client events, so it never fires `onMessageReceived` and the
+  // timer can be canceled on send/destroy.
+  function streamWelcome(text: string): void {
+    const intro: AgoMessage = {
+      id: `ago-intro-${Date.now()}`,
+      conversationId: "",
+      content: "",
+      role: "assistant",
+      status: "IN_PROGRESS",
+      createdAt: new Date(),
+    };
+    messages.push(intro);
+    render();
+
+    const tokens = text.match(/\S+\s*/g) ?? [text];
+    let i = 0;
+    introTimer = setInterval(() => {
+      if (i >= tokens.length) {
+        clearInterval(introTimer);
+        introTimer = undefined;
+        intro.status = "DONE";
+        render();
+        return;
+      }
+      intro.content += tokens[i];
+      i++;
+      render();
+    }, welcomeSpeed);
+  }
+
   client.on("message:start", onStart);
   client.on("message:chunk", onChunk);
   client.on("message:answer-complete", onAnswerComplete);
@@ -1024,6 +1096,19 @@ export function mountChatWidget(
     onMessageSent?.(trimmed);
     isLoading = true;
     errorMessage = null;
+
+    // If the streamed greeting is still typing, stop it and finalize what's there
+    // so it doesn't interleave with the user's turn. An empty intro is dropped.
+    if (introTimer) {
+      clearInterval(introTimer);
+      introTimer = undefined;
+      const intro = messages.find((m) => m.id.startsWith("ago-intro-"));
+      if (intro && !intro.content) {
+        messages = messages.filter((m) => m !== intro);
+      } else if (intro) {
+        intro.status = "DONE";
+      }
+    }
 
     const stamp = Date.now();
     messages.push({
@@ -1117,7 +1202,11 @@ export function mountChatWidget(
 
   render();
   focus();
+  // Resuming a thread loads its real history; otherwise (a fresh visit) play the
+  // streamed greeting if one was configured. `conversationId` is the fresh-visit
+  // gate: it's set only when an explicit id or a stored last-active thread exists.
   if (conversationId) void loadHistory(conversationId);
+  else if (welcomeMode === "streaming") streamWelcome(welcomeText);
   if (loadThreads) void refreshThreads();
 
   return {
@@ -1131,6 +1220,7 @@ export function mountChatWidget(
     threads,
     refreshThreads,
     destroy() {
+      if (introTimer) clearInterval(introTimer);
       client.off("message:start", onStart);
       client.off("message:chunk", onChunk);
       client.off("message:answer-complete", onAnswerComplete);
