@@ -268,7 +268,7 @@ so no media queries or hover); CSS variables override it if both are present.
 | --------------------------- | --------------- | ------------------- | ----------------------------------------------------------------- |
 | `--ago-font`                | `font`          | IBM Plex Sans stack | Whole panel (`inherit` adopts the page font)                      |
 | `--ago-radius`              | `radius`        | `16px`              | Panel container corners                                           |
-| `--ago-message-radius`      | `messageRadius` | `16px`              | Message bubble and suggested-reply pill corners                   |
+| `--ago-message-radius`      | `messageRadius` | `16px` (`20px` with `bubbleStyle: "imessage"`) | Message bubble and suggested-reply pill corners |
 | `--ago-brand-color`         | `brand`         | `#03182f`           | User bubbles + send button (and header, unless `headerBg` is set) |
 | `--ago-brand-text-color`    | `brandText`     | `#fff`              | Text on `brand`                                                   |
 | `--ago-header-background`   | `headerBg`      | → `brand`           | Header background                                                 |
