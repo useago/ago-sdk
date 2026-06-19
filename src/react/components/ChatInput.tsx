@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from "react";
+import React, { useCallback, useRef, useState } from "react";
 
 export interface ChatInputProps {
   onSend: (message: string, files?: File[]) => void;
@@ -45,7 +45,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         requestAnimationFrame(autoResize);
       }
     },
-    [message, files, onSend, autoResize]
+    [message, files, onSend, autoResize],
   );
 
   const handleKeyDown = useCallback(
@@ -55,7 +55,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         handleSubmit(e);
       }
     },
-    [handleSubmit]
+    [handleSubmit],
   );
 
   const handleFileChange = useCallback(
@@ -63,7 +63,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
       const selectedFiles = Array.from(e.target.files || []);
       setFiles((prev) => [...prev, ...selectedFiles]);
     },
-    []
+    [],
   );
 
   const removeFile = useCallback((index: number) => {
@@ -109,12 +109,20 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                 color: "#30373e",
               }}
             >
-              <span style={{ maxWidth: "120px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <span
+                style={{
+                  maxWidth: "120px",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
                 {file.name}
               </span>
               <button
                 type="button"
                 onClick={() => removeFile(i)}
+                aria-label={`Remove ${file.name}`}
                 style={{
                   border: "none",
                   background: "none",
@@ -146,6 +154,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={disabled}
+              aria-label="Attach file"
               style={{
                 padding: "8px",
                 border: "1px solid #dee3e8",
@@ -178,6 +187,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           }}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
+          // A placeholder is not an accessible name; label the field explicitly.
+          aria-label={placeholder}
           disabled={disabled}
           rows={1}
           style={{
@@ -213,11 +224,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             padding: "10px 18px",
             border: "none",
             borderRadius: "20px",
-            backgroundColor:
-              disabled || !canSend ? "#b5bfc8" : "#03182f",
+            backgroundColor: disabled || !canSend ? "#b5bfc8" : "#03182f",
             color: "#fff",
-            cursor:
-              disabled || !canSend ? "not-allowed" : "pointer",
+            cursor: disabled || !canSend ? "not-allowed" : "pointer",
             fontWeight: 500,
             fontSize: "16px",
             transition: "background-color 0.15s",

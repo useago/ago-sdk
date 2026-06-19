@@ -565,6 +565,12 @@ export function mountChatWidget(
     backgroundColor: MESSAGES_BACKGROUND,
   });
   messagesEl.className = "ago-chat-widget__messages";
+  // Announce streamed replies to screen readers as they arrive, without stealing
+  // focus.
+  messagesEl.setAttribute("role", "log");
+  messagesEl.setAttribute("aria-live", "polite");
+  messagesEl.setAttribute("aria-relevant", "additions text");
+  messagesEl.setAttribute("aria-atomic", "false");
 
   const { inputRow, setDisabled, focus } = buildInput({
     placeholder,
@@ -838,6 +844,7 @@ export function mountChatWidget(
         btn.textContent = reply;
         btn.disabled = !followUpEnabled;
         css(btn, {
+          minHeight: "36px",
           padding: "6px 14px",
           fontSize: "14px",
           borderRadius: MESSAGE_RADIUS,
@@ -933,6 +940,8 @@ export function mountChatWidget(
         fontSize: "13px",
         border: "1px solid #fecaca",
       });
+      // Announce failures immediately (the surrounding log is only `polite`).
+      err.setAttribute("role", "alert");
       err.textContent = errorMessage;
       messagesEl.appendChild(err);
     }
@@ -1331,6 +1340,8 @@ function buildInput(args: BuildInputArgs): {
 
   const textarea = document.createElement("textarea");
   textarea.placeholder = args.placeholder;
+  // A placeholder is not an accessible name; label the field explicitly.
+  textarea.setAttribute("aria-label", args.placeholder);
   textarea.rows = 1;
   css(textarea, {
     flex: "1",
@@ -1347,7 +1358,6 @@ function buildInput(args: BuildInputArgs): {
     // Grow with content up to 4 lines (16px * 1.4 * 4 + 20px padding), then scroll
     maxHeight: "110px",
     overflowY: "hidden",
-    outline: "none",
   });
 
   // Auto-grow the textarea to fit its content, capped at maxHeight (4 lines).
@@ -1419,6 +1429,7 @@ function buildInput(args: BuildInputArgs): {
     css(fileInput, { display: "none" });
     attachBtn = document.createElement("button");
     attachBtn.type = "button";
+    attachBtn.setAttribute("aria-label", "Attach file");
     attachBtn.textContent = "📎";
     css(attachBtn, {
       padding: "10px 12px",
@@ -1452,6 +1463,7 @@ function buildInput(args: BuildInputArgs): {
       name.textContent = file.name;
       const remove = document.createElement("button");
       remove.type = "button";
+      remove.setAttribute("aria-label", `Remove ${file.name}`);
       remove.textContent = "×";
       css(remove, {
         border: "none",

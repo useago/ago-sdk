@@ -207,6 +207,12 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
       {/* Messages */}
       <div
         className="ago-chat-widget__messages"
+        // Announce streamed replies to screen readers as they arrive, without
+        // stealing focus.
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions text"
+        aria-atomic={false}
         style={{
           flex: 1,
           overflow: "auto",
@@ -240,6 +246,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
 
         {error && (
           <div
+            role="alert"
             style={{
               padding: "10px 14px",
               backgroundColor: "#fef2f2",
