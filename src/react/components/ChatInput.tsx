@@ -21,6 +21,19 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const [message, setMessage] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Grow the textarea to fit its content, capped at 4 lines, then scroll.
+  // The +2 keeps the border-box height matching the natural single-line height
+  // (1px border top + bottom).
+  const autoResize = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const max = 110;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight + 2, max)}px`;
+    el.style.overflowY = el.scrollHeight + 2 > max ? "auto" : "hidden";
+  }, []);
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
@@ -29,9 +42,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         onSend(message.trim(), files.length > 0 ? files : undefined);
         setMessage("");
         setFiles([]);
+        requestAnimationFrame(autoResize);
       }
     },
-    [message, files, onSend]
+    [message, files, onSend, autoResize]
   );
 
   const handleKeyDown = useCallback(
@@ -156,8 +170,12 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         )}
 
         <textarea
+          ref={textareaRef}
           value={message}
-          onChange={(e) => setMessage(e.target.value)}
+          onChange={(e) => {
+            setMessage(e.target.value);
+            autoResize();
+          }}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           disabled={disabled}
@@ -169,8 +187,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             borderRadius: "20px",
             resize: "none",
             outline: "none",
+            boxSizing: "border-box",
+            // Grow with content up to 4 lines, then scroll.
+            maxHeight: "110px",
+            overflowY: "hidden",
             fontFamily: "inherit",
             fontSize: "16px",
+            lineHeight: 1.4,
             color: "#30373e",
             backgroundColor: "#f8f8f8",
             transition: "border-color 0.15s",
