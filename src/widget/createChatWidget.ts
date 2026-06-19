@@ -165,7 +165,9 @@ export interface MountChatWidgetOptions {
    * function to build the text from the raw submit response yourself; return a
    * nullish value to fall back to the default text.
    */
-  formSubmittedMessage?: string | ((result: unknown) => string | null | undefined);
+  formSubmittedMessage?:
+    | string
+    | ((result: unknown) => string | null | undefined);
   /**
    * How clicking a suggested follow-up reply behaves. Defaults to sending the
    * reply as a new user message. Pass a handler to override, or `false` to
@@ -269,6 +271,7 @@ const ACCENT_COLOR = "var(--ago-accent-color, #1b5fc4)";
 const AGENT_BUBBLE_BACKGROUND = "var(--ago-agent-bubble-background, #f1f3f5)";
 const RADIUS = "var(--ago-radius, 16px)";
 const MESSAGE_RADIUS = "var(--ago-message-radius, 16px)";
+const MESSAGE_RADIUS_IMESSAGE = "var(--ago-message-radius, 20px)";
 
 /** Apply a {@link WidgetTheme} as inline `--ago-*` custom properties on the root. */
 function applyTheme(el: HTMLElement, theme: WidgetTheme | undefined): void {
@@ -717,7 +720,11 @@ export function mountChatWidget(
     const bubble = div({
       maxWidth: imessage ? "75%" : isUser ? "75%" : bubbled ? "85%" : "100%",
       padding: bubbled ? "10px 14px" : "2px 8px",
-      borderRadius: bubbled ? MESSAGE_RADIUS : "0",
+      borderRadius: imessage
+        ? MESSAGE_RADIUS_IMESSAGE
+        : bubbled
+          ? MESSAGE_RADIUS
+          : "0",
       backgroundColor: isUser
         ? BRAND_COLOR
         : bubbled
@@ -734,17 +741,10 @@ export function mountChatWidget(
     // to carve out the curl (technique from CodePen swards/gxQmbj).
     if (imessage && isLastOfBlock) {
       bubble.style.position = "relative";
-      // Flatten the corner the tail attaches to so the curl reads as part of the
-      // bubble (bottom-right for the user, bottom-left for the assistant).
-      if (isUser) {
-        bubble.style.borderBottomRightRadius = "4px";
-      } else {
-        bubble.style.borderBottomLeftRadius = "4px";
-      }
       const fill = div({
         position: "absolute",
         zIndex: "0",
-        bottom: "0",
+        bottom: "-2px",
         width: "20px",
         height: "20px",
         background: isUser ? BRAND_COLOR : AGENT_BUBBLE_BACKGROUND,
@@ -753,7 +753,7 @@ export function mountChatWidget(
       const mask = div({
         position: "absolute",
         zIndex: "1",
-        bottom: "0",
+        bottom: "-2px",
         width: "10px",
         height: "20px",
         background: MESSAGES_BACKGROUND,
@@ -761,12 +761,12 @@ export function mountChatWidget(
       mask.className = "ago-message__tail-mask";
       if (isUser) {
         fill.style.right = "-8px";
-        fill.style.borderBottomLeftRadius = "15px";
+        fill.style.borderBottomLeftRadius = "16px 14px";
         mask.style.right = "-10px";
         mask.style.borderBottomLeftRadius = "10px";
       } else {
         fill.style.left = "-7px";
-        fill.style.borderBottomRightRadius = "15px";
+        fill.style.borderBottomRightRadius = "16px 14px";
         mask.style.left = "-10px";
         mask.style.borderBottomRightRadius = "10px";
       }
@@ -1268,7 +1268,8 @@ function buildInput(args: BuildInputArgs): {
     textarea.style.height = "auto";
     const target = Math.min(textarea.scrollHeight + 2, max);
     textarea.style.height = `${target}px`;
-    textarea.style.overflowY = textarea.scrollHeight + 2 > max ? "auto" : "hidden";
+    textarea.style.overflowY =
+      textarea.scrollHeight + 2 > max ? "auto" : "hidden";
   };
   textarea.addEventListener("input", autoResize);
 
