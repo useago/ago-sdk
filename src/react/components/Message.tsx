@@ -233,6 +233,7 @@ export const Message: React.FC<MessageProps> = ({
                   onFollowUpClick ? () => onFollowUpClick(reply) : undefined
                 }
                 style={{
+                  minHeight: "36px",
                   padding: "6px 14px",
                   fontSize: "13px",
                   borderRadius: "16px",
