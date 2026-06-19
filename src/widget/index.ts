@@ -7,6 +7,7 @@ export type {
   MountChatWidgetOptions,
   ChatWidgetHandle,
   WidgetTheme,
+  WelcomeMessage,
 } from "./createChatWidget";
 
 // Dependency-free markdown → DOM renderer used for message content; exported so

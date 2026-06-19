@@ -75,7 +75,7 @@ widget.destroy(); // removes listeners, uninstalls forms, clears the DOM
 | `persistConversation?` | `boolean \| Partial<ConversationSessionOptions>` | — (off)                          |
 | `loadThreads?`         | `boolean`                                        | `false`                          |
 | `title?`               | `string`                                         | `"Chat"`                         |
-| `welcomeMessage?`      | `string`                                         | `"Hello! How can I help you today?"` |
+| `welcomeMessage?`      | `string \| { message: string; mode?: "static" \| "streaming"; speed? }` | `"Hello! How can I help you today?"` |
 | `placeholder?`         | `string`                                         | `"Type a message..."`            |
 | `allowFiles?`          | `boolean`                                        | `false`                          |
 | `height?`              | `string \| number`                               | `500` (ignored for side panels)  |
@@ -96,6 +96,24 @@ widget.destroy(); // removes listeners, uninstalls forms, clears the DOM
 | `onMessageReceived?`   | `({ id, content }) => void`                      | —                                |
 | `onFormSubmitted?`     | `({ name, values, result }) => void`             | —                                |
 | `onFormError?`         | `({ name, values, error }) => void`              | —                                |
+
+### Streamed welcome message
+
+By default `welcomeMessage` is a centered placeholder that disappears once the chat
+starts. Pass an object with `mode: "streaming"` to greet the visitor with a real
+assistant bubble, typed out token-by-token. It plays only on a fresh visit (skipped
+when a stored thread is resumed) and `speed` sets the per-token interval in ms.
+
+```js
+mountChatWidget("#ago-chat", {
+  config: { baseUrl: "https://YOUR-DOMAIN.api.useago.com" },
+  welcomeMessage: {
+    message: "Hi! Tell me about your team and I'll set up a demo.",
+    mode: "streaming",
+    speed: 45,
+  },
+});
+```
 
 `mountChatWidget` returns a handle:
 `{ client, element, sendMessage, session, threads, refreshThreads, destroy }` (`session` is
