@@ -330,7 +330,8 @@ function ensureKeyframes(): void {
   const style = document.createElement("style");
   style.id = KEYFRAMES_ID;
   style.textContent =
-    "@keyframes ago-pulse { 0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }";
+    "@keyframes ago-pulse { 0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }" +
+    "@keyframes ago-spin { to { transform: rotate(360deg); } }";
   document.head.appendChild(style);
 }
 
@@ -1271,21 +1272,53 @@ function buildInput(args: BuildInputArgs): {
     textarea.style.overflowY =
       textarea.scrollHeight + 2 > max ? "auto" : "hidden";
   };
-  textarea.addEventListener("input", autoResize);
+  textarea.addEventListener("input", () => {
+    autoResize();
+    refreshSendBtn();
+  });
+
+  // Inline icons (no font/icon-lib dependency). Both use `currentColor` so they
+  // inherit the button's BRAND_TEXT_COLOR, keeping the `theme.brandText` contract.
+  const ARROW_ICON =
+    '<svg width="18" height="18" viewBox="0 -960 960 960" fill="currentColor" ' +
+    'aria-hidden="true"><path d="M440-160v-487L216-423l-56-57 320-320 320 320-56 ' +
+    '57-224-224v487h-80Z"/></svg>';
+  const SPINNER_ICON =
+    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" ' +
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+    'aria-hidden="true" style="animation: ago-spin 0.8s linear infinite">' +
+    '<path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>';
 
   const sendBtn = document.createElement("button");
   sendBtn.type = "submit";
-  sendBtn.textContent = "Send";
+  sendBtn.setAttribute("aria-label", "Send");
+  sendBtn.innerHTML = ARROW_ICON;
   css(sendBtn, {
-    padding: "10px 16px",
+    flexShrink: "0",
+    width: "40px",
+    height: "40px",
+    padding: "0",
     border: "none",
-    borderRadius: "12px",
+    borderRadius: "50%",
     backgroundColor: BRAND_COLOR,
     color: BRAND_TEXT_COLOR,
-    fontSize: "16px",
-    fontWeight: "500",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
     cursor: "pointer",
   });
+
+  // The send button is disabled while the agent is answering (spinner shown) and
+  // when there's nothing to send (no text and no files), matching `submit()`.
+  let answering = false;
+  const refreshSendBtn = (): void => {
+    const hasContent = textarea.value.trim() !== "" || files.length > 0;
+    const disabled = answering || !hasContent;
+    sendBtn.disabled = disabled;
+    sendBtn.innerHTML = answering ? SPINNER_ICON : ARROW_ICON;
+    sendBtn.style.opacity = disabled && !answering ? "0.5" : "1";
+    sendBtn.style.cursor = disabled ? "default" : "pointer";
+  };
 
   let fileInput: HTMLInputElement | null = null;
   let attachBtn: HTMLButtonElement | null = null;
@@ -1344,6 +1377,7 @@ function buildInput(args: BuildInputArgs): {
       chip.append(name, remove);
       fileList.appendChild(chip);
     });
+    refreshSendBtn();
   }
 
   const getValueAndClear = (): { content: string; files: File[] } => {
@@ -1379,14 +1413,18 @@ function buildInput(args: BuildInputArgs): {
   if (fileInput) form.appendChild(fileInput);
   form.append(fileList, row);
 
+  // Start disabled: the input is empty on mount.
+  refreshSendBtn();
+
   return {
     inputRow: form,
     getValueAndClear,
     setDisabled: (disabled: boolean) => {
       textarea.disabled = disabled;
-      sendBtn.disabled = disabled;
-      sendBtn.style.opacity = disabled ? "0.6" : "1";
-      sendBtn.style.cursor = disabled ? "not-allowed" : "pointer";
+      // The send button also stays disabled when the input is empty; let
+      // refreshSendBtn reconcile the answering state with content presence.
+      answering = disabled;
+      refreshSendBtn();
     },
     focus: () => textarea.focus(),
   };
