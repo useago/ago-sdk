@@ -249,7 +249,7 @@ Key events: `message:start`, `message:chunk` (`{ content }` per token),
 - Forms: `createFormCollector`
 - Testing: `createMockClient`
 - Types: `AgoConfig`, `AgoMessage`, `Conversation`, `AgoAgent`, `AgoSource`,
-  `ToolCallData`
+  `AgoAttachment`, `ToolCallData`
 
 ## Checklist before you finish
 

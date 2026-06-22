@@ -4,6 +4,7 @@ export { AgoClient } from "./client/AgoClient";
 // Types
 export type {
   AgoAgent,
+  AgoAttachment,
   AgoClientEvents,
   AgoConfig,
   AgoEventHandler,
@@ -131,3 +132,10 @@ export { withHandler } from "./helpers/factory";
 // Utils (for advanced usage)
 export { EventEmitter } from "./utils/eventEmitter";
 export { logger } from "./utils/logger";
+
+// Attachment display helpers (for building a custom UI that shows uploads safely)
+export {
+  canInlineImage,
+  formatFileSize,
+  safeAttachmentUrl,
+} from "./utils/attachments";

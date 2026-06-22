@@ -792,5 +792,81 @@ describe("mountChatWidget", () => {
       root.remove();
       client.destroy();
     });
+
+    it("displays uploaded files securely when resuming a thread", async () => {
+      const storage = fakeStorage();
+      seedThread(storage, "conv-files", Date.now());
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      vi.spyOn(client, "getConversation").mockResolvedValue(
+        makeConversation("conv-files", [
+          {
+            id: "m1",
+            conversationId: "conv-files",
+            content: "see attached",
+            role: "user",
+            status: "DONE",
+            createdAt: new Date(0),
+            attachments: [
+              {
+                id: "img",
+                name: "photo.png",
+                contentType: "image/png",
+                fileSize: 2048,
+                url: "https://files.example.com/photo.png?sig=abc",
+                isSafeImage: true,
+              },
+              {
+                id: "doc",
+                name: "report.pdf",
+                contentType: "application/pdf",
+                fileSize: 1024 * 1024,
+                url: "https://files.example.com/report.pdf?sig=xyz",
+                isSafeImage: false,
+              },
+              {
+                id: "spoof",
+                name: "evil.png",
+                contentType: "image/png",
+                fileSize: 100,
+                url: "https://files.example.com/evil.png",
+                // No safe verdict from the backend → must NOT be embedded.
+                isSafeImage: false,
+              },
+            ],
+          },
+        ])
+      );
+
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      const widget = mountChatWidget(root, {
+        client,
+        persistConversation: { storage },
+      });
+
+      await vi.waitFor(() => {
+        expect(root.textContent).toContain("see attached");
+      });
+
+      const imgs = root.querySelectorAll<HTMLImageElement>(
+        ".ago-message__attachments img"
+      );
+      // Only the backend-verified image is embedded; the unverified one is a link.
+      expect(imgs).toHaveLength(1);
+      expect(imgs[0].src).toBe("https://files.example.com/photo.png?sig=abc");
+
+      // The PDF and the unverified image both render as download links, not <img>.
+      expect(root.textContent).toContain("report.pdf");
+      expect(root.textContent).toContain("evil.png");
+      expect(
+        Array.from(
+          root.querySelectorAll<HTMLImageElement>("img")
+        ).some((el) => el.src.includes("evil.png"))
+      ).toBe(false);
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
   });
 });

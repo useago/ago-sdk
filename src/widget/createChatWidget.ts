@@ -18,6 +18,12 @@ import {
   type ConversationSession,
   type ConversationSessionOptions,
 } from "../state/createConversationSession";
+import {
+  attachmentsFromFiles,
+  canInlineImage,
+  formatFileSize,
+  safeAttachmentUrl,
+} from "../utils/attachments";
 import { renderMarkdown } from "./renderMarkdown";
 
 /**
@@ -757,7 +763,99 @@ export function mountChatWidget(
       wrap.appendChild(sources);
     }
 
+    // Uploaded files, above the bubble. Only backend-verified safe images embed
+    // inline as an <img>; everything else is a download link (no XSS surface).
+    if (message.attachments && message.attachments.length > 0) {
+      const attachments = div({
+        display: "flex",
+        flexWrap: "wrap",
+        gap: "6px",
+        marginBottom: "6px",
+        justifyContent: isUser ? "flex-end" : "flex-start",
+        maxWidth: "75%",
+      });
+      attachments.className = "ago-message__attachments";
+      for (const att of message.attachments) {
+        const href = safeAttachmentUrl(att.url);
+        if (canInlineImage(att) && href) {
+          const link = document.createElement("a");
+          link.href = href;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          css(link, { display: "inline-block", textDecoration: "none" });
+          const img = document.createElement("img");
+          img.src = href;
+          img.alt = att.name;
+          img.loading = "lazy";
+          css(img, {
+            maxWidth: "180px",
+            maxHeight: "160px",
+            objectFit: "cover",
+            borderRadius: "10px",
+            border: `1px solid ${BORDER_COLOR}`,
+            display: "block",
+          });
+          link.appendChild(img);
+          attachments.appendChild(link);
+          continue;
+        }
+
+        const card = href
+          ? document.createElement("a")
+          : document.createElement("div");
+        if (href && card instanceof HTMLAnchorElement) {
+          card.href = href;
+          card.target = "_blank";
+          card.rel = "noopener noreferrer";
+        }
+        css(card, {
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "8px",
+          padding: "8px 12px",
+          borderRadius: "10px",
+          border: `1px solid ${BORDER_COLOR}`,
+          backgroundColor: isUser ? "rgba(255,255,255,0.12)" : PANEL_BACKGROUND,
+          color: isUser ? BRAND_TEXT_COLOR : TEXT_COLOR,
+          fontSize: "13px",
+          textDecoration: "none",
+          maxWidth: "220px",
+        });
+        const icon = document.createElement("span");
+        icon.textContent = "📄";
+        icon.setAttribute("aria-hidden", "true");
+        css(icon, { fontSize: "16px", lineHeight: "1", flexShrink: "0" });
+        const meta = div({
+          display: "flex",
+          flexDirection: "column",
+          minWidth: "0",
+        });
+        const name = div({
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          maxWidth: "160px",
+        });
+        name.textContent = att.name;
+        name.title = att.name;
+        meta.appendChild(name);
+        const size = formatFileSize(att.fileSize);
+        if (size) {
+          const sizeEl = div({ fontSize: "11px", color: MUTED_TEXT_COLOR });
+          sizeEl.textContent = size;
+          meta.appendChild(sizeEl);
+        }
+        card.append(icon, meta);
+        attachments.appendChild(card);
+      }
+      wrap.appendChild(attachments);
+    }
+
     const bubbled = isUser || agentBubble || imessage;
+
+    // An attachment-only message (files, no text) shows no empty bubble.
+    const hasBubble =
+      !!message.content || message.status === "IN_PROGRESS";
 
     const bubble = div({
       maxWidth: imessage ? "75%" : isUser ? "75%" : bubbled ? "85%" : "100%",
@@ -821,7 +919,7 @@ export function mountChatWidget(
     } else if (message.status === "IN_PROGRESS") {
       bubble.appendChild(buildStreamingDots());
     }
-    wrap.appendChild(bubble);
+    if (hasBubble) wrap.appendChild(bubble);
 
     // Only on the last message, so stale suggestions disappear once the user
     // sends their next message.
@@ -1126,6 +1224,8 @@ export function mountChatWidget(
       content: trimmed,
       role: "user",
       status: "DONE",
+      attachments:
+        files && files.length > 0 ? attachmentsFromFiles(files) : undefined,
       createdAt: new Date(),
     });
     messages.push({

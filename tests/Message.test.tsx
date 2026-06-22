@@ -219,3 +219,96 @@ describe("Message follow-up replies", () => {
     container.remove();
   });
 });
+
+describe("Message attachments", () => {
+  it("embeds a backend-verified safe image inline as an <img>", () => {
+    const html = renderToStaticMarkup(
+      <Message
+        message={makeMessage({
+          role: "user",
+          attachments: [
+            {
+              id: "a1",
+              name: "photo.png",
+              contentType: "image/png",
+              fileSize: 2048,
+              url: "https://files.example.com/photo.png?sig=abc",
+              isSafeImage: true,
+            },
+          ],
+        })}
+      />,
+    );
+    expect(html).toContain("<img");
+    expect(html).toContain('src="https://files.example.com/photo.png?sig=abc"');
+    expect(html).toContain('alt="photo.png"');
+  });
+
+  it("renders a download link (not an <img>) for an unverified image", () => {
+    const html = renderToStaticMarkup(
+      <Message
+        message={makeMessage({
+          role: "user",
+          attachments: [
+            {
+              id: "a1",
+              name: "photo.png",
+              contentType: "image/png",
+              fileSize: 2048,
+              url: "https://files.example.com/photo.png",
+              isSafeImage: false,
+            },
+          ],
+        })}
+      />,
+    );
+    expect(html).not.toContain("<img");
+    expect(html).toContain('href="https://files.example.com/photo.png"');
+    expect(html).toContain("photo.png");
+  });
+
+  it("renders a download link for a non-image file", () => {
+    const html = renderToStaticMarkup(
+      <Message
+        message={makeMessage({
+          role: "user",
+          attachments: [
+            {
+              id: "a1",
+              name: "report.pdf",
+              contentType: "application/pdf",
+              fileSize: 1024 * 1024,
+              url: "https://files.example.com/report.pdf",
+              isSafeImage: false,
+            },
+          ],
+        })}
+      />,
+    );
+    expect(html).not.toContain("<img");
+    expect(html).toContain("report.pdf");
+    expect(html).toContain("1.0 MB");
+  });
+
+  it("does not render an empty bubble for an attachment-only message", () => {
+    const html = renderToStaticMarkup(
+      <Message
+        message={makeMessage({
+          role: "user",
+          content: "",
+          attachments: [
+            {
+              id: "a1",
+              name: "photo.png",
+              contentType: "image/png",
+              url: "https://files.example.com/photo.png?sig=abc",
+              isSafeImage: true,
+            },
+          ],
+        })}
+      />,
+    );
+    expect(html).not.toContain("ago-message__content");
+    expect(html).toContain("ago-message__attachments");
+  });
+});
