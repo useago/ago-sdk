@@ -92,6 +92,39 @@ await ago.sendMessage("Summarise this", {
 });
 ```
 
+Uploaded files come back on the message that carries them, under
+`message.attachments` (an `AgoAttachment[]`):
+
+```ts
+const thread = await ago.getConversation(conversationId);
+for (const msg of thread.messages ?? []) {
+  for (const file of msg.attachments ?? []) {
+    file.name; // "invoice.pdf"
+    file.url; // presigned, time-limited URL
+    file.isSafeImage; // backend verdict: safe to embed inline?
+  }
+}
+```
+
+The widget and the React `<Message>` render these for you. They show the upload
+on the user's own bubble right away (a local preview), then the presigned URL
+once it loads.
+
+**Secure display.** The SDK embeds a file inline as an `<img>` only when the
+backend has verified it is a real, script-free image (`isSafeImage === true`).
+Everything else (PDFs, documents, SVGs, and any unverified or spoofed type)
+renders as a download link, never embedded. The rule is secure by default: if
+`isSafeImage` is absent, the file is treated as a download. Building a custom UI?
+Use the same gate via the exported helper:
+
+```ts
+import { canInlineImage } from "@useago/sdk";
+
+canInlineImage(file)
+  ? renderImage(file.url)
+  : renderDownloadLink(file.url, file.name);
+```
+
 ### Override the agent per message
 
 ```ts

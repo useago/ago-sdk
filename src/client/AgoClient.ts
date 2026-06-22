@@ -13,6 +13,7 @@ import type {
   DynamicContextProvider,
 } from "../state/ClientContextRegistry";
 import { SSEHandler } from "../streaming/SSEHandler";
+import { mapAttachment } from "../utils/attachments";
 import { EventEmitter } from "../utils/eventEmitter";
 import { logger } from "../utils/logger";
 import { AgoError } from "./errors";
@@ -309,6 +310,7 @@ export class AgoClient {
         status: string;
         created_at: string;
         tool_call_data?: Array<Record<string, unknown>>;
+        attachments?: Array<Record<string, unknown>>;
       }>;
     }>(`/api/sdk/v1/conversations/${conversationId}`);
 
@@ -324,6 +326,10 @@ export class AgoClient {
         status: m.status as AgoMessage["status"],
         createdAt: new Date(m.created_at),
         toolCalls: AgoClient.mapPersistedToolCalls(m.tool_call_data),
+        attachments:
+          m.attachments && m.attachments.length > 0
+            ? m.attachments.map(mapAttachment)
+            : undefined,
       })),
     };
 

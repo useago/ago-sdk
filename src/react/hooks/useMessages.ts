@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { AgoClient } from "../../client/AgoClient";
 import type { AgoMessage } from "../../client/types";
+import { attachmentsFromFiles } from "../../utils/attachments";
 import { useOptionalAgoClient } from "../context/AgoContext";
 
 export interface UseMessagesOptions {
@@ -152,13 +153,16 @@ export function useMessages({
       setIsLoading(true);
       setError(null);
 
-      // Add optimistic user message
+      // Add optimistic user message, with local previews of any uploaded files
+      // so they show on the user's own bubble before the server round trip.
       const userMessage: AgoMessage = {
         id: `temp-${Date.now()}`,
         conversationId: conversationId || "",
         content,
         role: "user",
         status: "DONE",
+        attachments:
+          files && files.length > 0 ? attachmentsFromFiles(files) : undefined,
         createdAt: new Date(),
       };
 

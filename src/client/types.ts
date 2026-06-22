@@ -42,6 +42,27 @@ export interface SendMessageOptions {
 }
 
 /**
+ * An uploaded file attached to a message.
+ *
+ * `url` is a presigned, time-limited URL the backend generates per request (or a
+ * local `blob:` URL for an optimistic preview). `isSafeImage` is the backend's
+ * verdict that the file is a real, script-free image safe to embed inline; the
+ * UI only renders an `<img>` when it is true and otherwise shows a download link.
+ */
+export interface AgoAttachment {
+  id: string;
+  name: string;
+  /** MIME type reported by the backend (e.g. `image/png`). */
+  contentType?: string;
+  /** Size in bytes. */
+  fileSize?: number;
+  /** Presigned download/preview URL, or a local `blob:` URL before upload. */
+  url?: string;
+  /** True only when the backend verified the file is a safe inline image. */
+  isSafeImage: boolean;
+}
+
+/**
  * Message from AGO
  */
 export interface AgoMessage {
@@ -54,6 +75,8 @@ export interface AgoMessage {
   sources?: AgoSource[];
   toolCalls?: ToolCallData[];
   followUpReplies?: string[];
+  /** Uploaded files on this message (usually the user's). */
+  attachments?: AgoAttachment[];
   createdAt: Date;
 }
 

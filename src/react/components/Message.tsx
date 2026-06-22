@@ -1,8 +1,97 @@
 import React from "react";
-import type { AgoMessage } from "../../client/types";
+import type { AgoAttachment, AgoMessage } from "../../client/types";
+import {
+  canInlineImage,
+  formatFileSize,
+  safeAttachmentUrl,
+} from "../../utils/attachments";
 import { Markdown } from "./Markdown";
 
 // ── Subcomponents ───────────────────────────────────────────────────
+
+/**
+ * Render one uploaded file. Only files the backend verified as safe images are
+ * embedded inline as an `<img>`; everything else (and any unverified or spoofed
+ * type) renders as a download link, never embedded. See `utils/attachments`.
+ */
+const AttachmentCard: React.FC<{ attachment: AgoAttachment; isUser: boolean }> = ({
+  attachment,
+  isUser,
+}) => {
+  const href = safeAttachmentUrl(attachment.url);
+
+  if (canInlineImage(attachment)) {
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{ display: "inline-block", textDecoration: "none" }}
+      >
+        <img
+          src={href}
+          alt={attachment.name}
+          loading="lazy"
+          style={{
+            maxWidth: "180px",
+            maxHeight: "160px",
+            objectFit: "cover",
+            borderRadius: "10px",
+            border: "1px solid #dee3e8",
+            display: "block",
+          }}
+        />
+      </a>
+    );
+  }
+
+  const size = formatFileSize(attachment.fileSize);
+  const inner = (
+    <>
+      <span style={{ fontSize: "16px", lineHeight: 1, flexShrink: 0 }} aria-hidden>
+        📄
+      </span>
+      <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <span
+          style={{
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            maxWidth: "160px",
+          }}
+          title={attachment.name}
+        >
+          {attachment.name}
+        </span>
+        {size && (
+          <span style={{ fontSize: "11px", color: "#6b6d6f" }}>{size}</span>
+        )}
+      </span>
+    </>
+  );
+
+  const cardStyle: React.CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "8px",
+    padding: "8px 12px",
+    borderRadius: "10px",
+    border: "1px solid #dee3e8",
+    backgroundColor: isUser ? "rgba(255,255,255,0.12)" : "#fff",
+    color: isUser ? "#fff" : "#30373e",
+    fontSize: "13px",
+    textDecoration: "none",
+    maxWidth: "220px",
+  };
+
+  return href ? (
+    <a href={href} target="_blank" rel="noopener noreferrer" style={cardStyle}>
+      {inner}
+    </a>
+  ) : (
+    <div style={cardStyle}>{inner}</div>
+  );
+};
 
 const SourceCard: React.FC<{
   source: { id: string; title: string; url?: string };
@@ -188,26 +277,51 @@ export const Message: React.FC<MessageProps> = ({
         </div>
       )}
 
-      {/* Message bubble */}
-      <div
-        className="ago-message__content"
-        style={{
-          maxWidth: isUser ? "75%" : "100%",
-          padding: isUser ? "10px 14px" : "2px 8px",
-          borderRadius: isUser ? "16px" : "0",
-          backgroundColor: isUser ? "#03182f" : "transparent",
-          color: isUser ? "#fff" : "#30373e",
-          wordBreak: "break-word",
-          fontSize: "16px",
-          lineHeight: "1.6",
-        }}
-      >
-        {message.content ? (
-          <Markdown content={message.content} />
-        ) : (
-          isStreaming && <StreamingDots />
-        )}
-      </div>
+      {/* Attachments (uploaded files), above the message bubble */}
+      {message.attachments && message.attachments.length > 0 && (
+        <div
+          className="ago-message__attachments"
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "6px",
+            marginBottom: "6px",
+            justifyContent: isUser ? "flex-end" : "flex-start",
+            maxWidth: "75%",
+          }}
+        >
+          {message.attachments.map((attachment) => (
+            <AttachmentCard
+              key={attachment.id}
+              attachment={attachment}
+              isUser={isUser}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Message bubble — hidden for an attachment-only message (no empty box). */}
+      {(message.content || isStreaming) && (
+        <div
+          className="ago-message__content"
+          style={{
+            maxWidth: isUser ? "75%" : "100%",
+            padding: isUser ? "10px 14px" : "2px 8px",
+            borderRadius: isUser ? "16px" : "0",
+            backgroundColor: isUser ? "#03182f" : "transparent",
+            color: isUser ? "#fff" : "#30373e",
+            wordBreak: "break-word",
+            fontSize: "16px",
+            lineHeight: "1.6",
+          }}
+        >
+          {message.content ? (
+            <Markdown content={message.content} />
+          ) : (
+            isStreaming && <StreamingDots />
+          )}
+        </div>
+      )}
 
       {/* Follow-up replies — only on the last message, so stale suggestions
           disappear once the user sends their next message. */}
