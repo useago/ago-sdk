@@ -5,6 +5,7 @@ Runnable example apps for `@useago/sdk`, one per stack.
 | Example | Stack | Entry |
 | --- | --- | --- |
 | `simple-react/` | React + Vite | `npm run dev` |
+| `react-sidebar-doc/` | React + Vite (chat folds into a sidebar, shows the top cited document) | `npm run dev` |
 | `glacier/` | React + Vite (ice-cream shop: functions + navigation) | `npm run dev` |
 | `simple-vue/` | Vue 3 + Vite | `npm run dev` |
 | `simple-angular/` | Angular | `npm run dev` |

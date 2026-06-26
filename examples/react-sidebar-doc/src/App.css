@@ -1,0 +1,303 @@
+:root {
+  --line: #dee3e8;
+  --ink: #30373e;
+  --navy: #03182f;
+  --blue: #1b5fc4;
+  --bg: #f5f7fa;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+}
+
+/* ── Layout ──────────────────────────────────────────────────────────── */
+
+.workspace {
+  display: flex;
+  height: 100vh;
+  justify-content: center;
+}
+
+/* Chat column. Centered card when alone, fixed-width sidebar once split. */
+.chat {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 760px;
+  background: #fff;
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  transition: max-width 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.workspace--split {
+  justify-content: flex-start;
+}
+
+.workspace--split .chat {
+  max-width: 400px;
+  border-left: none;
+}
+
+.doc {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-left: 1px solid var(--line);
+  animation: doc-in 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes doc-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* ── Chat ────────────────────────────────────────────────────────────── */
+
+.chat__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.chat__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #29c267;
+}
+
+.chat__title {
+  font-weight: 600;
+}
+
+.chat__hint {
+  margin-left: auto;
+  font-size: 12px;
+  color: #8a949d;
+}
+
+.chat__scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+.chat__input {
+  border-top: 1px solid var(--line);
+  padding: 12px;
+  flex-shrink: 0;
+}
+
+/* Welcome / empty state */
+.chat__welcome {
+  max-width: 440px;
+  margin: 8vh auto 0;
+  text-align: center;
+}
+
+.chat__welcome h1 {
+  font-size: 26px;
+  margin: 0 0 10px;
+  color: var(--navy);
+}
+
+.chat__welcome p {
+  color: #6b7480;
+  line-height: 1.5;
+}
+
+.chat__suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 24px;
+}
+
+.chat__suggestions button {
+  padding: 11px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.chat__suggestions button:hover {
+  border-color: var(--blue);
+  background: #f0f4ff;
+}
+
+/* ── Document ────────────────────────────────────────────────────────── */
+
+.doc__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.doc__titles {
+  min-width: 0;
+}
+
+.doc__eyebrow {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--blue);
+  margin-bottom: 4px;
+}
+
+.doc__title {
+  margin: 0;
+  font-size: 18px;
+  color: var(--navy);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.doc__open {
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--blue);
+  text-decoration: none;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  transition: border-color 0.15s;
+}
+
+.doc__open:hover {
+  border-color: var(--blue);
+}
+
+.doc__tabs {
+  display: flex;
+  gap: 8px;
+  padding: 12px 20px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line);
+}
+
+.doc__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 240px;
+  padding: 6px 12px 6px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.doc__tab:hover {
+  border-color: var(--blue);
+}
+
+.doc__tab.is-active {
+  border-color: var(--blue);
+  background: #f0f4ff;
+}
+
+.doc__tab-rank {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--blue);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.doc__tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.doc__body {
+  flex: 1;
+  min-height: 0;
+  background: var(--bg);
+}
+
+.doc__frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.doc__placeholder {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #8a949d;
+  text-align: center;
+  padding: 24px;
+}
+
+.doc__placeholder-sub {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* On narrow screens, stack the document under the chat. */
+@media (max-width: 880px) {
+  .workspace--split {
+    flex-direction: column;
+  }
+  .workspace--split .chat {
+    max-width: none;
+    height: 50vh;
+  }
+  .doc {
+    border-left: none;
+    border-top: 1px solid var(--line);
+  }
+}
