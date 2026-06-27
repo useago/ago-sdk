@@ -578,9 +578,24 @@ export function createFormCollector<V = Record<string, unknown>>(
   };
 
   const contextKey = `form:${name}`;
-  // The full schema reaches the agent through context (not just the tool params) so it
-  // knows every field, its type, the real `required` list (vs. the tool's `[]`), and the
-  // `requiredWhen` conditions explaining why a field is/becomes required while collecting.
+  // Every field's name, type, description and allowed values already reach the agent
+  // through the update_<name> tool's `parameters` (see toWireParameters). The only
+  // requiredness information the tool omits is the base `required` list (it sends `[]`
+  // so the form can fill incrementally) and the per-field `requiredWhen` conditions
+  // (stripped to keep the tool schema JSON-Schema-legal). So context carries just those
+  // rules, not a second copy of the whole schema — sending the full schema here doubled
+  // the prompt (a large form's schema is the single biggest chunk of the request).
+  const requiredWhenRules = Object.fromEntries(
+    Object.entries(schema.properties ?? {})
+      .filter(([, prop]) => prop.requiredWhen != null)
+      .map(([key, prop]) => [key, prop.requiredWhen]),
+  );
+  const requirementRules: { required: string[]; requiredWhen?: typeof requiredWhenRules } = {
+    required: schema.required ?? [],
+    ...(Object.keys(requiredWhenRules).length > 0 && {
+      requiredWhen: requiredWhenRules,
+    }),
+  };
   const contextProvider = (): ContextEntry => {
     const { values, submitted } = store.get();
     const { missing, complete } = deriveFormStatus(schema, values);
@@ -596,8 +611,9 @@ export function createFormCollector<V = Record<string, unknown>>(
       name: `Form: ${name}`,
       description:
         `${phase} ${description} ` +
-        `Some fields are conditionally required; the requiredWhen field in the schema tells you when each becomes required. ` +
-        `The form schema is the following: ${JSON.stringify(schema)}. ` +
+        `The form's fields, their types and allowed values are defined by the update_${name} tool. ` +
+        `Some fields are conditionally required; these rules say which fields are required and, via requiredWhen, when each becomes required: ` +
+        `${JSON.stringify(requirementRules)}. ` +
         `Data collected so far: ${JSON.stringify(values)}. ` +
         `Call update_${name} with any fields the user provides; ask only for what is still missing.${submitHint}`,
       data: {
