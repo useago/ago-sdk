@@ -38,8 +38,8 @@ export interface FormFieldLeafCondition {
  * An empty `anyOf` is never required; an empty `allOf` is always required.
  *
  * Stripped from the LLM tool's `parameters` (see {@link toWireParameters}), but the
- * full schema, `requiredWhen` included, still reaches the agent via the dynamic
- * context so it knows when each field becomes required.
+ * condition still reaches the agent via the dynamic context's requiredness rules so
+ * it knows when each field becomes required.
  */
 export type FormFieldCondition =
   | FormFieldLeafCondition
@@ -55,14 +55,14 @@ export interface FormFieldSchema {
   /**
    * Makes the field required only while this condition holds. Drives the dynamic
    * `missing` list; stripped from the LLM tool's `parameters` (still sent to the
-   * agent via dynamic context). See {@link toWireParameters}.
+   * agent via the dynamic context's requiredness rules). See {@link toWireParameters}.
    */
   requiredWhen?: FormFieldCondition;
 }
 
 /**
  * Shape of a form's fields. Mirrors a client function's `parameters` (so the same
- * object feeds the store, the update function, and the dynamic context). Additionally allows the SDK-only per-field `requiredWhen`, which {@link toWireParameters} removes from the LLM tool's `parameters` (the full schema still reaches the agent via dynamic context).
+ * object feeds the store, the update function, and the dynamic context). Additionally allows the SDK-only per-field `requiredWhen`, which {@link toWireParameters} removes from the LLM tool's `parameters` (the `requiredWhen` conditions still reach the agent via the dynamic context's requiredness rules).
  */
 export interface FormCollectorSchema {
   type: "object";
@@ -284,8 +284,8 @@ export function deriveFormStatus(
  * SDK-only `requiredWhen` so the tool schema stays JSON-Schema-legal — and set
  * `required: []` so the agent can fill the form incrementally. The form's real
  * requiredness lives in `schema.required` + `requiredWhen` and reaches the agent
- * through the dynamic context (the full schema plus the `missing` list), not this
- * per-call `required`.
+ * through the dynamic context (the requiredness rules plus the `missing` list), not
+ * this per-call `required`.
  */
 function toWireParameters(
   schema: FormCollectorSchema,
