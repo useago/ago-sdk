@@ -24,6 +24,7 @@ import {
   formatFileSize,
   safeAttachmentUrl,
 } from "../utils/attachments";
+import { cancelFrame, scheduleFrame } from "../utils/scheduleFrame";
 import { renderMarkdown } from "./renderMarkdown";
 
 /**
@@ -472,6 +473,10 @@ export function mountChatWidget(
   let messages: AgoMessage[] = [];
   let isLoading = false;
   let errorMessage: string | null = null;
+  // Coalesces streamed-token re-renders: while content streams we schedule one
+  // render per animation frame instead of rebuilding the whole message DOM (and
+  // re-parsing every message's markdown) on every token. null when idle.
+  let renderHandle: number | null = null;
   // Handle for the streamed-welcome typewriter, so it can be canceled when the
   // user sends a message mid-stream or the widget is destroyed.
   let introTimer: ReturnType<typeof setInterval> | undefined;
@@ -996,7 +1001,22 @@ export function mountChatWidget(
     return el;
   }
 
+  // Schedule a render for the next frame unless one is already pending. Multiple
+  // tokens arriving within the same frame collapse into a single rebuild.
+  function scheduleRender(): void {
+    if (renderHandle !== null) return;
+    renderHandle = scheduleFrame(() => {
+      renderHandle = null;
+      render();
+    });
+  }
+
   function render(): void {
+    // A direct render supersedes any frame queued by scheduleRender().
+    if (renderHandle !== null) {
+      cancelFrame(renderHandle);
+      renderHandle = null;
+    }
     messagesEl.replaceChildren();
     if (messages.length === 0) {
       // In streaming mode the empty state stays blank: the greeting plays as a
@@ -1069,7 +1089,9 @@ export function mountChatWidget(
     const target = lastInProgressAssistant();
     if (!target) return;
     target.content += data.content;
-    render();
+    // Batch to one render per frame; the next render() reads target.content, so
+    // no token is lost even though several may land before the frame fires.
+    scheduleRender();
   };
   const onAnswerComplete = (message: AgoMessage): void => {
     // Main answer text is done; follow-up replies may still be streaming. Reveal
@@ -1330,6 +1352,10 @@ export function mountChatWidget(
     refreshThreads,
     destroy() {
       if (introTimer) clearInterval(introTimer);
+      if (renderHandle !== null) {
+        cancelFrame(renderHandle);
+        renderHandle = null;
+      }
       client.off("message:start", onStart);
       client.off("message:chunk", onChunk);
       client.off("message:answer-complete", onAnswerComplete);

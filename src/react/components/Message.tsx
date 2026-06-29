@@ -5,6 +5,7 @@ import {
   formatFileSize,
   safeAttachmentUrl,
 } from "../../utils/attachments";
+import { useThrottledStreamingContent } from "../hooks/useThrottledStreamingContent";
 import { Markdown } from "./Markdown";
 
 // ── Subcomponents ───────────────────────────────────────────────────
@@ -228,6 +229,10 @@ export const Message: React.FC<MessageProps> = ({
 }) => {
   const isUser = message.role === "user";
   const isStreaming = message.status === "IN_PROGRESS";
+  // Throttle the content fed to the markdown parse so a fast stream re-parses at
+  // most ~once per window, not once per frame. Static/finished content renders
+  // immediately (the first value is returned as-is).
+  const renderedContent = useThrottledStreamingContent(message.content);
 
   return (
     <div
@@ -315,8 +320,8 @@ export const Message: React.FC<MessageProps> = ({
             lineHeight: "1.6",
           }}
         >
-          {message.content ? (
-            <Markdown content={message.content} />
+          {renderedContent ? (
+            <Markdown content={renderedContent} />
           ) : (
             isStreaming && <StreamingDots />
           )}
