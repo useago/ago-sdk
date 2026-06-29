@@ -1,4 +1,4 @@
-import React from "react";
+import React, { memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -267,9 +267,16 @@ export interface MarkdownProps {
  * (tables, task lists, strikethrough, autolinks) and inline-styled
  * element renderers. Used by {@link Message} but exported so consumers
  * building a custom chat UI can render assistant content the same way.
+ *
+ * Memoized on `content`: `ReactMarkdown` re-parses the whole string on every
+ * render, so without this a parent re-render (or a streaming sibling) would
+ * re-parse unchanged messages. Combined with {@link useThrottledStreamingContent}
+ * in {@link Message}, the streaming message re-parses at most once per throttle
+ * window instead of once per frame.
  */
-export const Markdown: React.FC<MarkdownProps> = ({ content }) => (
+export const Markdown: React.FC<MarkdownProps> = memo(({ content }) => (
   <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
     {content}
   </ReactMarkdown>
-);
+));
+Markdown.displayName = "Markdown";

@@ -122,9 +122,11 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedClient, formsKey]);
 
-  // Auto-scroll to bottom when new messages arrive
+  // Auto-scroll to bottom when new messages arrive. Use "auto" (instant): this
+  // fires on every streamed frame, and a smooth animation would fight the
+  // incoming tokens and add blocking motion. Smooth is for explicit user scroll.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
   }, [messages]);
 
   // Callback when message is received

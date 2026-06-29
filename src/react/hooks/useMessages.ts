@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgoClient } from "../../client/AgoClient";
 import type { AgoMessage } from "../../client/types";
 import { attachmentsFromFiles } from "../../utils/attachments";
+import { cancelFrame, scheduleFrame } from "../../utils/scheduleFrame";
 import { useOptionalAgoClient } from "../context/AgoContext";
 
 export interface UseMessagesOptions {
@@ -48,6 +49,58 @@ export function useMessages({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
+  // Streamed tokens are buffered here and flushed to state once per animation
+  // frame, so a fast stream triggers ~one re-render per frame instead of one per
+  // token. The buffer holds the not-yet-committed tail of the streaming message.
+  const pendingContentRef = useRef("");
+  const flushHandleRef = useRef<number | null>(null);
+
+  // Commit buffered tokens by appending them to the streaming (last in-progress
+  // assistant) message. Matching by status — not id — because the optimistic
+  // placeholder carries a temp id while chunks carry the real backend id, so an
+  // id match never fires (chunks would otherwise be silently dropped).
+  const flushChunks = useCallback(() => {
+    if (flushHandleRef.current !== null) {
+      cancelFrame(flushHandleRef.current);
+      flushHandleRef.current = null;
+    }
+    const extra = pendingContentRef.current;
+    if (!extra) return;
+    pendingContentRef.current = "";
+    setMessages((prev) => {
+      for (let i = prev.length - 1; i >= 0; i--) {
+        if (prev[i].role === "assistant" && prev[i].status === "IN_PROGRESS") {
+          const next = prev.slice();
+          next[i] = { ...next[i], content: next[i].content + extra };
+          return next;
+        }
+      }
+      return prev;
+    });
+  }, []);
+
+  // Drop buffered tokens without committing them — used right before an
+  // answer-complete/complete/error event replaces the message with the
+  // authoritative full content (which already includes every streamed token).
+  const cancelChunks = useCallback(() => {
+    if (flushHandleRef.current !== null) {
+      cancelFrame(flushHandleRef.current);
+      flushHandleRef.current = null;
+    }
+    pendingContentRef.current = "";
+  }, []);
+
+  const scheduleChunkFlush = useCallback(() => {
+    if (flushHandleRef.current !== null) return;
+    flushHandleRef.current = scheduleFrame(() => {
+      flushHandleRef.current = null;
+      flushChunks();
+    });
+  }, [flushChunks]);
+
+  // Cancel any pending frame on unmount so a flush can't fire after teardown.
+  useEffect(() => () => cancelChunks(), [cancelChunks]);
+
   // Load messages when conversation ID changes
   useEffect(() => {
     if (initialConversationId && initialConversationId !== conversationId) {
@@ -82,19 +135,14 @@ export function useMessages({
       conversationId: string;
       messageId: string;
     }) => {
-      setMessages((prev) => {
-        const lastMessage = prev[prev.length - 1];
-        if (lastMessage && lastMessage.id === data.messageId) {
-          return [
-            ...prev.slice(0, -1),
-            { ...lastMessage, content: lastMessage.content + data.content },
-          ];
-        }
-        return prev;
-      });
+      // Buffer the token and flush on the next frame (see flushChunks).
+      pendingContentRef.current += data.content;
+      scheduleChunkFlush();
     };
 
     const handleAnswerComplete = (message: AgoMessage) => {
+      // The full message supersedes anything still buffered.
+      cancelChunks();
       // Main answer text is done; follow-up replies may still be streaming. Reveal
       // the answer and flip the streaming assistant message to DONE (adopting the
       // real id from the event so message:complete updates the same entry), but
@@ -117,6 +165,7 @@ export function useMessages({
     };
 
     const handleMessageComplete = (message: AgoMessage) => {
+      cancelChunks();
       setMessages((prev) => {
         // Replace the streaming message with the complete one
         const existingIndex = prev.findIndex((m) => m.id === message.id);
@@ -129,6 +178,7 @@ export function useMessages({
     };
 
     const handleMessageError = (data: { error: string }) => {
+      cancelChunks();
       setError(new Error(data.error));
       setIsLoading(false);
     };
@@ -146,7 +196,7 @@ export function useMessages({
       client.off("message:complete", handleMessageComplete);
       client.off("message:error", handleMessageError);
     };
-  }, [client, conversationId]);
+  }, [client, conversationId, scheduleChunkFlush, cancelChunks]);
 
   const sendMessage = useCallback(
     async (content: string, files?: File[]): Promise<AgoMessage | null> => {
