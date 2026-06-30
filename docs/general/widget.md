@@ -67,35 +67,38 @@ widget.destroy(); // removes listeners, uninstalls forms, clears the DOM
 
 ### Options
 
-| Option                 | Type                                             | Default                          |
-| ---------------------- | ------------------------------------------------ | -------------------------------- |
-| `client?`              | `AgoClient`                                      | — (provide this **or** `config`) |
-| `config?`              | `AgoConfig`                                      | — (needs at least `baseUrl`)     |
-| `conversationId?`      | `string`                                         | —                                |
-| `persistConversation?` | `boolean \| Partial<ConversationSessionOptions>` | — (off)                          |
-| `loadThreads?`         | `boolean`                                        | `false`                          |
-| `title?`               | `string`                                         | `"Chat"`                         |
-| `welcomeMessage?`      | `string \| { message: string; mode?: "static" \| "streaming"; speed? }` | `"Hello! How can I help you today?"` |
-| `placeholder?`         | `string`                                         | `"Type a message..."`            |
-| `allowFiles?`          | `boolean`                                        | `false`                          |
-| `height?`              | `string \| number`                               | `500` (ignored for side panels)  |
-| `placement?`           | `"inline" \| "left" \| "right"`                  | `"inline"`                       |
-| `width?`               | `string \| number`                               | `400` (side panels only)         |
-| `launcher?`            | `boolean`                                         | `true` (side panels only)        |
-| `defaultOpen?`         | `boolean`                                         | `false` (side panels only)       |
-| `logoUrl?`             | `string`                                         | —                                |
-| `showAgentName?`       | `boolean`                                        | `false`                          |
-| `agentBubble?`         | `boolean`                                        | `false`                          |
-| `bubbleStyle?`         | `"default" \| "imessage"`                        | `"default"`                      |
-| `showHeader?`          | `boolean`                                        | `true`                           |
-| `theme?`               | `WidgetTheme`                                    | — (see [Theming](#theming))      |
-| `forms?`               | `Array<CreateFormCollectorOptions \| LoadFormCollectorOptions>` | —                  |
-| `formSubmittedMessage?`| `string \| ((result) => string \| null)`         | server `message`, else `"Form submitted."` |
-| `onFollowUpClick?`     | `((reply) => void) \| false`                     | sends the reply                  |
-| `onMessageSent?`       | `(content) => void`                              | —                                |
-| `onMessageReceived?`   | `({ id, content }) => void`                      | —                                |
-| `onFormSubmitted?`     | `({ name, values, result }) => void`             | —                                |
-| `onFormError?`         | `({ name, values, error }) => void`              | —                                |
+| Option                  | Type                                                                    | Default                                                    |
+| ----------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `client?`               | `AgoClient`                                                             | — (provide this **or** `config`)                           |
+| `config?`               | `AgoConfig`                                                             | — (needs at least `baseUrl`)                               |
+| `conversationId?`       | `string`                                                                | —                                                          |
+| `persistConversation?`  | `boolean \| Partial<ConversationSessionOptions>`                        | — (off)                                                    |
+| `loadThreads?`          | `boolean`                                                               | `false`                                                    |
+| `title?`                | `string`                                                                | `"Chat"`                                                   |
+| `welcomeMessage?`       | `string \| { message: string; mode?: "static" \| "streaming"; speed? }` | `"Hello! How can I help you today?"`                       |
+| `placeholder?`          | `string`                                                                | `"Type a message..."`                                      |
+| `allowFiles?`           | `boolean`                                                               | `false`                                                    |
+| `height?`               | `string \| number`                                                      | `500` (ignored for side panels)                            |
+| `placement?`            | `"inline" \| "left" \| "right"`                                         | `"inline"`                                                 |
+| `width?`                | `string \| number`                                                      | `400` (side panels only)                                   |
+| `launcher?`             | `boolean`                                                               | `true` (side panels only)                                  |
+| `defaultOpen?`          | `boolean`                                                               | `false` (side panels only)                                 |
+| `mobile?`               | `{ breakpoint?: number; trigger?: "focus" \| "manual" }`                | — (automatic; see [Mobile fullscreen](#mobile-fullscreen)) |
+| `logoUrl?`              | `string`                                                                | —                                                          |
+| `showAgentName?`        | `boolean`                                                               | `false`                                                    |
+| `agentBubble?`          | `boolean`                                                               | `false`                                                    |
+| `bubbleStyle?`          | `"default" \| "imessage"`                                               | `"default"`                                                |
+| `showHeader?`           | `boolean`                                                               | `true`                                                     |
+| `theme?`                | `WidgetTheme`                                                           | — (see [Theming](#theming))                                |
+| `forms?`                | `Array<CreateFormCollectorOptions \| LoadFormCollectorOptions>`         | —                                                          |
+| `formSubmittedMessage?` | `string \| ((result) => string \| null)`                                | server `message`, else `"Form submitted."`                 |
+| `onFollowUpClick?`      | `((reply) => void) \| false`                                            | sends the reply                                            |
+| `onOpen?`               | `() => void`                                                            | — (side open / inline expand)                              |
+| `onClose?`              | `() => void`                                                            | — (side close / inline collapse)                           |
+| `onMessageSent?`        | `(content) => void`                                                     | —                                                          |
+| `onMessageReceived?`    | `({ id, content }) => void`                                             | —                                                          |
+| `onFormSubmitted?`      | `({ name, values, result }) => void`                                    | —                                                          |
+| `onFormError?`          | `({ name, values, error }) => void`                                     | —                                                          |
 
 ### Streamed welcome message
 
@@ -117,8 +120,9 @@ mountChatWidget("#ago-chat", {
 
 `mountChatWidget` returns a handle:
 `{ client, element, sendMessage, session, threads, refreshThreads, destroy }` (`session` is
-present only when `persistConversation` is set; `open`/`close`/`toggle` are present only for
-side placements, see [Side panel](#side-panel-left--right)). `threads` is the visitor's conversation list,
+present only when `persistConversation` is set; `open`/`close`/`toggle` are present for side
+placements and, in a browser, for inline placement, see [Side panel](#side-panel-left--right)
+and [Mobile fullscreen](#mobile-fullscreen)). `threads` is the visitor's conversation list,
 the vanilla equivalent of the React/Vue `useConversation().conversations`. It auto-loads on
 mount and refreshes after each turn only when `loadThreads: true`; otherwise it stays empty
 until you call `refreshThreads()`. To debug, hand `widget.client` to the [dev panel](devtools.md)
@@ -188,6 +192,51 @@ drops its rounded corners and keeps a single divider on the inner edge. The
 wrapper, launcher, and close button all carry `ago`-prefixed class names
 (`.ago-chat-widget-panel`, `.ago-chat-widget-launcher`, `.ago-chat-widget__close`)
 so nothing leaks into the host page.
+
+### Mobile fullscreen
+
+The widget fills the screen on small viewports automatically. There is no flag to
+set: a compact inline card behaves like a launcher on a phone, and the side panel
+squares off to a full-screen sheet. The `mobile` object only exists to tune this
+or hand control back to you.
+
+```ts
+mountChatWidget("#ago-chat", {
+  config: { baseUrl: "https://YOUR-DOMAIN.api.useago.com" },
+  logoUrl: "https://YOUR-DOMAIN/logo.svg", // shown in the fullscreen bar
+});
+```
+
+The fullscreen bar is the sheet's header. Its leading content reuses the props the
+in-card header already uses: it shows `logoUrl` as a logo, or falls back to the
+`title` text when there is no logo. Pass `title: ""` for a bar with just the close
+button. When `showHeader` is `true`, the in-card header is hidden while full-screen
+so the logo/title is not duplicated.
+
+With `placement: "inline"`, the compact card morphs to a fixed full-screen sheet
+(with a logo + close bar) when the input is engaged, and back when the user closes
+it. The morph uses the [View Transitions API](https://developer.mozilla.org/docs/Web/API/View_Transitions_API)
+where available and falls back to an instant swap, tracks the visible viewport so
+the input stays above the keyboard, and exposes the sheet as a `role="dialog"`
+(Escape closes it). The morph is skipped automatically when the card is already
+full-bleed (about full viewport height), so a dedicated full-page chat is left
+alone. `open`/`close`/`toggle` are available on the handle (no-ops on a desktop
+viewport):
+
+```ts
+widget.open?.(); // expand to fullscreen (mobile only)
+widget.close?.(); // collapse back to the inline card
+```
+
+With `placement: "left" | "right"`, the side panel squares off to a true
+full-screen sheet on mobile; the slide-in/out behavior is unchanged.
+
+Tuning (all optional): `breakpoint` is the max viewport width (px) treated as
+mobile (default `768`); `trigger` is `"focus"` (default, expand when the input is
+tapped) or `"manual"` (expand only via `widget.open()`), and applies to inline
+placement. `onOpen` / `onClose` fire on expand/collapse (and on side-panel
+open/close). The fullscreen bar and spacer carry `ago`-prefixed class names
+(`.ago-chat-widget-mobile-bar`, `.ago-chat-widget-spacer`).
 
 ### Resume the last thread across reloads
 
@@ -282,22 +331,22 @@ so no media queries or hover); CSS variables override it if both are present.
 
 #### Token reference
 
-| CSS variable                | `theme` key     | Default             | Applies to                                                        |
-| --------------------------- | --------------- | ------------------- | ----------------------------------------------------------------- |
-| `--ago-font`                | `font`          | IBM Plex Sans stack | Whole panel (`inherit` adopts the page font)                      |
-| `--ago-radius`              | `radius`        | `16px`              | Panel container corners                                           |
-| `--ago-message-radius`      | `messageRadius` | `16px` (`20px` with `bubbleStyle: "imessage"`) | Message bubble and suggested-reply pill corners |
-| `--ago-brand-color`         | `brand`         | `#03182f`           | User bubbles + send button (and header, unless `headerBg` is set) |
-| `--ago-brand-text-color`    | `brandText`     | `#fff`              | Text on `brand`                                                   |
-| `--ago-header-background`   | `headerBg`      | → `brand`           | Header background                                                 |
-| `--ago-header-text-color`   | `headerText`    | `#e8f0fe`           | Header title                                                      |
-| `--ago-panel-background`    | `panelBg`       | `#fff`              | Container, input row, pills, source cards                         |
-| `--ago-messages-background` | `messagesBg`    | `#fbfbfb`           | Scrolling messages area                                           |
-| `--ago-text-color`          | `text`          | `#30373e`           | Assistant messages, agent name, source labels                     |
-| `--ago-muted-text-color`    | `mutedText`     | `#6b6d6f`           | Empty-state welcome message                                       |
-| `--ago-border-color`        | `border`        | `#dee3e8`           | Panel, input, pills, cards (set transparent to hide)              |
-| `--ago-accent-color`        | `accent`        | `#1b5fc4`           | Source badges + suggested-reply hover outline                     |
-| `--ago-agent-bubble-background` | `agentBubbleBg` | `#f1f3f5`       | Assistant message bubble fill (when `agentBubble` is on)          |
+| CSS variable                    | `theme` key     | Default                                        | Applies to                                                        |
+| ------------------------------- | --------------- | ---------------------------------------------- | ----------------------------------------------------------------- |
+| `--ago-font`                    | `font`          | IBM Plex Sans stack                            | Whole panel (`inherit` adopts the page font)                      |
+| `--ago-radius`                  | `radius`        | `16px`                                         | Panel container corners                                           |
+| `--ago-message-radius`          | `messageRadius` | `16px` (`20px` with `bubbleStyle: "imessage"`) | Message bubble and suggested-reply pill corners                   |
+| `--ago-brand-color`             | `brand`         | `#03182f`                                      | User bubbles + send button (and header, unless `headerBg` is set) |
+| `--ago-brand-text-color`        | `brandText`     | `#fff`                                         | Text on `brand`                                                   |
+| `--ago-header-background`       | `headerBg`      | → `brand`                                      | Header background                                                 |
+| `--ago-header-text-color`       | `headerText`    | `#e8f0fe`                                      | Header title                                                      |
+| `--ago-panel-background`        | `panelBg`       | `#fff`                                         | Container, input row, pills, source cards                         |
+| `--ago-messages-background`     | `messagesBg`    | `#fbfbfb`                                      | Scrolling messages area                                           |
+| `--ago-text-color`              | `text`          | `#30373e`                                      | Assistant messages, agent name, source labels                     |
+| `--ago-muted-text-color`        | `mutedText`     | `#6b6d6f`                                      | Empty-state welcome message                                       |
+| `--ago-border-color`            | `border`        | `#dee3e8`                                      | Panel, input, pills, cards (set transparent to hide)              |
+| `--ago-accent-color`            | `accent`        | `#1b5fc4`                                      | Source badges + suggested-reply hover outline                     |
+| `--ago-agent-bubble-background` | `agentBubbleBg` | `#f1f3f5`                                      | Assistant message bubble fill (when `agentBubble` is on)          |
 
 Error messages stay red by design, and a couple of incidental tints (file/source
 chip background, streaming dots) are fixed neutrals that read on any light surface.
@@ -357,22 +406,22 @@ anywhere this import is in scope.
 
 ## `AgoWidgetConfig`
 
-| Field                  | Type                      | Description                                |
-| ---------------------- | ------------------------- | ------------------------------------------ |
-| `basepath`             | `string`                  | Your AGO instance URL (required).          |
+| Field                  | Type                      | Description                                        |
+| ---------------------- | ------------------------- | -------------------------------------------------- |
+| `basepath`             | `string`                  | Your AGO instance URL (required).                  |
 | `widgetApiKey`         | `string`                  | Widget API key from your AGO dashboard (required). |
-| `defaultAgent?`        | `string`                  | Agent id/slug to start conversations with. |
-| `email?`               | `string`                  | Pre-fill / identify the end user.          |
-| `title?`               | `string`                  | Header title.                              |
-| `icon?`                | `string`                  | URL of the launcher/header icon.           |
-| `prompt?`              | `string`                  | Greeting / opening message.                |
-| `notifications?`       | `boolean`                 | Enable proactive notification bubble.      |
-| `notificationMessage?` | `string`                  | Text for the notification bubble.          |
-| `colors?`              | `AgoWidgetColors`         | Theme overrides (see below).               |
-| `hideFooter?`          | `boolean`                 | Hide the "powered by" footer.              |
-| `jwt?` / `authToken?`  | `string`                  | Authenticated-session tokens.              |
-| `permission?`          | `string`                  | Permission name applied to requests.       |
-| `metadata?`            | `Record<string, unknown>` | Arbitrary metadata sent with the session.  |
+| `defaultAgent?`        | `string`                  | Agent id/slug to start conversations with.         |
+| `email?`               | `string`                  | Pre-fill / identify the end user.                  |
+| `title?`               | `string`                  | Header title.                                      |
+| `icon?`                | `string`                  | URL of the launcher/header icon.                   |
+| `prompt?`              | `string`                  | Greeting / opening message.                        |
+| `notifications?`       | `boolean`                 | Enable proactive notification bubble.              |
+| `notificationMessage?` | `string`                  | Text for the notification bubble.                  |
+| `colors?`              | `AgoWidgetColors`         | Theme overrides (see below).                       |
+| `hideFooter?`          | `boolean`                 | Hide the "powered by" footer.                      |
+| `jwt?` / `authToken?`  | `string`                  | Authenticated-session tokens.                      |
+| `permission?`          | `string`                  | Permission name applied to requests.               |
+| `metadata?`            | `Record<string, unknown>` | Arbitrary metadata sent with the session.          |
 
 ### `AgoWidgetColors`
 
