@@ -13,311 +13,42 @@ import {
   type FormCollector,
   type LoadFormCollectorOptions,
 } from "../forms/createFormCollector";
-import {
-  createConversationSession,
-  type ConversationSession,
-  type ConversationSessionOptions,
-} from "../state/createConversationSession";
-import {
-  attachmentsFromFiles,
-  canInlineImage,
-  formatFileSize,
-  safeAttachmentUrl,
-} from "../utils/attachments";
+import { createConversationSession } from "../state/createConversationSession";
+import { attachmentsFromFiles } from "../utils/attachments";
+import { buildInput } from "./buildInput";
 import { renderMarkdown } from "./renderMarkdown";
+import {
+  buildChatIcon,
+  renderFormNotice,
+  renderMessage,
+} from "./renderMessage";
+import {
+  applyTheme,
+  BORDER_COLOR,
+  BRAND_COLOR,
+  BRAND_TEXT_COLOR,
+  css,
+  div,
+  ensureKeyframes,
+  FONT_VAR,
+  HEADER_BACKGROUND,
+  HEADER_TEXT_COLOR,
+  MESSAGES_BACKGROUND,
+  MUTED_TEXT_COLOR,
+  PANEL_BACKGROUND,
+  RADIUS,
+  TEXT_COLOR,
+} from "./styles";
+import type { ChatWidgetHandle, MountChatWidgetOptions } from "./types";
 
-/**
- * Theme overrides for {@link mountChatWidget}. *
- * @see The `--ago-*` token reference in `docs/general/widget.md`.
- */
-export interface WidgetTheme {
-  /** Font family for the whole panel. Pass `"inherit"` to adopt the page font. (`--ago-font`) */
-  font?: string;
-  /** Corner radius of the panel container. (`--ago-radius`) */
-  radius?: string;
-  /** Corner radius of message bubbles and suggested-reply pills. Defaults to 16px. (`--ago-message-radius`) */
-  messageRadius?: string;
-  /** Brand color: user message bubbles and the send button (and the header, unless `headerBg` is set). (`--ago-brand-color`) */
-  brand?: string;
-  /** Text/icon color shown on top of `brand`. (`--ago-brand-text-color`) */
-  brandText?: string;
-  /** Header background. Defaults to `brand`. (`--ago-header-background`) */
-  headerBg?: string;
-  /** Header title color. (`--ago-header-text-color`) */
-  headerText?: string;
-  /** Panel surface: container, input row, suggested-reply pills, source cards. (`--ago-panel-background`) */
-  panelBg?: string;
-  /** Background of the scrolling messages area. (`--ago-messages-background`) */
-  messagesBg?: string;
-  /** Primary body text color (assistant messages, agent name, source labels). (`--ago-text-color`) */
-  text?: string;
-  /** Muted text color (the empty-state welcome message). (`--ago-muted-text-color`) */
-  mutedText?: string;
-  /** Border color used for the panel, input, pills, and cards. (`--ago-border-color`) */
-  border?: string;
-  /** Secondary accent: source badges and suggested-reply hover outline. (`--ago-accent-color`) */
-  accent?: string;
-  /** Background of assistant message bubbles when `agentBubble` is on. Defaults to a light gray. (`--ago-agent-bubble-background`) */
-  agentBubbleBg?: string;
-}
-
-/**
- * The greeting shown before any conversation has started. Pass a plain string
- * for the classic centered empty-state placeholder, or an object to control how
- * it is presented:
- *
- * - `mode: "static"` (default): the centered, muted empty-state text. It is not
- *   a real message and disappears once the conversation starts.
- * - `mode: "streaming"`: the greeting is delivered as a real assistant message
- *   bubble, typed out token-by-token, that stays in the thread. It only plays on
- *   a fresh visit (skipped when a thread is being resumed), and `speed` sets the
- *   per-token interval in milliseconds (default `45`).
- */
-export type WelcomeMessage =
-  | string
-  | { message: string; mode?: "static" | "streaming"; speed?: number };
-
-/**
- * Options for {@link mountChatWidget} — the framework-agnostic (pure TS/JS)
- * equivalent of the React `<ChatWidget>` component. Same features: conversational
- * forms (form creator) and clickable suggested replies.
- */
-export interface MountChatWidgetOptions {
-  /** An existing AGO client. Provide this OR `config`. */
-  client?: AgoClient;
-  /** Config to build a client when `client` is not supplied. `baseUrl` is required. */
-  config?: AgoConfig;
-  /** Initial conversation ID to continue. */
-  conversationId?: string;
-  /**
-   * Resume the visitor's last active thread across reloads. `true` enables defaults
-   * (localStorage, widget id under `ago_widget_id`); pass an object to set `storage`
-   * (e.g. `sessionStorage`), `key`, or an explicit `widgetId`. Built on
-   * {@link createConversationSession}: the visitor is identified by a single stable
-   * widget id and the backend hands back their most recently updated conversation.
-   * An explicit `conversationId` still wins as the initial thread. Off by default.
-   */
-  persistConversation?: boolean | Partial<ConversationSessionOptions>;
-  /** Widget title shown in the header. */
-  title?: string;
-  /**
-   * Greeting shown before any conversation has started. A plain string renders
-   * the classic centered empty-state; pass a {@link WelcomeMessage} object with
-   * `mode: "streaming"` to type it out as a real assistant bubble on a fresh
-   * visit instead.
-   */
-  welcomeMessage?: WelcomeMessage;
-  /** Input placeholder. */
-  placeholder?: string;
-  /** Enable file attachments. */
-  allowFiles?: boolean;
-  /** Widget height (number → px). Ignored when `placement` is `"left"`/`"right"`
-   * (a side panel is always full-height). */
-  height?: string | number;
-  /**
-   * Where the panel renders. `"inline"` (default) mounts it directly into the
-   * target element, filling it. `"left"` / `"right"` instead pin a **fixed,
-   * full-height side panel** to that edge of the viewport that slides open and
-   * closed; the target is only used as the DOM parent (pass `document.body` for
-   * a true page overlay). In side mode `height` is ignored and the width comes
-   * from {@link MountChatWidgetOptions.width}.
-   */
-  placement?: "inline" | "left" | "right";
-  /**
-   * Width of the side panel for `placement: "left" | "right"` (number → px).
-   * Capped at the viewport width so it never overflows on mobile. Ignored when
-   * `placement` is `"inline"`. Defaults to `400`.
-   */
-  width?: string | number;
-  /**
-   * For side placements, render the built-in floating launcher button that opens
-   * the panel (plus a close "×" in the header). Set `false` to drive open/close
-   * yourself via the handle's `open()`/`close()`/`toggle()`. Ignored when
-   * `placement` is `"inline"`. Defaults to `true`.
-   */
-  launcher?: boolean;
-  /**
-   * For side placements, whether the panel starts open. Ignored when `placement`
-   * is `"inline"` (an inline panel is always visible). Defaults to `false`.
-   */
-  defaultOpen?: boolean;
-  /** URL of a logo shown in the header (and on the launcher button, if shown). */
-  logoUrl?: string;
-  /** Show the agent name above assistant messages. Defaults to `false`. */
-  showAgentName?: boolean;
-  /** Render assistant messages inside a filled bubble (themed via `agentBubbleBg`). Defaults to `false`. */
-  agentBubble?: boolean;
-  /**
-   * Bubble shape preset. `"imessage"` bubbles both sides (assistant messages get
-   * the filled `agentBubbleBg` bubble too) and draws the iMessage "tail" curl on
-   * the last bubble of each same-sender run. Defaults to `"default"` (current
-   * look). Colors stay themed: user bubble `brand`, assistant bubble
-   * `agentBubbleBg`, and the tail mask follows `messagesBg`.
-   */
-  bubbleStyle?: "default" | "imessage";
-  /**
-   * Show the header bar (title, logo, and the side-panel close "×"). Set `false`
-   * to drop it, e.g. when the host page already frames the widget. Defaults to
-   * `true`. Note: with the built-in launcher in side placement, the close "×"
-   * lives in the header, so hiding it leaves the launcher (and `widget.close()`)
-   * as the way to dismiss the panel.
-   */
-  showHeader?: boolean;
-  /**
-   * Theme overrides so the panel blends into the host page.
-   */
-  theme?: WidgetTheme;
-  /**
-   * Load the visitor's conversation list into `widget.threads` on mount and refresh
-   * it after each turn (one `GET /conversations` per load). Off by default to avoid
-   * the request when the integrator doesn't need it; `widget.refreshThreads()` stays
-   * callable on demand regardless.
-   */
-  loadThreads?: boolean;
-  /**
-   * Conversational forms the agent can fill and submit during the chat. Each
-   * entry is installed as a {@link createFormCollector} for the lifetime of the
-   * widget (removed on `destroy()`).
-   *
-   * Pass a full config (with `schema`) to define it inline, or just `{ name }` to
-   * fetch the definition from the backend ({@link loadFormCollector}).
-   */
-  forms?: Array<CreateFormCollectorOptions | LoadFormCollectorOptions>;
-  /**
-   * The confirmation notice shown in the chat once a form is submitted (auto-submit
-   * or a manual `submit_<name>`), a small success block appended below the
-   * conversation. By default the notice shows a `message` string returned by the
-   * submit response (POST body / handler result / backend relay) when present, and
-   * otherwise falls back to this string ("Form submitted." by default). Pass a
-   * function to build the text from the raw submit response yourself; return a
-   * nullish value to fall back to the default text.
-   */
-  formSubmittedMessage?:
-    | string
-    | ((result: unknown) => string | null | undefined);
-  /**
-   * How clicking a suggested follow-up reply behaves. Defaults to sending the
-   * reply as a new user message. Pass a handler to override, or `false` to
-   * render the suggestions as non-interactive.
-   */
-  onFollowUpClick?: ((reply: string) => void) | false;
-  /** Called when the user sends a message. */
-  onMessageSent?: (content: string) => void;
-  /** Called when an assistant message completes. */
-  onMessageReceived?: (message: { id: string; content: string }) => void;
-  /**
-   * Called when a form collector submits successfully. `result` is the raw submit
-   * response (the third-party API's answer); `values` are the submitted fields.
-   * Forwards the client's `form:submitted` event.
-   */
-  onFormSubmitted?: (data: {
-    name: string;
-    values: Record<string, unknown>;
-    result: unknown;
-  }) => void;
-  /**
-   * Called when a form collector submit fails at the network/server level.
-   * Forwards the client's `form:error` event. No notice is shown in the chat.
-   */
-  onFormError?: (data: {
-    name: string;
-    values: Record<string, unknown>;
-    error: string;
-  }) => void;
-}
-
-/** Handle returned by {@link mountChatWidget}. */
-export interface ChatWidgetHandle {
-  /** The AGO client backing the widget. */
-  client: AgoClient;
-  /** The root element the widget rendered into. */
-  element: HTMLElement;
-  /** Programmatically send a message (same path as the input). */
-  sendMessage: (content: string, files?: File[]) => Promise<void>;
-  /**
-   * Open / close / toggle the side panel. Present only for
-   * `placement: "left" | "right"` (an inline panel is always visible).
-   */
-  open?: () => void;
-  close?: () => void;
-  toggle?: () => void;
-  /**
-   * The conversation-persistence session, present only when `persistConversation`
-   * is set — exposes the stable `widgetId` and `session.clear()` to start a new thread.
-   */
-  session?: ConversationSession;
-  /**
-   * The visitor's conversations (threads) — the vanilla equivalent of the React/Vue
-   * `useConversation().conversations`. Auto-loaded on mount and refreshed after each
-   * turn only when `loadThreads` is set; otherwise it stays empty until you call
-   * {@link ChatWidgetHandle.refreshThreads}.
-   */
-  readonly threads: Conversation[];
-  /** Re-fetch the conversations list and update {@link ChatWidgetHandle.threads}. */
-  refreshThreads: () => Promise<Conversation[]>;
-  /** Remove listeners, uninstall forms, and clear the DOM. */
-  destroy: () => void;
-}
-
-// ── Styling (kept in sync with the React ChatWidget look) ────────────
-// The semantic tokens (12) are the public theming contract — see docs/general/widget.md.
-const FONT =
-  '"IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-/** Font family, themed via `--ago-font` (default: the IBM Plex stack above). */
-const FONT_VAR = `var(--ago-font, ${FONT})`;
-
-/** Map of {@link WidgetTheme} keys → the CSS custom property each one sets. */
-const THEME_VARS: Record<keyof WidgetTheme, string> = {
-  font: "--ago-font",
-  radius: "--ago-radius",
-  messageRadius: "--ago-message-radius",
-  brand: "--ago-brand-color",
-  brandText: "--ago-brand-text-color",
-  headerBg: "--ago-header-background",
-  headerText: "--ago-header-text-color",
-  panelBg: "--ago-panel-background",
-  messagesBg: "--ago-messages-background",
-  text: "--ago-text-color",
-  mutedText: "--ago-muted-text-color",
-  border: "--ago-border-color",
-  accent: "--ago-accent-color",
-  agentBubbleBg: "--ago-agent-bubble-background",
-};
-
-const BRAND_COLOR = "var(--ago-brand-color, #03182f)";
-const BRAND_TEXT_COLOR = "var(--ago-brand-text-color, #fff)";
-const HEADER_BACKGROUND =
-  "var(--ago-header-background, var(--ago-brand-color, #03182f))";
-const HEADER_TEXT_COLOR = "var(--ago-header-text-color, #e8f0fe)";
-const PANEL_BACKGROUND = "var(--ago-panel-background, #fff)";
-const MESSAGES_BACKGROUND = "var(--ago-messages-background, #fbfbfb)";
-const TEXT_COLOR = "var(--ago-text-color, #30373e)";
-const MUTED_TEXT_COLOR = "var(--ago-muted-text-color, #6b6d6f)";
-const BORDER_COLOR = "var(--ago-border-color, #dee3e8)";
-const ACCENT_COLOR = "var(--ago-accent-color, #1b5fc4)";
-const AGENT_BUBBLE_BACKGROUND = "var(--ago-agent-bubble-background, #f1f3f5)";
-const RADIUS = "var(--ago-radius, 16px)";
-const MESSAGE_RADIUS = "var(--ago-message-radius, 16px)";
-const MESSAGE_RADIUS_IMESSAGE = "var(--ago-message-radius, 20px)";
-
-/** Apply a {@link WidgetTheme} as inline `--ago-*` custom properties on the root. */
-function applyTheme(el: HTMLElement, theme: WidgetTheme | undefined): void {
-  if (!theme) return;
-  for (const key of Object.keys(THEME_VARS) as (keyof WidgetTheme)[]) {
-    const value = theme[key];
-    if (value != null) el.style.setProperty(THEME_VARS[key], value);
-  }
-}
-
-function css(el: HTMLElement, styles: Partial<CSSStyleDeclaration>): void {
-  Object.assign(el.style, styles);
-}
-
-function div(styles: Partial<CSSStyleDeclaration> = {}): HTMLDivElement {
-  const el = document.createElement("div");
-  css(el, styles);
-  return el;
-}
+// These public types used to be declared in this file; re-exported from their new
+// home in `./types` so existing `from "./createChatWidget"` imports keep working.
+export type {
+  ChatWidgetHandle,
+  MountChatWidgetOptions,
+  WelcomeMessage,
+  WidgetTheme,
+} from "./types";
 
 /** Fallback text for the form-submitted notice when the response carries none. */
 const DEFAULT_FORM_SUBMITTED_MESSAGE = "Form submitted.";
@@ -344,23 +75,14 @@ function messageFromResult(result: unknown): string | null {
   return null;
 }
 
-const KEYFRAMES_ID = "ago-chat-widget-keyframes";
+/** Per-document counter so each mobile-fullscreen widget gets a unique
+ * `view-transition-name` (names must be unique across the document). */
+let widgetSeq = 0;
 
-/** Inject the streaming-dot keyframes once per document. */
-function ensureKeyframes(): void {
-  if (
-    typeof document === "undefined" ||
-    document.getElementById(KEYFRAMES_ID)
-  ) {
-    return;
-  }
-  const style = document.createElement("style");
-  style.id = KEYFRAMES_ID;
-  style.textContent =
-    "@keyframes ago-pulse { 0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }" +
-    "@keyframes ago-spin { to { transform: rotate(360deg); } }";
-  document.head.appendChild(style);
-}
+/** `document` augmented with the View Transitions API (not in all TS DOM libs). */
+type DocumentWithVT = Document & {
+  startViewTransition?: (callback: () => void) => { finished: Promise<void> };
+};
 
 function resolveTarget(target: string | HTMLElement): HTMLElement {
   const el =
@@ -429,6 +151,8 @@ export function mountChatWidget(
     onMessageReceived,
     onFormSubmitted,
     onFormError,
+    onOpen,
+    onClose,
   } = options;
 
   // Normalize the greeting into a string + presentation. A bare string (or the
@@ -457,6 +181,22 @@ export function mountChatWidget(
   const isSide = placement === "left" || placement === "right";
   const showLauncher = isSide && (options.launcher ?? true);
   let panelOpen = isSide ? defaultOpen : true;
+
+  // Mobile full-screen is automatic: on small viewports the panel fills the
+  // screen with no opt-in. All viewport/transition APIs below are feature-detected
+  // so the behavior is inert (and test-safe) where they are missing: jsdom and
+  // older browsers have no matchMedia / visualViewport / startViewTransition.
+  const mobileBreakpoint = options.mobile?.breakpoint ?? 768;
+  const mobileTrigger = options.mobile?.trigger ?? "focus";
+  const hasMatchMedia = typeof window !== "undefined" && !!window.matchMedia;
+  const mobileMQ = hasMatchMedia
+    ? window.matchMedia(`(max-width: ${mobileBreakpoint}px)`)
+    : undefined;
+  const reduceMotionMQ = hasMatchMedia
+    ? window.matchMedia("(prefers-reduced-motion: reduce)")
+    : undefined;
+  // Inline placement morphs to a sheet on mobile; side panels just square off.
+  const inlineFullscreen = !isSide && !!mobileMQ;
 
   // Optional cross-reload resumption of the visitor's last active thread, keyed off
   // a single stable widget id rather than a per-agent stored conversation id.
@@ -663,9 +403,69 @@ export function mountChatWidget(
     launcherBtn.addEventListener("click", () => openPanel());
   }
 
+  // ── Mobile-fullscreen state (inert unless inline in a browser) ──
+  const vtName = inlineFullscreen ? `ago-vt-${++widgetSeq}` : "";
+  const INLINE_BAR_H = 52;
+  let inlineExpanded = false;
+  let mobileBar: HTMLDivElement | undefined;
+  let vtStyle: HTMLStyleElement | undefined;
+  let inlineSpacer: HTMLDivElement | undefined;
+  // Resting container styles we override on expand and restore on collapse.
+  const inlineOrig = {
+    height: container.style.height,
+    border: container.style.border,
+    borderRadius: container.style.borderRadius,
+    boxShadow: container.style.boxShadow,
+  };
+
   root.appendChild(mountInto);
   if (launcherBtn) root.appendChild(launcherBtn);
   applyOpenState();
+
+  // ── Mobile-fullscreen setup (inline morph; nothing below runs otherwise) ──
+  if (inlineFullscreen) {
+    mobileBar = buildMobileBar();
+    // Keep the bar inside the dialog (container) so its close button stays within
+    // the aria-modal subtree and reachable by assistive tech. It is position:fixed,
+    // and container never becomes a containing block for fixed descendants, so its
+    // on-screen placement and overflow:hidden do not affect the bar. First child so
+    // it leads the reading/tab order, matching its visual position at the top.
+    container.insertBefore(mobileBar, container.firstChild);
+    // Scoped per-instance morph timing. The transition-name is only attached
+    // during a transition (see runInlineTransition), so this rule never touches
+    // the host page's own view transitions.
+    vtStyle = document.createElement("style");
+    vtStyle.id = vtName;
+    vtStyle.textContent =
+      `::view-transition-group(${vtName}),::view-transition-group(${vtName}-bar)` +
+      `{animation-duration:0.3s;animation-timing-function:cubic-bezier(0.4,0,0.2,1)}`;
+    document.head.appendChild(vtStyle);
+    if (mobileTrigger === "focus") {
+      // Tapping the input expands first, then focuses (see expandInline), so the
+      // keyboard rises into the settled fullscreen layout. preventDefault defers
+      // the native focus until the morph finishes.
+      container.addEventListener(
+        "pointerdown",
+        (e) => {
+          if (inlineExpanded || !mobileMQ?.matches) return;
+          if (!inputRow.contains(e.target as Node)) return;
+          e.preventDefault();
+          void expandInline();
+        },
+        true,
+      );
+      // Fallback for keyboard / assistive-tech users (focus without a pointer).
+      container.addEventListener("focusin", () => {
+        if (mobileMQ?.matches) void expandInline();
+      });
+    }
+    document.addEventListener("keydown", onInlineKeydown);
+  }
+  // Re-apply geometry when crossing the breakpoint (side squares off / inline
+  // collapses out of full screen). Relevant for both placements when an mq exists.
+  if (mobileMQ) {
+    mobileMQ.addEventListener("change", onMobileMqChange);
+  }
 
   // ── Rendering ──────────────────────────────────────────────────────
   const followUpEnabled = onFollowUpClick !== false;
@@ -673,328 +473,6 @@ export function mountChatWidget(
     onFollowUpClick === false
       ? undefined
       : (onFollowUpClick ?? ((reply: string) => void send(reply)));
-
-  function renderMessage(
-    message: AgoMessage,
-    isLast: boolean,
-    isLastOfBlock = true,
-  ): HTMLElement {
-    const isUser = message.role === "user";
-    const imessage = bubbleStyle === "imessage";
-    const wrap = div({
-      display: "flex",
-      flexDirection: "column",
-      alignItems: isUser ? "flex-end" : "flex-start",
-      // Tighter stack within a same-sender block, full gap after it (iMessage).
-      marginBottom: imessage && !isLastOfBlock ? "2px" : "16px",
-    });
-    wrap.className = `ago-message ago-message--${message.role}`;
-
-    if (!isUser && showAgentName && message.agent) {
-      const name = div({
-        fontSize: "13px",
-        fontWeight: "500",
-        color: TEXT_COLOR,
-        marginBottom: "6px",
-        padding: "0 4px",
-      });
-      name.className = "ago-message__agent";
-      name.textContent = message.agent.displayName || message.agent.name;
-      wrap.appendChild(name);
-    }
-
-    if (!isUser && message.sources && message.sources.length > 0) {
-      const sources = div({
-        display: "grid",
-        gridTemplateColumns: "1fr 1fr",
-        gap: "6px",
-        marginBottom: "10px",
-        width: "100%",
-        maxWidth: "85%",
-      });
-      sources.className = "ago-message__sources";
-      message.sources.forEach((source, i) => {
-        const card = source.url
-          ? document.createElement("a")
-          : document.createElement("div");
-        if (source.url && card instanceof HTMLAnchorElement) {
-          card.href = source.url;
-          card.target = "_blank";
-          card.rel = "noopener noreferrer";
-        }
-        css(card, {
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          padding: "8px 10px",
-          border: `1px solid ${BORDER_COLOR}`,
-          borderRadius: "8px",
-          backgroundColor: PANEL_BACKGROUND,
-          textDecoration: "none",
-          color: TEXT_COLOR,
-          fontSize: "12px",
-          overflow: "hidden",
-        });
-        const badge = div({
-          flexShrink: "0",
-          width: "18px",
-          height: "18px",
-          borderRadius: "3px",
-          border: `1px solid ${ACCENT_COLOR}`,
-          color: ACCENT_COLOR,
-          fontSize: "11px",
-          fontWeight: "500",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          backgroundColor: "#f0f4ff",
-        });
-        badge.textContent = String(i + 1);
-        const label = div({
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        });
-        label.textContent = source.title;
-        label.title = source.title;
-        card.append(badge, label);
-        sources.appendChild(card);
-      });
-      wrap.appendChild(sources);
-    }
-
-    // Uploaded files, above the bubble. Only backend-verified safe images embed
-    // inline as an <img>; everything else is a download link (no XSS surface).
-    if (message.attachments && message.attachments.length > 0) {
-      const attachments = div({
-        display: "flex",
-        flexWrap: "wrap",
-        gap: "6px",
-        marginBottom: "6px",
-        justifyContent: isUser ? "flex-end" : "flex-start",
-        maxWidth: "75%",
-      });
-      attachments.className = "ago-message__attachments";
-      for (const att of message.attachments) {
-        const href = safeAttachmentUrl(att.url);
-        if (canInlineImage(att) && href) {
-          const link = document.createElement("a");
-          link.href = href;
-          link.target = "_blank";
-          link.rel = "noopener noreferrer";
-          css(link, { display: "inline-block", textDecoration: "none" });
-          const img = document.createElement("img");
-          img.src = href;
-          img.alt = att.name;
-          img.loading = "lazy";
-          css(img, {
-            maxWidth: "180px",
-            maxHeight: "160px",
-            objectFit: "cover",
-            borderRadius: "10px",
-            border: `1px solid ${BORDER_COLOR}`,
-            display: "block",
-          });
-          link.appendChild(img);
-          attachments.appendChild(link);
-          continue;
-        }
-
-        const card = href
-          ? document.createElement("a")
-          : document.createElement("div");
-        if (href && card instanceof HTMLAnchorElement) {
-          card.href = href;
-          card.target = "_blank";
-          card.rel = "noopener noreferrer";
-        }
-        css(card, {
-          display: "inline-flex",
-          alignItems: "center",
-          gap: "8px",
-          padding: "8px 12px",
-          borderRadius: "10px",
-          border: `1px solid ${BORDER_COLOR}`,
-          backgroundColor: isUser ? "rgba(255,255,255,0.12)" : PANEL_BACKGROUND,
-          color: isUser ? BRAND_TEXT_COLOR : TEXT_COLOR,
-          fontSize: "13px",
-          textDecoration: "none",
-          maxWidth: "220px",
-        });
-        const icon = document.createElement("span");
-        icon.textContent = "📄";
-        icon.setAttribute("aria-hidden", "true");
-        css(icon, { fontSize: "16px", lineHeight: "1", flexShrink: "0" });
-        const meta = div({
-          display: "flex",
-          flexDirection: "column",
-          minWidth: "0",
-        });
-        const name = div({
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          maxWidth: "160px",
-        });
-        name.textContent = att.name;
-        name.title = att.name;
-        meta.appendChild(name);
-        const size = formatFileSize(att.fileSize);
-        if (size) {
-          const sizeEl = div({ fontSize: "11px", color: MUTED_TEXT_COLOR });
-          sizeEl.textContent = size;
-          meta.appendChild(sizeEl);
-        }
-        card.append(icon, meta);
-        attachments.appendChild(card);
-      }
-      wrap.appendChild(attachments);
-    }
-
-    const bubbled = isUser || agentBubble || imessage;
-
-    // An attachment-only message (files, no text) shows no empty bubble.
-    const hasBubble =
-      !!message.content || message.status === "IN_PROGRESS";
-
-    const bubble = div({
-      maxWidth: imessage ? "75%" : isUser ? "75%" : bubbled ? "85%" : "100%",
-      padding: bubbled ? "10px 14px" : "2px 8px",
-      borderRadius: imessage
-        ? MESSAGE_RADIUS_IMESSAGE
-        : bubbled
-          ? MESSAGE_RADIUS
-          : "0",
-      backgroundColor: isUser
-        ? BRAND_COLOR
-        : bubbled
-          ? AGENT_BUBBLE_BACKGROUND
-          : "transparent",
-      color: isUser ? BRAND_TEXT_COLOR : TEXT_COLOR,
-      wordBreak: "break-word",
-      fontSize: "16px",
-      lineHeight: "1.6",
-    });
-    bubble.className = "ago-message__content";
-    // iMessage tail on the last bubble of a same-sender block: a colored bulge
-    // (fill) at the bottom corner, masked by a shape in the messages-area color
-    // to carve out the curl (technique from CodePen swards/gxQmbj).
-    if (imessage && isLastOfBlock) {
-      bubble.style.position = "relative";
-      const fill = div({
-        position: "absolute",
-        zIndex: "0",
-        bottom: "-2px",
-        width: "20px",
-        height: "20px",
-        background: isUser ? BRAND_COLOR : AGENT_BUBBLE_BACKGROUND,
-      });
-      fill.className = "ago-message__tail";
-      const mask = div({
-        position: "absolute",
-        zIndex: "1",
-        bottom: "-2px",
-        width: "10px",
-        height: "20px",
-        background: MESSAGES_BACKGROUND,
-      });
-      mask.className = "ago-message__tail-mask";
-      if (isUser) {
-        fill.style.right = "-8px";
-        fill.style.borderBottomLeftRadius = "16px 14px";
-        mask.style.right = "-10px";
-        mask.style.borderBottomLeftRadius = "10px";
-      } else {
-        fill.style.left = "-7px";
-        fill.style.borderBottomRightRadius = "16px 14px";
-        mask.style.left = "-10px";
-        mask.style.borderBottomRightRadius = "10px";
-      }
-      bubble.append(fill, mask);
-    }
-    if (message.content) {
-      // GitHub-flavored markdown, rendered by a dependency-free parser that
-      // escapes all message text before it reaches the DOM (see renderMarkdown).
-      bubble.appendChild(renderMarkdown(message.content));
-    } else if (message.status === "IN_PROGRESS") {
-      bubble.appendChild(buildStreamingDots());
-    }
-    if (hasBubble) wrap.appendChild(bubble);
-
-    // Only on the last message, so stale suggestions disappear once the user
-    // sends their next message.
-    if (
-      isLast &&
-      message.followUpReplies &&
-      message.followUpReplies.length > 0
-    ) {
-      const followups = div({
-        display: "flex",
-        flexWrap: "wrap",
-        gap: "8px",
-        marginTop: "10px",
-      });
-      followups.className = "ago-message__followups";
-      for (const reply of message.followUpReplies) {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "ago-message__followup-btn";
-        btn.textContent = reply;
-        btn.disabled = !followUpEnabled;
-        css(btn, {
-          minHeight: "36px",
-          padding: "6px 14px",
-          fontSize: "14px",
-          borderRadius: MESSAGE_RADIUS,
-          border: `1px solid ${BORDER_COLOR}`,
-          backgroundColor: PANEL_BACKGROUND,
-          color: TEXT_COLOR,
-          cursor: followUpEnabled ? "pointer" : "default",
-          transition: "border-color 0.15s",
-        });
-        if (followUpHandler) {
-          btn.addEventListener("click", () => followUpHandler(reply));
-        }
-        btn.addEventListener("mouseenter", () => {
-          btn.style.borderColor = ACCENT_COLOR;
-        });
-        btn.addEventListener("mouseleave", () => {
-          btn.style.borderColor = BORDER_COLOR;
-        });
-        followups.appendChild(btn);
-      }
-      wrap.appendChild(followups);
-    }
-
-    return wrap;
-  }
-
-  // A success notice confirming a form was sent — mirrors the error block's shape
-  // (a styled block appended to the message area) but in green.
-  function renderFormNotice(text: string): HTMLElement {
-    const el = div({
-      display: "flex",
-      alignItems: "center",
-      gap: "8px",
-      padding: "10px 14px",
-      backgroundColor: "#f0fdf4",
-      color: "#15803d",
-      borderRadius: MESSAGE_RADIUS,
-      marginTop: "8px",
-      fontSize: "13px",
-      border: "1px solid #bbf7d0",
-    });
-    el.className = "ago-form-notice";
-    el.setAttribute("role", "status");
-    const check = document.createElement("span");
-    check.textContent = "✓";
-    check.setAttribute("aria-hidden", "true");
-    css(check, { fontWeight: "700" });
-    const label = document.createElement("span");
-    label.textContent = text;
-    el.append(check, label);
-    return el;
-  }
 
   function render(): void {
     messagesEl.replaceChildren();
@@ -1020,7 +498,15 @@ export function mountChatWidget(
           index === messages.length - 1 ||
           messages[index + 1].role !== message.role;
         messagesEl.appendChild(
-          renderMessage(message, index === messages.length - 1, isLastOfBlock),
+          renderMessage(message, {
+            isLast: index === messages.length - 1,
+            isLastOfBlock,
+            bubbleStyle,
+            showAgentName,
+            agentBubble,
+            followUpEnabled,
+            followUpHandler,
+          }),
         );
       });
     }
@@ -1310,7 +796,10 @@ export function mountChatWidget(
   }
 
   render();
-  focus();
+  // On a mobile viewport the inline card is a compact launcher; don't auto-focus
+  // it (that would pop the keyboard and morph to full screen on load). Focus
+  // happens on genuine user engagement instead (pointerdown / focusin).
+  if (!(inlineFullscreen && mobileMQ?.matches)) focus();
   // Resuming a thread loads its real history; otherwise (a fresh visit) play the
   // streamed greeting if one was configured. `conversationId` is the fresh-visit
   // gate: it's set only when an explicit id or a stored last-active thread exists.
@@ -1322,8 +811,8 @@ export function mountChatWidget(
     client,
     element: mountInto,
     sendMessage: send,
-    ...(isSide
-      ? { open: openPanel, close: closePanel, toggle: togglePanel }
+    ...(isSide || inlineFullscreen
+      ? { open: openCtl, close: closeCtl, toggle: toggleCtl }
       : {}),
     session,
     threads,
@@ -1341,6 +830,16 @@ export function mountChatWidget(
       uninstallForms.forEach((fn) => fn());
       mountInto.remove();
       launcherBtn?.remove();
+      mobileBar?.remove();
+      vtStyle?.remove();
+      inlineSpacer?.remove();
+      mobileMQ?.removeEventListener("change", onMobileMqChange);
+      if (inlineFullscreen) {
+        document.removeEventListener("keydown", onInlineKeydown);
+        window.visualViewport?.removeEventListener("resize", syncVh);
+        // Drop the scroll lock if we're torn down while expanded.
+        document.documentElement.style.removeProperty("overflow");
+      }
       // Only tear down the client if we created it.
       if (!options.client) client.destroy();
     },
@@ -1349,6 +848,20 @@ export function mountChatWidget(
   // ── Side-panel open/close (no-ops in inline mode) ──────────────────
   function applyOpenState(): void {
     if (!wrapper) return;
+    // Square the side panel off to a full-screen sheet on mobile (automatic; no
+    // opt-in). On viewports wider than the breakpoint it keeps its resting width
+    // and inner divider. Slide mechanics below are unchanged.
+    {
+      const sideBorder = edge === "left" ? "border-right" : "border-left";
+      if (mobileMQ?.matches) {
+        wrapper.style.width = "100%";
+        container.style.borderRadius = "0";
+        container.style.removeProperty(sideBorder);
+      } else {
+        wrapper.style.width = typeof width === "number" ? `${width}px` : width;
+        container.style.setProperty(sideBorder, `1px solid ${BORDER_COLOR}`);
+      }
+    }
     const hidden =
       placement === "left" ? "translateX(-100%)" : "translateX(100%)";
     wrapper.style.transform = panelOpen ? "translateX(0)" : hidden;
@@ -1359,275 +872,268 @@ export function mountChatWidget(
     panelOpen = true;
     applyOpenState();
     focus();
+    onOpen?.();
   }
   function closePanel(): void {
     panelOpen = false;
     applyOpenState();
+    onClose?.();
   }
   function togglePanel(): void {
     if (panelOpen) closePanel();
     else openPanel();
   }
 
-  /** A dependency-free chat-bubble glyph for the launcher button. */
-  function buildChatIcon(): SVGSVGElement {
-    const ns = "http://www.w3.org/2000/svg";
-    const svg = document.createElementNS(ns, "svg");
-    svg.setAttribute("width", "26");
-    svg.setAttribute("height", "26");
-    svg.setAttribute("viewBox", "0 0 24 24");
-    svg.setAttribute("fill", "none");
-    const path = document.createElementNS(ns, "path");
-    path.setAttribute(
-      "d",
-      "M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.7a8.5 8.5 0 0 1-.9-3.8 8.38 8.38 0 0 1 8.5-8.5 8.38 8.38 0 0 1 8.5 8.5z",
+  // ── Mobile fullscreen (inline card ↔ full-screen sheet) ────────────
+  function openCtl(): void {
+    if (isSide) openPanel();
+    else void expandInline();
+  }
+  function closeCtl(): void {
+    if (isSide) closePanel();
+    else void collapseInline();
+  }
+  function toggleCtl(): void {
+    if (isSide) togglePanel();
+    else if (inlineExpanded) void collapseInline();
+    else void expandInline();
+  }
+  // Visible, tabbable elements inside the expanded dialog (skips display:none
+  // subtrees like the hidden in-card header; getClientRects covers fixed elements
+  // such as the bar, which offsetParent would miss).
+  function inlineFocusables(): HTMLElement[] {
+    const sel =
+      "a[href],button:not([disabled]),textarea:not([disabled])," +
+      'input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
+    return Array.from(container.querySelectorAll<HTMLElement>(sel)).filter(
+      (el) => el.getClientRects().length > 0,
     );
-    path.setAttribute("stroke", "currentColor");
-    path.setAttribute("stroke-width", "2");
-    path.setAttribute("stroke-linecap", "round");
-    path.setAttribute("stroke-linejoin", "round");
-    svg.appendChild(path);
-    return svg;
   }
-
-  // ── Input builder (closure over send) ──────────────────────────────
-  function buildStreamingDots(): HTMLElement {
-    const wrap = div({ display: "flex", gap: "4px", padding: "4px 0" });
-    for (let i = 0; i < 3; i++) {
-      const dot = div({
-        width: "6px",
-        height: "6px",
-        borderRadius: "50%",
-        backgroundColor: "#b5bfc8",
-        animation: "ago-pulse 1.2s ease-in-out infinite",
-        animationDelay: `${i * 0.2}s`,
-      });
-      wrap.appendChild(dot);
+  function onInlineKeydown(e: KeyboardEvent): void {
+    if (!inlineExpanded) return;
+    if (e.key === "Escape") {
+      void collapseInline();
+      return;
     }
-    return wrap;
-  }
-}
-
-// ── Input component ──────────────────────────────────────────────────
-interface BuildInputArgs {
-  placeholder: string;
-  allowFiles: boolean;
-  onSend: (content: string, files?: File[]) => void;
-}
-
-function buildInput(args: BuildInputArgs): {
-  inputRow: HTMLElement;
-  getValueAndClear: () => { content: string; files: File[] };
-  setDisabled: (disabled: boolean) => void;
-  focus: () => void;
-} {
-  let files: File[] = [];
-
-  const form = document.createElement("form");
-  css(form, {
-    display: "flex",
-    flexDirection: "column",
-    gap: "8px",
-    padding: "12px",
-    borderTop: `1px solid ${BORDER_COLOR}`,
-    backgroundColor: PANEL_BACKGROUND,
-  });
-  form.className = "ago-chat-input";
-
-  const fileList = div({ display: "flex", flexWrap: "wrap", gap: "6px" });
-
-  const row = div({ display: "flex", gap: "8px", alignItems: "flex-end" });
-
-  const textarea = document.createElement("textarea");
-  textarea.placeholder = args.placeholder;
-  // A placeholder is not an accessible name; label the field explicitly.
-  textarea.setAttribute("aria-label", args.placeholder);
-  textarea.rows = 1;
-  css(textarea, {
-    flex: "1",
-    resize: "none",
-    boxSizing: "border-box",
-    padding: "10px 12px",
-    border: `1px solid ${BORDER_COLOR}`,
-    borderRadius: "12px",
-    // Keep at >=16px: iOS Safari auto-zooms the page when a focused field is
-    // smaller
-    fontSize: "16px",
-    fontFamily: FONT_VAR,
-    lineHeight: "1.4",
-    // Grow with content up to 4 lines (16px * 1.4 * 4 + 20px padding), then scroll
-    maxHeight: "110px",
-    overflowY: "hidden",
-  });
-
-  // Auto-grow the textarea to fit its content, capped at maxHeight (4 lines).
-  // Leaves the resting (single-line) size untouched: it only sets an explicit
-  // height once the content has actually been measured in the DOM. The +2 keeps
-  // the border-box height matching the natural height (1px border top + bottom).
-  const autoResize = (): void => {
-    const max = 110;
-    textarea.style.height = "auto";
-    const target = Math.min(textarea.scrollHeight + 2, max);
-    textarea.style.height = `${target}px`;
-    textarea.style.overflowY =
-      textarea.scrollHeight + 2 > max ? "auto" : "hidden";
-  };
-  textarea.addEventListener("input", () => {
-    autoResize();
-    refreshSendBtn();
-  });
-
-  // Inline icons (no font/icon-lib dependency). Both use `currentColor` so they
-  // inherit the button's BRAND_TEXT_COLOR, keeping the `theme.brandText` contract.
-  const ARROW_ICON =
-    '<svg width="18" height="18" viewBox="0 -960 960 960" fill="currentColor" ' +
-    'aria-hidden="true"><path d="M440-160v-487L216-423l-56-57 320-320 320 320-56 ' +
-    '57-224-224v487h-80Z"/></svg>';
-  const SPINNER_ICON =
-    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" ' +
-    'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
-    'aria-hidden="true" style="animation: ago-spin 0.8s linear infinite">' +
-    '<path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>';
-
-  const sendBtn = document.createElement("button");
-  sendBtn.type = "submit";
-  sendBtn.setAttribute("aria-label", "Send");
-  sendBtn.innerHTML = ARROW_ICON;
-  css(sendBtn, {
-    flexShrink: "0",
-    width: "40px",
-    height: "40px",
-    padding: "0",
-    border: "none",
-    borderRadius: "50%",
-    backgroundColor: BRAND_COLOR,
-    color: BRAND_TEXT_COLOR,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    cursor: "pointer",
-  });
-
-  // The send button is disabled while the agent is answering (spinner shown) and
-  // when there's nothing to send (no text and no files), matching `submit()`.
-  let answering = false;
-  const refreshSendBtn = (): void => {
-    const hasContent = textarea.value.trim() !== "" || files.length > 0;
-    const disabled = answering || !hasContent;
-    sendBtn.disabled = disabled;
-    sendBtn.innerHTML = answering ? SPINNER_ICON : ARROW_ICON;
-    sendBtn.style.opacity = disabled && !answering ? "0.5" : "1";
-    sendBtn.style.cursor = disabled ? "default" : "pointer";
-  };
-
-  let fileInput: HTMLInputElement | null = null;
-  let attachBtn: HTMLButtonElement | null = null;
-  if (args.allowFiles) {
-    fileInput = document.createElement("input");
-    fileInput.type = "file";
-    fileInput.multiple = true;
-    css(fileInput, { display: "none" });
-    attachBtn = document.createElement("button");
-    attachBtn.type = "button";
-    attachBtn.setAttribute("aria-label", "Attach file");
-    attachBtn.textContent = "📎";
-    css(attachBtn, {
-      padding: "10px 12px",
-      border: `1px solid ${BORDER_COLOR}`,
-      borderRadius: "12px",
-      backgroundColor: PANEL_BACKGROUND,
-      cursor: "pointer",
-      fontSize: "14px",
-    });
-    attachBtn.addEventListener("click", () => fileInput?.click());
-    fileInput.addEventListener("change", () => {
-      files = [...files, ...Array.from(fileInput?.files ?? [])];
-      renderFiles();
-    });
-  }
-
-  function renderFiles(): void {
-    fileList.replaceChildren();
-    files.forEach((file, i) => {
-      const chip = div({
-        display: "flex",
-        alignItems: "center",
-        gap: "4px",
-        padding: "4px 8px",
-        backgroundColor: "#f0f4ff",
-        border: `1px solid ${BORDER_COLOR}`,
-        borderRadius: "8px",
-        fontSize: "12px",
-      });
-      const name = document.createElement("span");
-      name.textContent = file.name;
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.setAttribute("aria-label", `Remove ${file.name}`);
-      remove.textContent = "×";
-      css(remove, {
-        border: "none",
-        background: "transparent",
-        cursor: "pointer",
-        fontSize: "14px",
-        lineHeight: "1",
-      });
-      remove.addEventListener("click", () => {
-        files = files.filter((_, idx) => idx !== i);
-        renderFiles();
-      });
-      chip.append(name, remove);
-      fileList.appendChild(chip);
-    });
-    refreshSendBtn();
-  }
-
-  const getValueAndClear = (): { content: string; files: File[] } => {
-    const content = textarea.value;
-    const collected = files;
-    textarea.value = "";
-    autoResize();
-    files = [];
-    renderFiles();
-    return { content, files: collected };
-  };
-
-  const submit = (): void => {
-    const { content, files: collected } = getValueAndClear();
-    if (content.trim() || collected.length > 0) {
-      args.onSend(content.trim(), collected.length > 0 ? collected : undefined);
-    }
-  };
-
-  form.addEventListener("submit", (e) => {
-    e.preventDefault();
-    submit();
-  });
-  textarea.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // Trap Tab within the modal sheet (aria-modal alone does not stop keyboard
+    // focus from leaving into the scroll-locked background).
+    if (e.key !== "Tab") return;
+    const focusables = inlineFocusables();
+    if (focusables.length === 0) {
       e.preventDefault();
-      submit();
+      return;
     }
-  });
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    const active = document.activeElement;
+    if (e.shiftKey && (active === first || !container.contains(active))) {
+      e.preventDefault();
+      last.focus();
+    } else if (
+      !e.shiftKey &&
+      (active === last || !container.contains(active))
+    ) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+  function onMobileMqChange(e: MediaQueryListEvent): void {
+    if (isSide) applyOpenState();
+    else if (!e.matches && inlineExpanded) void collapseInline();
+  }
 
-  if (attachBtn) row.appendChild(attachBtn);
-  row.append(textarea, sendBtn);
-  if (fileInput) form.appendChild(fileInput);
-  form.append(fileList, row);
+  function viewportHeight(): number {
+    return window.visualViewport?.height ?? window.innerHeight;
+  }
+  // Match the expanded card to the visible viewport so the input stays above the
+  // iOS keyboard. A CSS var so live updates happen outside any view transition.
+  function syncVh(): void {
+    container.style.setProperty("--ago-vh", `${viewportHeight()}px`);
+  }
+  function scrollMessagesToEnd(): void {
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
 
-  // Start disabled: the input is empty on mount.
-  refreshSendBtn();
+  // The slim top bar (optional logo + close) shown only while expanded.
+  function buildMobileBar(): HTMLDivElement {
+    const bar = div({
+      position: "fixed",
+      top: "0",
+      left: "0",
+      right: "0",
+      height: `calc(${INLINE_BAR_H}px + env(safe-area-inset-top))`,
+      display: "none",
+      alignItems: "center",
+      justifyContent: "space-between",
+      padding: "env(safe-area-inset-top) 14px 0",
+      backgroundColor: PANEL_BACKGROUND,
+      borderBottom: `1px solid ${BORDER_COLOR}`,
+      zIndex: "2147483001",
+      fontFamily: FONT_VAR,
+    });
+    bar.className = "ago-chat-widget-mobile-bar";
+    // Leading slot resolves from the props the header already uses, so the bar
+    // acts as the full-screen header: a logo if `logoUrl` is set, else the
+    // `title` text, else nothing (pass `title: ""` to suppress branding). The
+    // empty spacer keeps the close button right-aligned in the "nothing" case.
+    if (logoUrl) {
+      const img = document.createElement("img");
+      img.src = logoUrl;
+      img.alt = "";
+      css(img, { height: "28px", width: "auto" });
+      bar.appendChild(img);
+    } else if (title) {
+      const label = document.createElement("span");
+      label.textContent = title;
+      css(label, {
+        fontSize: "15px",
+        fontWeight: "600",
+        color: TEXT_COLOR,
+        overflow: "hidden",
+        whiteSpace: "nowrap",
+        textOverflow: "ellipsis",
+      });
+      bar.appendChild(label);
+    } else {
+      bar.appendChild(div({}));
+    }
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.setAttribute("aria-label", "Close");
+    closeBtn.textContent = "×";
+    css(closeBtn, {
+      border: "none",
+      background: "transparent",
+      fontSize: "26px",
+      lineHeight: "1",
+      color: TEXT_COLOR,
+      cursor: "pointer",
+      padding: "4px 8px",
+    });
+    closeBtn.addEventListener("click", () => void collapseInline());
+    bar.appendChild(closeBtn);
+    return bar;
+  }
 
-  return {
-    inputRow: form,
-    getValueAndClear,
-    setDisabled: (disabled: boolean) => {
-      textarea.disabled = disabled;
-      // The send button also stays disabled when the input is empty; let
-      // refreshSendBtn reconcile the answering state with content presence.
-      answering = disabled;
-      refreshSendBtn();
-    },
-    focus: () => textarea.focus(),
-  };
+  // The morph runs through the View Transitions API when available, on a mobile
+  // viewport, and motion is allowed; otherwise the DOM just swaps instantly.
+  function canAnimateInline(): boolean {
+    return (
+      typeof (document as DocumentWithVT).startViewTransition === "function" &&
+      !reduceMotionMQ?.matches &&
+      !!mobileMQ?.matches
+    );
+  }
+  function runInlineTransition(mutate: () => void): Promise<void> {
+    const doc = document as DocumentWithVT;
+    if (canAnimateInline() && doc.startViewTransition) {
+      // Attach the names only for the duration of the transition so the widget
+      // is anonymous at rest (no interference with host view transitions).
+      container.style.setProperty("view-transition-name", vtName);
+      mobileBar?.style.setProperty("view-transition-name", `${vtName}-bar`);
+      const clear = (): void => {
+        container.style.removeProperty("view-transition-name");
+        mobileBar?.style.removeProperty("view-transition-name");
+      };
+      return doc.startViewTransition(mutate).finished.then(clear, clear);
+    }
+    mutate();
+    return Promise.resolve();
+  }
+
+  // Promote the inline card to a fixed full-screen sheet, or restore it. Runs
+  // inside the view transition so the browser composites the geometry change.
+  function applyInlineState(expanded: boolean): void {
+    if (expanded) {
+      if (inlineSpacer) {
+        container.parentElement?.insertBefore(inlineSpacer, container);
+      }
+      css(container, {
+        position: "fixed",
+        top: "0",
+        left: "0",
+        right: "0",
+        bottom: "0",
+        height: "var(--ago-vh, 100dvh)",
+        zIndex: "2147483000",
+        border: "none",
+        borderRadius: "0",
+        boxShadow: "none",
+        paddingTop: `calc(${INLINE_BAR_H}px + env(safe-area-inset-top))`,
+        paddingBottom: "env(safe-area-inset-bottom)",
+      });
+      container.setAttribute("role", "dialog");
+      container.setAttribute("aria-modal", "true");
+      container.setAttribute("aria-label", title);
+      document.documentElement.style.overflow = "hidden";
+      // The bar is the full-screen header, so hide the in-card header to avoid a
+      // duplicate logo/title row right beneath it.
+      if (header) header.style.display = "none";
+      if (mobileBar) mobileBar.style.display = "flex";
+    } else {
+      inlineSpacer?.remove();
+      inlineSpacer = undefined;
+      for (const prop of [
+        "position",
+        "top",
+        "left",
+        "right",
+        "bottom",
+        "z-index",
+        "padding-top",
+        "padding-bottom",
+      ]) {
+        container.style.removeProperty(prop);
+      }
+      container.style.height = inlineOrig.height;
+      container.style.border = inlineOrig.border;
+      container.style.borderRadius = inlineOrig.borderRadius;
+      container.style.boxShadow = inlineOrig.boxShadow;
+      container.removeAttribute("role");
+      container.removeAttribute("aria-modal");
+      container.removeAttribute("aria-label");
+      document.documentElement.style.removeProperty("overflow");
+      // Restore the in-card header hidden on expand (it is always flex).
+      if (header) header.style.display = "flex";
+      if (mobileBar) mobileBar.style.display = "none";
+    }
+  }
+
+  function expandInline(): Promise<void> {
+    if (inlineExpanded || !mobileMQ?.matches) return Promise.resolve();
+    // Skip the morph when the card already fills the viewport (a dedicated
+    // full-page chat): there is nothing to promote, and a sheet would just
+    // duplicate what is already on screen.
+    const rect = container.getBoundingClientRect();
+    if (rect.height >= viewportHeight() * 0.8) return Promise.resolve();
+    inlineExpanded = true;
+    // Reserve the card's slot so the page doesn't jump when it leaves flow.
+    inlineSpacer = div({
+      width: `${rect.width}px`,
+      height: `${rect.height}px`,
+    });
+    inlineSpacer.className = "ago-chat-widget-spacer";
+    inlineSpacer.setAttribute("aria-hidden", "true");
+    syncVh(); // height set before the transition snapshots
+    window.visualViewport?.addEventListener("resize", syncVh);
+    const done = runInlineTransition(() => applyInlineState(true));
+    void done.then(() => {
+      scrollMessagesToEnd();
+      focus();
+    });
+    scrollMessagesToEnd();
+    onOpen?.();
+    return done;
+  }
+  function collapseInline(): Promise<void> {
+    if (!inlineExpanded) return Promise.resolve();
+    inlineExpanded = false;
+    window.visualViewport?.removeEventListener("resize", syncVh);
+    // Blur so dismissing doesn't immediately re-trigger the focus expand.
+    container.querySelector<HTMLTextAreaElement>("textarea")?.blur();
+    const done = runInlineTransition(() => applyInlineState(false));
+    void done.then(() => container.style.removeProperty("--ago-vh"));
+    onClose?.();
+    return done;
+  }
 }

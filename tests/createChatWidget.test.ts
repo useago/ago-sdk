@@ -1,9 +1,9 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgoClient } from "../src/client/AgoClient";
 import type { AgoMessage, Conversation } from "../src/client/types";
-import { mountChatWidget } from "../src/widget/createChatWidget";
 import type { CreateFormCollectorOptions } from "../src/forms/createFormCollector";
 import type { StorageLike } from "../src/state/createStore";
+import { mountChatWidget } from "../src/widget/createChatWidget";
 
 // The widget loads the conversation list on mount (refreshThreads → getConversations).
 // Stub fetch so unmocked mounts return an empty list instead of hitting the network;
@@ -15,7 +15,7 @@ beforeEach(() => {
       ok: true,
       status: 200,
       json: async () => ({ count: 0, items: [] }),
-    }))
+    })),
   );
 });
 
@@ -34,7 +34,6 @@ function fakeStorage(): StorageLike & { raw: Map<string, string> } {
     },
   };
 }
-
 
 const orderForm: CreateFormCollectorOptions = {
   name: "order",
@@ -58,7 +57,10 @@ function makeAssistantMessage(overrides: Partial<AgoMessage> = {}): AgoMessage {
   };
 }
 
-function makeConversation(id: string, messages: AgoMessage[] = []): Conversation {
+function makeConversation(
+  id: string,
+  messages: AgoMessage[] = [],
+): Conversation {
   return { id, title: "Thread", lastMessageDate: new Date(0), messages };
 }
 
@@ -109,7 +111,7 @@ describe("mountChatWidget", () => {
 
     const widget = mountChatWidget(root, { client, forms: [orderForm] });
     expect(client.getRegisteredFunctions().map((s) => s.name)).toContain(
-      "update_order"
+      "update_order",
     );
 
     widget.destroy();
@@ -124,7 +126,10 @@ describe("mountChatWidget", () => {
     const registry = (
       client as unknown as {
         functionRegistry: {
-          execute: (name: string, args: Record<string, unknown>) => Promise<unknown>;
+          execute: (
+            name: string,
+            args: Record<string, unknown>,
+          ) => Promise<unknown>;
         };
       }
     ).functionRegistry;
@@ -163,7 +168,9 @@ describe("mountChatWidget", () => {
 
     // The POST handler returns a server message — the notice should show it,
     // overriding the static fallback.
-    const handler = vi.fn(async () => ({ message: "Commande #1234 confirmée." }));
+    const handler = vi.fn(async () => ({
+      message: "Commande #1234 confirmée.",
+    }));
     const widget = mountChatWidget(root, {
       client,
       formSubmittedMessage: "Form submitted.",
@@ -258,7 +265,8 @@ describe("mountChatWidget", () => {
         // First turn returns follow-up suggestions; later turns return plain.
         return makeAssistantMessage({
           id: `assistant-${sent.length}`,
-          followUpReplies: sent.length === 1 ? ["Pricing", "Book a demo"] : undefined,
+          followUpReplies:
+            sent.length === 1 ? ["Pricing", "Book a demo"] : undefined,
         });
       });
 
@@ -269,7 +277,7 @@ describe("mountChatWidget", () => {
     await widget.sendMessage("hello");
 
     const buttons = root.querySelectorAll<HTMLButtonElement>(
-      ".ago-message__followup-btn"
+      ".ago-message__followup-btn",
     );
     expect(buttons).toHaveLength(2);
     expect(buttons[0].disabled).toBe(false);
@@ -296,9 +304,10 @@ describe("mountChatWidget", () => {
         // Only the first turn returns follow-up suggestions.
         return makeAssistantMessage({
           id: `assistant-${sent.length}`,
-          followUpReplies: sent.length === 1 ? ["Pricing", "Book a demo"] : undefined,
+          followUpReplies:
+            sent.length === 1 ? ["Pricing", "Book a demo"] : undefined,
         });
-      }
+      },
     );
 
     const root = document.createElement("div");
@@ -306,16 +315,12 @@ describe("mountChatWidget", () => {
     const widget = mountChatWidget(root, { client });
 
     await widget.sendMessage("hello");
-    expect(
-      root.querySelectorAll(".ago-message__followup-btn")
-    ).toHaveLength(2);
+    expect(root.querySelectorAll(".ago-message__followup-btn")).toHaveLength(2);
 
     // Second turn: the first reply is no longer the last message, so its
     // stale suggestions must disappear.
     await widget.sendMessage("tell me more");
-    expect(
-      root.querySelectorAll(".ago-message__followup-btn")
-    ).toHaveLength(0);
+    expect(root.querySelectorAll(".ago-message__followup-btn")).toHaveLength(0);
 
     widget.destroy();
     root.remove();
@@ -325,7 +330,7 @@ describe("mountChatWidget", () => {
   it("renders suggested replies as disabled when onFollowUpClick is false", async () => {
     const client = new AgoClient({ baseUrl: "https://example.test" });
     vi.spyOn(client, "sendMessage").mockResolvedValue(
-      makeAssistantMessage({ followUpReplies: ["A"] })
+      makeAssistantMessage({ followUpReplies: ["A"] }),
     );
 
     const root = document.createElement("div");
@@ -335,7 +340,7 @@ describe("mountChatWidget", () => {
     await widget.sendMessage("hello");
 
     const button = root.querySelector<HTMLButtonElement>(
-      ".ago-message__followup-btn"
+      ".ago-message__followup-btn",
     );
     expect(button).not.toBeNull();
     expect(button?.disabled).toBe(true);
@@ -380,7 +385,7 @@ describe("mountChatWidget", () => {
       await widget.sendMessage("hi");
 
       const bubble = root.querySelector<HTMLElement>(
-        ".ago-message--assistant .ago-message__content"
+        ".ago-message--assistant .ago-message__content",
       );
       expect(bubble).not.toBeNull();
       expect(bubble!.style.padding).toBe("2px 8px");
@@ -401,7 +406,7 @@ describe("mountChatWidget", () => {
       await widget.sendMessage("hi");
 
       const bubble = root.querySelector<HTMLElement>(
-        ".ago-message--assistant .ago-message__content"
+        ".ago-message--assistant .ago-message__content",
       );
       expect(bubble).not.toBeNull();
       expect(bubble!.style.padding).toBe("10px 14px");
@@ -424,14 +429,13 @@ describe("mountChatWidget", () => {
       // Assistant message: filled bubble with the tail bulge on the bottom-left
       // (a `.ago-message__tail` overlay positioned to the left of the bubble).
       const assistant = root.querySelector<HTMLElement>(
-        ".ago-message--assistant .ago-message__content"
+        ".ago-message--assistant .ago-message__content",
       );
       expect(assistant).not.toBeNull();
       expect(assistant!.style.padding).toBe("10px 14px");
       expect(assistant!.style.backgroundColor).not.toBe("transparent");
-      const assistantTail = assistant!.querySelector<HTMLElement>(
-        ".ago-message__tail"
-      );
+      const assistantTail =
+        assistant!.querySelector<HTMLElement>(".ago-message__tail");
       expect(assistantTail).not.toBeNull();
       expect(assistantTail!.style.left).not.toBe("");
       expect(assistantTail!.style.right).toBe("");
@@ -439,7 +443,7 @@ describe("mountChatWidget", () => {
 
       // User message: tail bulge on the bottom-right.
       const user = root.querySelector<HTMLElement>(
-        ".ago-message--user .ago-message__content"
+        ".ago-message--user .ago-message__content",
       );
       expect(user).not.toBeNull();
       const userTail = user!.querySelector<HTMLElement>(".ago-message__tail");
@@ -464,7 +468,7 @@ describe("mountChatWidget", () => {
 
       const wrapper = root.querySelector<HTMLElement>(".ago-chat-widget-panel");
       const launcher = root.querySelector<HTMLElement>(
-        ".ago-chat-widget-launcher"
+        ".ago-chat-widget-launcher",
       );
       expect(wrapper).not.toBeNull();
       expect(launcher).not.toBeNull();
@@ -491,9 +495,11 @@ describe("mountChatWidget", () => {
       document.body.appendChild(root);
 
       const widget = mountChatWidget(root, { client, placement: "right" });
-      const wrapper = root.querySelector<HTMLElement>(".ago-chat-widget-panel")!;
+      const wrapper = root.querySelector<HTMLElement>(
+        ".ago-chat-widget-panel",
+      )!;
       const launcher = root.querySelector<HTMLElement>(
-        ".ago-chat-widget-launcher"
+        ".ago-chat-widget-launcher",
       )!;
 
       // Right edge → slides off to the right while closed.
@@ -525,7 +531,9 @@ describe("mountChatWidget", () => {
         defaultOpen: true,
         launcher: false,
       });
-      const wrapper = root.querySelector<HTMLElement>(".ago-chat-widget-panel")!;
+      const wrapper = root.querySelector<HTMLElement>(
+        ".ago-chat-widget-panel",
+      )!;
 
       expect(wrapper.style.transform).toBe("translateX(0)");
       expect(root.querySelector(".ago-chat-widget-launcher")).toBeNull();
@@ -552,14 +560,406 @@ describe("mountChatWidget", () => {
     });
   });
 
+  describe("mobile fullscreen", () => {
+    // jsdom has no matchMedia; stub it with a controllable `matches`. The
+    // prefers-reduced-motion query always reports false. (startViewTransition is
+    // also absent, so the morph exercises the instant-swap fallback path.)
+    function stubMatchMedia(state: { mobile: boolean }) {
+      const listeners = new Map<
+        string,
+        Set<(e: { matches: boolean }) => void>
+      >();
+      vi.stubGlobal(
+        "matchMedia",
+        vi.fn((query: string) => {
+          const isReduce = query.includes("prefers-reduced-motion");
+          const set = listeners.get(query) ?? new Set();
+          listeners.set(query, set);
+          return {
+            get matches() {
+              return isReduce ? false : state.mobile;
+            },
+            media: query,
+            addEventListener: (
+              _: string,
+              cb: (e: { matches: boolean }) => void,
+            ) => set.add(cb),
+            removeEventListener: (
+              _: string,
+              cb: (e: { matches: boolean }) => void,
+            ) => set.delete(cb),
+            dispatchEvent: () => true,
+          };
+        }),
+      );
+      return {
+        fire(query: string, matches: boolean) {
+          state.mobile = matches;
+          for (const cb of listeners.get(query) ?? []) cb({ matches });
+        },
+      };
+    }
+
+    it("inline (in a browser) exposes open/close/toggle automatically", () => {
+      stubMatchMedia({ mobile: true });
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+
+      const widget = mountChatWidget(root, {
+        client,
+      });
+
+      expect(typeof widget.open).toBe("function");
+      expect(typeof widget.close).toBe("function");
+      expect(typeof widget.toggle).toBe("function");
+      expect(root.querySelector(".ago-chat-widget-panel")).toBeNull();
+      expect(root.querySelector(".ago-chat-widget-launcher")).toBeNull();
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("open() expands the inline card to a full-screen dialog; close() reverts", () => {
+      stubMatchMedia({ mobile: true });
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+
+      const widget = mountChatWidget(root, {
+        client,
+      });
+      const container = root.querySelector<HTMLElement>(".ago-chat-widget")!;
+
+      widget.open!();
+      expect(container.style.position).toBe("fixed");
+      expect(container.getAttribute("role")).toBe("dialog");
+      expect(container.getAttribute("aria-modal")).toBe("true");
+      expect(document.documentElement.style.overflow).toBe("hidden");
+      // The slim bar shows and the slot is reserved so the page doesn't jump.
+      const bar = document.querySelector<HTMLElement>(
+        ".ago-chat-widget-mobile-bar",
+      )!;
+      expect(bar.style.display).toBe("flex");
+      expect(root.querySelector(".ago-chat-widget-spacer")).not.toBeNull();
+
+      widget.close!();
+      expect(container.style.position).toBe("");
+      expect(container.getAttribute("role")).toBeNull();
+      expect(container.getAttribute("aria-modal")).toBeNull();
+      expect(document.documentElement.style.overflow).toBe("");
+      expect(bar.style.display).toBe("none");
+      expect(root.querySelector(".ago-chat-widget-spacer")).toBeNull();
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("open() is a no-op on a desktop viewport", () => {
+      stubMatchMedia({ mobile: false });
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+
+      const widget = mountChatWidget(root, {
+        client,
+      });
+      const container = root.querySelector<HTMLElement>(".ago-chat-widget")!;
+
+      widget.open!();
+      expect(container.style.position).not.toBe("fixed");
+      expect(container.getAttribute("role")).toBeNull();
+      expect(document.documentElement.style.overflow).toBe("");
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("open() is a no-op when the card already fills the viewport", () => {
+      stubMatchMedia({ mobile: true });
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+
+      const widget = mountChatWidget(root, {
+        client,
+      });
+      const container = root.querySelector<HTMLElement>(".ago-chat-widget")!;
+      // A full-bleed card (≈full viewport height) is already "fullscreen", so
+      // the morph is skipped: nothing to promote. Height well above any viewport.
+      container.getBoundingClientRect = () =>
+        ({ width: 390, height: 100000 }) as DOMRect;
+
+      widget.open!();
+      expect(container.style.position).not.toBe("fixed");
+      expect(container.getAttribute("role")).toBeNull();
+      expect(root.querySelector(".ago-chat-widget-spacer")).toBeNull();
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("fires onOpen / onClose on inline expand and collapse", () => {
+      stubMatchMedia({ mobile: true });
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      const onOpen = vi.fn();
+      const onClose = vi.fn();
+
+      const widget = mountChatWidget(root, {
+        client,
+        onOpen,
+        onClose,
+      });
+
+      widget.open!();
+      expect(onOpen).toHaveBeenCalledTimes(1);
+      widget.close!();
+      expect(onClose).toHaveBeenCalledTimes(1);
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("fires onOpen / onClose on side-panel open and close", () => {
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      const onOpen = vi.fn();
+      const onClose = vi.fn();
+
+      const widget = mountChatWidget(root, {
+        client,
+        placement: "right",
+        onOpen,
+        onClose,
+      });
+
+      widget.open!();
+      expect(onOpen).toHaveBeenCalledTimes(1);
+      widget.close!();
+      expect(onClose).toHaveBeenCalledTimes(1);
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("destroy() removes the bar, the per-instance style, the spacer, and the scroll lock", () => {
+      stubMatchMedia({ mobile: true });
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+
+      const widget = mountChatWidget(root, {
+        client,
+      });
+      widget.open!();
+
+      const bar = document.querySelector(".ago-chat-widget-mobile-bar");
+      const vtStyle = document.querySelector('style[id^="ago-vt-"]');
+      const spacer = root.querySelector(".ago-chat-widget-spacer");
+      expect(bar).not.toBeNull();
+      expect(vtStyle).not.toBeNull();
+      expect(spacer).not.toBeNull();
+
+      widget.destroy();
+      expect(bar!.isConnected).toBe(false);
+      expect(vtStyle!.isConnected).toBe(false);
+      expect(spacer!.isConnected).toBe(false);
+      expect(document.documentElement.style.overflow).toBe("");
+
+      root.remove();
+      client.destroy();
+    });
+
+    it("mobile bar shows the logo when logoUrl is set", () => {
+      stubMatchMedia({ mobile: true });
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+
+      const widget = mountChatWidget(root, {
+        client,
+        logoUrl: "https://example.test/logo.svg",
+      });
+      const bar = document.querySelector<HTMLElement>(
+        ".ago-chat-widget-mobile-bar",
+      )!;
+      const img = bar.querySelector("img");
+      expect(img).not.toBeNull();
+      expect(img!.getAttribute("src")).toBe("https://example.test/logo.svg");
+      expect(bar.querySelector("span")).toBeNull();
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("mobile bar falls back to the title text when no logoUrl", () => {
+      stubMatchMedia({ mobile: true });
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+
+      const widget = mountChatWidget(root, {
+        client,
+        title: "CreditProx",
+      });
+      const bar = document.querySelector<HTMLElement>(
+        ".ago-chat-widget-mobile-bar",
+      )!;
+      expect(bar.querySelector("img")).toBeNull();
+      expect(bar.querySelector("span")?.textContent).toBe("CreditProx");
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("mobile bar shows no branding when title is empty and no logoUrl", () => {
+      stubMatchMedia({ mobile: true });
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+
+      const widget = mountChatWidget(root, {
+        client,
+        title: "",
+      });
+      const bar = document.querySelector<HTMLElement>(
+        ".ago-chat-widget-mobile-bar",
+      )!;
+      expect(bar.querySelector("img")).toBeNull();
+      expect(bar.querySelector("span")).toBeNull();
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("keeps the close button inside the aria-modal dialog", () => {
+      stubMatchMedia({ mobile: true });
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+
+      const widget = mountChatWidget(root, { client });
+      const container = root.querySelector<HTMLElement>(".ago-chat-widget")!;
+      widget.open!();
+
+      // The bar (and its close button) must be a descendant of the dialog, or
+      // assistive tech would ignore it under aria-modal.
+      expect(container.getAttribute("aria-modal")).toBe("true");
+      const bar = container.querySelector(".ago-chat-widget-mobile-bar");
+      expect(bar).not.toBeNull();
+      expect(container.contains(bar)).toBe(true);
+      expect(bar!.querySelector('button[aria-label="Close"]')).not.toBeNull();
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("traps Tab focus within the expanded sheet", () => {
+      stubMatchMedia({ mobile: true });
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+
+      const widget = mountChatWidget(root, { client });
+      const container = root.querySelector<HTMLElement>(".ago-chat-widget")!;
+      widget.open!();
+
+      // jsdom does no layout, so fake visibility for the getClientRects filter.
+      const origGCR = Element.prototype.getClientRects;
+      Element.prototype.getClientRects = () =>
+        [{} as DOMRect] as unknown as DOMRectList;
+      try {
+        const focusables = Array.from(
+          container.querySelectorAll<HTMLElement>(
+            'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])',
+          ),
+        );
+        expect(focusables.length).toBeGreaterThan(1);
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+
+        // Tab on the last focusable wraps to the first.
+        last.focus();
+        const fwd = new KeyboardEvent("keydown", {
+          key: "Tab",
+          bubbles: true,
+          cancelable: true,
+        });
+        document.dispatchEvent(fwd);
+        expect(fwd.defaultPrevented).toBe(true);
+        expect(document.activeElement).toBe(first);
+
+        // Shift+Tab on the first wraps to the last.
+        first.focus();
+        const back = new KeyboardEvent("keydown", {
+          key: "Tab",
+          shiftKey: true,
+          bubbles: true,
+          cancelable: true,
+        });
+        document.dispatchEvent(back);
+        expect(back.defaultPrevented).toBe(true);
+        expect(document.activeElement).toBe(last);
+      } finally {
+        Element.prototype.getClientRects = origGCR;
+      }
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("hides the in-card header while full-screen and restores it on collapse", () => {
+      stubMatchMedia({ mobile: true });
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+
+      const widget = mountChatWidget(root, {
+        client,
+        showHeader: true,
+      });
+      const header = root.querySelector<HTMLElement>(
+        ".ago-chat-widget__header",
+      )!;
+      expect(header.style.display).toBe("flex");
+
+      widget.open!();
+      expect(header.style.display).toBe("none");
+
+      widget.close!();
+      expect(header.style.display).toBe("flex");
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+  });
+
   describe("persistConversation", () => {
     /** Seed the front-cached last active thread (id + last message time). */
     function seedThread(
       storage: StorageLike & { raw: Map<string, string> },
       value: string,
-      lastMessageAt: number
+      lastMessageAt: number,
     ): void {
-      storage.raw.set("ago_last_thread", JSON.stringify({ value, lastMessageAt }));
+      storage.raw.set(
+        "ago_last_thread",
+        JSON.stringify({ value, lastMessageAt }),
+      );
     }
 
     it("resumes the cached last active thread on mount (id comes from the front cache)", async () => {
@@ -587,7 +987,7 @@ describe("mountChatWidget", () => {
       expect(getSpy).toHaveBeenCalledWith("conv-restored");
       expect(sendSpy).toHaveBeenCalledWith(
         "hi",
-        expect.objectContaining({ conversationId: "conv-restored" })
+        expect.objectContaining({ conversationId: "conv-restored" }),
       );
 
       sendSpy.mockRestore();
@@ -600,11 +1000,14 @@ describe("mountChatWidget", () => {
       const storage = fakeStorage();
       const client = new AgoClient({ baseUrl: "https://example.test" });
       vi.spyOn(client, "sendMessage").mockResolvedValue(
-        makeAssistantMessage({ conversationId: "conv-1" })
+        makeAssistantMessage({ conversationId: "conv-1" }),
       );
       const listSpy = vi
         .spyOn(client, "getConversations")
-        .mockResolvedValue([makeConversation("conv-1"), makeConversation("conv-2")]);
+        .mockResolvedValue([
+          makeConversation("conv-1"),
+          makeConversation("conv-2"),
+        ]);
 
       const root = document.createElement("div");
       document.body.appendChild(root);
@@ -659,7 +1062,9 @@ describe("mountChatWidget", () => {
       const client = new AgoClient({ baseUrl: "https://example.test" });
       const sendSpy = vi
         .spyOn(client, "sendMessage")
-        .mockResolvedValue(makeAssistantMessage({ conversationId: "conv-new" }));
+        .mockResolvedValue(
+          makeAssistantMessage({ conversationId: "conv-new" }),
+        );
       const getSpy = vi.spyOn(client, "getConversation");
 
       const root = document.createElement("div");
@@ -675,7 +1080,7 @@ describe("mountChatWidget", () => {
       expect(getSpy).not.toHaveBeenCalled();
       expect(sendSpy).toHaveBeenCalledWith(
         "hi",
-        expect.objectContaining({ conversationId: undefined })
+        expect.objectContaining({ conversationId: undefined }),
       );
 
       sendSpy.mockRestore();
@@ -689,7 +1094,10 @@ describe("mountChatWidget", () => {
       const completedAt = new Date();
       const client = new AgoClient({ baseUrl: "https://example.test" });
       vi.spyOn(client, "sendMessage").mockResolvedValue(
-        makeAssistantMessage({ conversationId: "conv-9", createdAt: completedAt })
+        makeAssistantMessage({
+          conversationId: "conv-9",
+          createdAt: completedAt,
+        }),
       );
 
       const root = document.createElement("div");
@@ -720,7 +1128,7 @@ describe("mountChatWidget", () => {
         .spyOn(client, "sendMessage")
         .mockResolvedValue(makeAssistantMessage());
       vi.spyOn(client, "getConversation").mockResolvedValue(
-        makeConversation("conv-explicit")
+        makeConversation("conv-explicit"),
       );
 
       const root = document.createElement("div");
@@ -735,7 +1143,7 @@ describe("mountChatWidget", () => {
 
       expect(sendSpy).toHaveBeenCalledWith(
         "hi",
-        expect.objectContaining({ conversationId: "conv-explicit" })
+        expect.objectContaining({ conversationId: "conv-explicit" }),
       );
 
       sendSpy.mockRestore();
@@ -772,7 +1180,7 @@ describe("mountChatWidget", () => {
             createdAt: new Date(0),
           },
           makeAssistantMessage({ id: "m2", content: "Earlier answer" }),
-        ])
+        ]),
       );
 
       const root = document.createElement("div");
@@ -834,7 +1242,7 @@ describe("mountChatWidget", () => {
               },
             ],
           },
-        ])
+        ]),
       );
 
       const root = document.createElement("div");
@@ -849,7 +1257,7 @@ describe("mountChatWidget", () => {
       });
 
       const imgs = root.querySelectorAll<HTMLImageElement>(
-        ".ago-message__attachments img"
+        ".ago-message__attachments img",
       );
       // Only the backend-verified image is embedded; the unverified one is a link.
       expect(imgs).toHaveLength(1);
@@ -859,9 +1267,9 @@ describe("mountChatWidget", () => {
       expect(root.textContent).toContain("report.pdf");
       expect(root.textContent).toContain("evil.png");
       expect(
-        Array.from(
-          root.querySelectorAll<HTMLImageElement>("img")
-        ).some((el) => el.src.includes("evil.png"))
+        Array.from(root.querySelectorAll<HTMLImageElement>("img")).some((el) =>
+          el.src.includes("evil.png"),
+        ),
       ).toBe(false);
 
       widget.destroy();
