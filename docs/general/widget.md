@@ -67,38 +67,38 @@ widget.destroy(); // removes listeners, uninstalls forms, clears the DOM
 
 ### Options
 
-| Option                  | Type                                                                    | Default                                                    |
-| ----------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------- |
-| `client?`               | `AgoClient`                                                             | — (provide this **or** `config`)                           |
-| `config?`               | `AgoConfig`                                                             | — (needs at least `baseUrl`)                               |
-| `conversationId?`       | `string`                                                                | —                                                          |
-| `persistConversation?`  | `boolean \| Partial<ConversationSessionOptions>`                        | — (off)                                                    |
-| `loadThreads?`          | `boolean`                                                               | `false`                                                    |
-| `title?`                | `string`                                                                | `"Chat"`                                                   |
+| Option                  | Type                                                                                      | Default                                                    |
+| ----------------------- | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `client?`               | `AgoClient`                                                                               | — (provide this **or** `config`)                           |
+| `config?`               | `AgoConfig`                                                                               | — (needs at least `baseUrl`)                               |
+| `conversationId?`       | `string`                                                                                  | —                                                          |
+| `persistConversation?`  | `boolean \| Partial<ConversationSessionOptions>`                                          | — (off)                                                    |
+| `loadThreads?`          | `boolean`                                                                                 | `false`                                                    |
+| `title?`                | `string`                                                                                  | `"Chat"`                                                   |
 | `welcomeMessage?`       | `string \| { message: string; mode?: "static" \| "streaming"; speed?; followUpReplies? }` | `"Hello! How can I help you today?"`                       |
-| `placeholder?`          | `string`                                                                | `"Type a message..."`                                      |
-| `allowFiles?`           | `boolean`                                                               | `false`                                                    |
-| `height?`               | `string \| number`                                                      | `500` (ignored for side panels)                            |
-| `placement?`            | `"inline" \| "left" \| "right"`                                         | `"inline"`                                                 |
-| `width?`                | `string \| number`                                                      | `400` (side panels only)                                   |
-| `launcher?`             | `boolean`                                                               | `true` (side panels only)                                  |
-| `defaultOpen?`          | `boolean`                                                               | `false` (side panels only)                                 |
-| `mobile?`               | `{ breakpoint?: number; trigger?: "focus" \| "manual" }`                | — (automatic; see [Mobile fullscreen](#mobile-fullscreen)) |
-| `logoUrl?`              | `string`                                                                | —                                                          |
-| `showAgentName?`        | `boolean`                                                               | `false`                                                    |
-| `agentBubble?`          | `boolean`                                                               | `false`                                                    |
-| `bubbleStyle?`          | `"default" \| "imessage"`                                               | `"default"`                                                |
-| `showHeader?`           | `boolean`                                                               | `true`                                                     |
-| `theme?`                | `WidgetTheme`                                                           | — (see [Theming](#theming))                                |
-| `forms?`                | `Array<CreateFormCollectorOptions \| LoadFormCollectorOptions>`         | —                                                          |
-| `formSubmittedMessage?` | `string \| ((result) => string \| null)`                                | server `message`, else `"Form submitted."`                 |
-| `onFollowUpClick?`      | `((reply) => void) \| false`                                            | sends the reply                                            |
-| `onOpen?`               | `() => void`                                                            | — (side open / inline expand)                              |
-| `onClose?`              | `() => void`                                                            | — (side close / inline collapse)                           |
-| `onMessageSent?`        | `(content) => void`                                                     | —                                                          |
-| `onMessageReceived?`    | `({ id, content }) => void`                                             | —                                                          |
-| `onFormSubmitted?`      | `({ name, values, result }) => void`                                    | —                                                          |
-| `onFormError?`          | `({ name, values, error }) => void`                                     | —                                                          |
+| `placeholder?`          | `string`                                                                                  | `"Type a message..."`                                      |
+| `allowFiles?`           | `boolean`                                                                                 | `false`                                                    |
+| `height?`               | `string \| number`                                                                        | `500` (ignored for side panels)                            |
+| `placement?`            | `"inline" \| "left" \| "right"`                                                           | `"inline"`                                                 |
+| `width?`                | `string \| number`                                                                        | `400` (side panels only)                                   |
+| `launcher?`             | `boolean`                                                                                 | `true` (side panels only)                                  |
+| `defaultOpen?`          | `boolean`                                                                                 | `false` (side panels only)                                 |
+| `mobile?`               | `{ breakpoint?: number; trigger?: "focus" \| "manual" }`                                  | — (automatic; see [Mobile fullscreen](#mobile-fullscreen)) |
+| `logoUrl?`              | `string`                                                                                  | —                                                          |
+| `showAgentName?`        | `boolean`                                                                                 | `false`                                                    |
+| `agentBubble?`          | `boolean`                                                                                 | `false`                                                    |
+| `bubbleStyle?`          | `"default" \| "imessage"`                                                                 | `"default"`                                                |
+| `showHeader?`           | `boolean`                                                                                 | `true`                                                     |
+| `theme?`                | `WidgetTheme`                                                                             | — (see [Theming](#theming))                                |
+| `forms?`                | `Array<CreateFormCollectorOptions \| LoadFormCollectorOptions>`                           | —                                                          |
+| `formSubmittedMessage?` | `string \| ((result) => string \| null)`                                                  | server `message`, else `"Form submitted."`                 |
+| `onFollowUpClick?`      | `((reply) => void) \| false`                                                              | sends the reply                                            |
+| `onOpen?`               | `() => void`                                                                              | — (side open / inline expand)                              |
+| `onClose?`              | `() => void`                                                                              | — (side close / inline collapse)                           |
+| `onMessageSent?`        | `(content) => void`                                                                       | —                                                          |
+| `onMessageReceived?`    | `({ id, content }) => void`                                                               | —                                                          |
+| `onFormSubmitted?`      | `({ name, values, result }) => void`                                                      | —                                                          |
+| `onFormError?`          | `({ name, values, error }) => void`                                                       | —                                                          |
 
 ### Streamed welcome message
 
