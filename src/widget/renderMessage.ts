@@ -48,6 +48,8 @@ export interface RenderMessageOptions {
   followUpEnabled: boolean;
   /** Click handler for a suggested reply (omitted when non-interactive). */
   followUpHandler?: (reply: string) => void;
+  /** Small viewport: widen bubbles to reclaim horizontal space. */
+  isMobile?: boolean;
 }
 
 export function renderMessage(
@@ -62,6 +64,7 @@ export function renderMessage(
     agentBubble,
     followUpEnabled,
     followUpHandler,
+    isMobile,
   } = opts;
   const isUser = message.role === "user";
   const imessage = bubbleStyle === "imessage";
@@ -240,8 +243,20 @@ export function renderMessage(
   // An attachment-only message (files, no text) shows no empty bubble.
   const hasBubble = !!message.content || message.status === "IN_PROGRESS";
 
+  // Bubbles run wider on small viewports so long messages don't waste the screen
+  // edge on a narrow device. Non-bubbled assistant text is already full width.
+  const bubbleMaxWidth = bubbled
+    ? imessage || isUser
+      ? isMobile
+        ? "88%"
+        : "75%"
+      : isMobile
+        ? "92%"
+        : "85%"
+    : "100%";
+
   const bubble = div({
-    maxWidth: imessage ? "75%" : isUser ? "75%" : bubbled ? "85%" : "100%",
+    maxWidth: bubbleMaxWidth,
     padding: bubbled ? "10px 14px" : "2px 8px",
     borderRadius: imessage
       ? MESSAGE_RADIUS_IMESSAGE

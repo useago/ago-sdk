@@ -113,7 +113,20 @@ export interface WidgetTheme {
  */
 export type WelcomeMessage =
   | string
-  | { message: string; mode?: "static" | "streaming"; speed?: number };
+  | {
+      message: string;
+      mode?: "static" | "streaming";
+      speed?: number;
+      /**
+       * Suggested follow-up replies rendered as clickable pills under the
+       * greeting once it finishes typing. Only applies to `mode: "streaming"`
+       * (the static empty-state has no message bubble to attach them to).
+       * Clicking one behaves exactly like a backend follow-up reply: it sends
+       * the text as the first message, unless {@link MountChatWidgetOptions.onFollowUpClick}
+       * intercepts or disables it.
+       */
+      followUpReplies?: string[];
+    };
 
 /**
  * Options for `mountChatWidget` — the framework-agnostic (pure TS/JS)
