@@ -657,6 +657,69 @@ describe("mountChatWidget", () => {
       client.destroy();
     });
 
+    it("pushes the sheet up (without resizing) when the keyboard opens", async () => {
+      stubMatchMedia({ mobile: true });
+      // Stub a controllable visualViewport (jsdom has none). It starts at the full
+      // height, then shrinks and offsets as if the on-screen keyboard opened.
+      const vvListeners = new Map<string, Set<() => void>>();
+      const vv = {
+        height: 800,
+        offsetTop: 0,
+        addEventListener: (type: string, cb: () => void) => {
+          const set = vvListeners.get(type) ?? new Set();
+          set.add(cb);
+          vvListeners.set(type, set);
+        },
+        removeEventListener: (type: string, cb: () => void) => {
+          vvListeners.get(type)?.delete(cb);
+        },
+      };
+      vi.stubGlobal("visualViewport", vv);
+      const fireVv = (type: string) => {
+        for (const cb of vvListeners.get(type) ?? []) cb();
+      };
+
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+
+      const widget = mountChatWidget(root, { client });
+      const container = root.querySelector<HTMLElement>(".ago-chat-widget")!;
+      const bar = document.querySelector<HTMLElement>(
+        ".ago-chat-widget-mobile-bar",
+      )!;
+
+      widget.open!();
+      // The sheet captures the full height and sits flush at the top.
+      expect(container.style.getPropertyValue("--ago-vh")).toBe("800px");
+      expect(container.style.top).toBe("0px");
+
+      // Keyboard opens: viewport shrinks (800 -> 500) and scrolls down (40). The
+      // resize + scroll burst is coalesced into one rAF, so flush a frame.
+      vv.height = 500;
+      vv.offsetTop = 40;
+      fireVv("resize");
+      fireVv("scroll");
+      await new Promise((r) => requestAnimationFrame(r));
+      // Height is unchanged (no resize); the sheet is pushed up by the keyboard
+      // overlap: 40 + 500 - 800 = -260.
+      expect(container.style.getPropertyValue("--ago-vh")).toBe("800px");
+      expect(container.style.top).toBe("-260px");
+      expect(bar.style.top).toBe("40px");
+
+      widget.close!();
+      // Listeners are dropped on collapse, so later viewport changes are ignored.
+      vv.height = 700;
+      vv.offsetTop = 10;
+      fireVv("resize");
+      expect(container.style.top).toBe("");
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+      vi.unstubAllGlobals();
+    });
+
     it("open() is a no-op on a desktop viewport", () => {
       stubMatchMedia({ mobile: false });
       const client = new AgoClient({ baseUrl: "https://example.test" });
@@ -942,6 +1005,76 @@ describe("mountChatWidget", () => {
 
       widget.close!();
       expect(header.style.display).toBe("flex");
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("tapping a suggested reply on mobile sends it without morphing to full screen", async () => {
+      stubMatchMedia({ mobile: true });
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const sent: string[] = [];
+      vi.spyOn(client, "sendMessage").mockImplementation(
+        async (content: string) => {
+          sent.push(content);
+          return makeAssistantMessage({
+            id: `assistant-${sent.length}`,
+            followUpReplies: sent.length === 1 ? ["Pricing"] : undefined,
+          });
+        },
+      );
+
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      const widget = mountChatWidget(root, { client });
+      const container = root.querySelector<HTMLElement>(".ago-chat-widget")!;
+
+      await widget.sendMessage("hello");
+      const button = root.querySelector<HTMLButtonElement>(
+        ".ago-message__followup-btn",
+      )!;
+      expect(button).not.toBeNull();
+
+      // Reproduce a real tap: focusing the pill must not expand the card (the
+      // morph would flip it to position:fixed mid-tap and eat the click), and
+      // the click must still send the reply.
+      button.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+      expect(container.style.position).not.toBe("fixed");
+      button.click();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(sent).toEqual(["hello", "Pricing"]);
+      expect(container.style.position).not.toBe("fixed");
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("widens message bubbles on a mobile viewport", async () => {
+      const mq = stubMatchMedia({ mobile: true });
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      vi.spyOn(client, "sendMessage").mockResolvedValue(
+        makeAssistantMessage({ id: "a1" }),
+      );
+
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      const widget = mountChatWidget(root, { client });
+
+      await widget.sendMessage("hi");
+      const bubble = () =>
+        root.querySelector<HTMLElement>(
+          ".ago-message--user .ago-message__content",
+        )!;
+      // User bubble is 75% on desktop; mobile reclaims the edge.
+      expect(bubble().style.maxWidth).toBe("88%");
+
+      // Crossing back to desktop reflows the thread to the narrower width.
+      mq.fire("(max-width: 768px)", false);
+      expect(bubble().style.maxWidth).toBe("75%");
 
       widget.destroy();
       root.remove();

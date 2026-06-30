@@ -75,7 +75,7 @@ widget.destroy(); // removes listeners, uninstalls forms, clears the DOM
 | `persistConversation?`  | `boolean \| Partial<ConversationSessionOptions>`                        | — (off)                                                    |
 | `loadThreads?`          | `boolean`                                                               | `false`                                                    |
 | `title?`                | `string`                                                                | `"Chat"`                                                   |
-| `welcomeMessage?`       | `string \| { message: string; mode?: "static" \| "streaming"; speed? }` | `"Hello! How can I help you today?"`                       |
+| `welcomeMessage?`       | `string \| { message: string; mode?: "static" \| "streaming"; speed?; followUpReplies? }` | `"Hello! How can I help you today?"`                       |
 | `placeholder?`          | `string`                                                                | `"Type a message..."`                                      |
 | `allowFiles?`           | `boolean`                                                               | `false`                                                    |
 | `height?`               | `string \| number`                                                      | `500` (ignored for side panels)                            |
@@ -107,6 +107,12 @@ starts. Pass an object with `mode: "streaming"` to greet the visitor with a real
 assistant bubble, typed out token-by-token. It plays only on a fresh visit (skipped
 when a stored thread is resumed) and `speed` sets the per-token interval in ms.
 
+Add `followUpReplies` to show clickable suggestion pills under the greeting once it
+finishes typing. A click sends that text as the first message (the same behavior as
+the follow-up replies a turn returns, so `onFollowUpClick` still intercepts it).
+`followUpReplies` applies to `mode: "streaming"` only; the static placeholder has no
+bubble to attach pills to.
+
 ```js
 mountChatWidget("#ago-chat", {
   config: { baseUrl: "https://YOUR-DOMAIN.api.useago.com" },
@@ -114,6 +120,7 @@ mountChatWidget("#ago-chat", {
     message: "Hi! Tell me about your team and I'll set up a demo.",
     mode: "streaming",
     speed: 45,
+    followUpReplies: ["See pricing", "Book a demo", "Talk to a human"],
   },
 });
 ```
@@ -230,6 +237,10 @@ widget.close?.(); // collapse back to the inline card
 
 With `placement: "left" | "right"`, the side panel squares off to a true
 full-screen sheet on mobile; the slide-in/out behavior is unchanged.
+
+On a mobile viewport message bubbles also run wider (user bubbles to 88%, agent
+bubbles to 92%) to reclaim the screen edge on narrow devices. This is automatic and
+reflows when the viewport crosses the `breakpoint`.
 
 Tuning (all optional): `breakpoint` is the max viewport width (px) treated as
 mobile (default `768`); `trigger` is `"focus"` (default, expand when the input is

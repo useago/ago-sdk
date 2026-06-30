@@ -165,6 +165,8 @@ export function mountChatWidget(
   const welcomeText = wm.message;
   const welcomeMode = wm.mode ?? "static";
   const welcomeSpeed = ("speed" in wm && wm.speed) || 45;
+  const welcomeFollowUps =
+    ("followUpReplies" in wm && wm.followUpReplies) || undefined;
 
   if (!options.client && !options.config?.baseUrl) {
     throw new AgoError(
@@ -407,6 +409,12 @@ export function mountChatWidget(
   const vtName = inlineFullscreen ? `ago-vt-${++widgetSeq}` : "";
   const INLINE_BAR_H = 52;
   let inlineExpanded = false;
+  // Full sheet height (px) captured when it expands, before any keyboard opens.
+  // The sheet keeps this height the whole time it's up; the keyboard pushes it up
+  // rather than resizing it. 0 = not expanded.
+  let fullVh = 0;
+  // Pending rAF handle for the coalesced viewport sync (see syncVh); 0 = none.
+  let vhRaf = 0;
   let mobileBar: HTMLDivElement | undefined;
   let vtStyle: HTMLStyleElement | undefined;
   let inlineSpacer: HTMLDivElement | undefined;
@@ -455,8 +463,15 @@ export function mountChatWidget(
         true,
       );
       // Fallback for keyboard / assistive-tech users (focus without a pointer).
-      container.addEventListener("focusin", () => {
-        if (mobileMQ?.matches) void expandInline();
+      // Scoped to the input row, like the pointerdown handler above: focus landing
+      // on other controls in the thread (follow-up reply pills, source links) must
+      // not morph to full screen. The morph flips the container to position:fixed
+      // mid-tap, which eats the synthesized click so the tapped control never fires
+      // (e.g. a suggested reply opens fullscreen instead of sending).
+      container.addEventListener("focusin", (e) => {
+        if (!mobileMQ?.matches) return;
+        if (!inputRow.contains(e.target as Node)) return;
+        void expandInline();
       });
     }
     document.addEventListener("keydown", onInlineKeydown);
@@ -506,6 +521,8 @@ export function mountChatWidget(
             agentBubble,
             followUpEnabled,
             followUpHandler,
+            // On a small viewport let bubbles run wider to reclaim horizontal space.
+            isMobile: !!mobileMQ?.matches,
           }),
         );
       });
@@ -624,6 +641,9 @@ export function mountChatWidget(
         clearInterval(introTimer);
         introTimer = undefined;
         intro.status = "DONE";
+        // Reveal suggested replies only once the greeting has finished typing,
+        // so the pills don't pop in mid-stream.
+        if (welcomeFollowUps) intro.followUpReplies = welcomeFollowUps;
         render();
         return;
       }
@@ -836,7 +856,7 @@ export function mountChatWidget(
       mobileMQ?.removeEventListener("change", onMobileMqChange);
       if (inlineFullscreen) {
         document.removeEventListener("keydown", onInlineKeydown);
-        window.visualViewport?.removeEventListener("resize", syncVh);
+        removeViewportListeners();
         // Drop the scroll lock if we're torn down while expanded.
         document.documentElement.style.removeProperty("overflow");
       }
@@ -940,15 +960,55 @@ export function mountChatWidget(
   function onMobileMqChange(e: MediaQueryListEvent): void {
     if (isSide) applyOpenState();
     else if (!e.matches && inlineExpanded) void collapseInline();
+    // Bubble max-width depends on the breakpoint (see renderMessage isMobile), so
+    // reflow the thread when it changes (rotation / resize across the breakpoint).
+    render();
   }
 
   function viewportHeight(): number {
     return window.visualViewport?.height ?? window.innerHeight;
   }
-  // Match the expanded card to the visible viewport so the input stays above the
-  // iOS keyboard. A CSS var so live updates happen outside any view transition.
+  // Keep the expanded sheet's bottom (the input) above the on-screen keyboard
+  // *without resizing the sheet*. Resizing the height as the keyboard slides means
+  // two properties (height + top) change across separate viewport events that
+  // don't share a frame, so for one frame the sheet is mis-sized and its content
+  // flashes off-screen. Instead the sheet keeps its full captured height and we
+  // only shift it up by the keyboard overlap via a negative `top`. `top` (unlike
+  // `transform`) doesn't make the sheet a containing block, so the fixed top bar
+  // stays put. One property, read from one snapshot, so there's no flashing frame.
+  function applyVh(): void {
+    const vv = window.visualViewport;
+    const top = vv?.offsetTop ?? 0;
+    const h = vv?.height ?? fullVh;
+    // How far the keyboard covers the bottom of the full-height sheet. Clamped to
+    // <= 0 so a keyboardless viewport leaves the sheet flush at the top.
+    const shift = Math.min(0, top + h - fullVh);
+    container.style.top = `${shift}px`;
+    // The bar tracks the visible-viewport top so it stays on screen if the page
+    // itself scrolls under the sheet (offsetTop > 0).
+    if (mobileBar) mobileBar.style.top = `${top}px`;
+  }
+  // The keyboard opening fires a burst of resize + scroll events. Coalesce them
+  // into one rAF so `applyVh` reads a single settled snapshot and writes once.
   function syncVh(): void {
-    container.style.setProperty("--ago-vh", `${viewportHeight()}px`);
+    if (vhRaf) return;
+    vhRaf = requestAnimationFrame(() => {
+      vhRaf = 0;
+      applyVh();
+    });
+  }
+  function addViewportListeners(): void {
+    window.visualViewport?.addEventListener("resize", syncVh);
+    window.visualViewport?.addEventListener("scroll", syncVh);
+  }
+  function removeViewportListeners(): void {
+    window.visualViewport?.removeEventListener("resize", syncVh);
+    window.visualViewport?.removeEventListener("scroll", syncVh);
+    // Drop any queued frame so it can't re-write stale geometry after collapse.
+    if (vhRaf) {
+      cancelAnimationFrame(vhRaf);
+      vhRaf = 0;
+    }
   }
   function scrollMessagesToEnd(): void {
     messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -1114,8 +1174,12 @@ export function mountChatWidget(
     });
     inlineSpacer.className = "ago-chat-widget-spacer";
     inlineSpacer.setAttribute("aria-hidden", "true");
-    syncVh(); // height set before the transition snapshots
-    window.visualViewport?.addEventListener("resize", syncVh);
+    // Lock in the full sheet height now, before the keyboard can shrink the
+    // viewport, so the keyboard only shifts the sheet up (never resizes it).
+    fullVh = viewportHeight();
+    container.style.setProperty("--ago-vh", `${fullVh}px`);
+    applyVh(); // geometry set synchronously before the transition snapshots
+    addViewportListeners();
     const done = runInlineTransition(() => applyInlineState(true));
     void done.then(() => {
       scrollMessagesToEnd();
@@ -1128,11 +1192,12 @@ export function mountChatWidget(
   function collapseInline(): Promise<void> {
     if (!inlineExpanded) return Promise.resolve();
     inlineExpanded = false;
-    window.visualViewport?.removeEventListener("resize", syncVh);
+    removeViewportListeners();
     // Blur so dismissing doesn't immediately re-trigger the focus expand.
     container.querySelector<HTMLTextAreaElement>("textarea")?.blur();
     const done = runInlineTransition(() => applyInlineState(false));
     void done.then(() => container.style.removeProperty("--ago-vh"));
+    fullVh = 0;
     onClose?.();
     return done;
   }
