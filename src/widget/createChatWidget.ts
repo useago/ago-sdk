@@ -484,10 +484,22 @@ export function mountChatWidget(
 
   // ── Rendering ──────────────────────────────────────────────────────
   const followUpEnabled = onFollowUpClick !== false;
+  // Default: on a collapsed mobile inline card, promote to the fullscreen sheet
+  // first, then send once the morph settles, so the reply and its streaming answer
+  // land in the full view (not the tiny card). expandInline() resolves immediately
+  // on desktop / when already full screen / on the instant-swap fallback, so those
+  // paths just send. Gated on inlineFullscreen so it never touches a side panel
+  // (expandInline has no isSide guard). Triggered from the click (not focusin) so
+  // it can't eat the tap.
+  const sendFollowUp = (reply: string): void => {
+    if (inlineFullscreen && mobileMQ?.matches && !inlineExpanded) {
+      void expandInline().then(() => send(reply));
+    } else {
+      void send(reply);
+    }
+  };
   const followUpHandler =
-    onFollowUpClick === false
-      ? undefined
-      : (onFollowUpClick ?? ((reply: string) => void send(reply)));
+    onFollowUpClick === false ? undefined : (onFollowUpClick ?? sendFollowUp);
 
   function render(): void {
     messagesEl.replaceChildren();

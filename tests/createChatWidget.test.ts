@@ -1011,7 +1011,7 @@ describe("mountChatWidget", () => {
       client.destroy();
     });
 
-    it("tapping a suggested reply on mobile sends it without morphing to full screen", async () => {
+    it("tapping a suggested reply on mobile opens fullscreen, then sends it", async () => {
       stubMatchMedia({ mobile: true });
       const client = new AgoClient({ baseUrl: "https://example.test" });
       const sent: string[] = [];
@@ -1036,17 +1036,19 @@ describe("mountChatWidget", () => {
       )!;
       expect(button).not.toBeNull();
 
-      // Reproduce a real tap: focusing the pill must not expand the card (the
-      // morph would flip it to position:fixed mid-tap and eat the click), and
-      // the click must still send the reply.
+      // Focusing the pill must NOT expand the card: that morph would flip it to
+      // position:fixed mid-tap and eat the click (the original bug). Only the
+      // click should drive the morph.
       button.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
       expect(container.style.position).not.toBe("fixed");
-      button.click();
-      await Promise.resolve();
-      await Promise.resolve();
 
+      // The click expands to the fullscreen sheet first, then sends just after, so
+      // the reply and its answer land in the full view.
+      button.click();
+      expect(container.style.position).toBe("fixed");
+      await Promise.resolve();
+      await Promise.resolve();
       expect(sent).toEqual(["hello", "Pricing"]);
-      expect(container.style.position).not.toBe("fixed");
 
       widget.destroy();
       root.remove();
