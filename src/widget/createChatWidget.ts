@@ -189,7 +189,7 @@ export function mountChatWidget(
   // so the behavior is inert (and test-safe) where they are missing: jsdom and
   // older browsers have no matchMedia / visualViewport / startViewTransition.
   const mobileBreakpoint = options.mobile?.breakpoint ?? 768;
-  const mobileTrigger = options.mobile?.trigger ?? "focus";
+  const mobileTrigger = options.mobile?.trigger ?? "tap";
   const hasMatchMedia = typeof window !== "undefined" && !!window.matchMedia;
   const mobileMQ = hasMatchMedia
     ? window.matchMedia(`(max-width: ${mobileBreakpoint}px)`)
@@ -448,26 +448,29 @@ export function mountChatWidget(
       `::view-transition-group(${vtName}),::view-transition-group(${vtName}-bar)` +
       `{animation-duration:0.3s;animation-timing-function:cubic-bezier(0.4,0,0.2,1)}`;
     document.head.appendChild(vtStyle);
-    if (mobileTrigger === "focus") {
-      // Tapping the input expands first, then focuses (see expandInline), so the
-      // keyboard rises into the settled fullscreen layout. preventDefault defers
-      // the native focus until the morph finishes.
+    if (mobileTrigger === "focus" || mobileTrigger === "tap") {
       container.addEventListener(
         "pointerdown",
         (e) => {
           if (inlineExpanded || !mobileMQ?.matches) return;
-          if (!inputRow.contains(e.target as Node)) return;
-          e.preventDefault();
+          const onInput = inputRow.contains(e.target as Node);
+          if (mobileTrigger === "tap") {
+            const el = e.target instanceof Element ? e.target : null;
+            if (el?.closest("button,a[href],[role='button']")) return;
+          } else if (!onInput) {
+            return;
+          }
+          // Defer the input's native focus until the morph finishes; other
+          // regions need no preventDefault (and keep native scroll/selection).
+          if (onInput) e.preventDefault();
           void expandInline();
         },
         true,
       );
       // Fallback for keyboard / assistive-tech users (focus without a pointer).
-      // Scoped to the input row, like the pointerdown handler above: focus landing
-      // on other controls in the thread (follow-up reply pills, source links) must
-      // not morph to full screen. The morph flips the container to position:fixed
-      // mid-tap, which eats the synthesized click so the tapped control never fires
-      // (e.g. a suggested reply opens fullscreen instead of sending).
+      // Scoped to the input row for both triggers: focus landing on other
+      // controls in the thread (follow-up reply pills, source links) must not
+      // morph to full screen and eat the click.
       container.addEventListener("focusin", (e) => {
         if (!mobileMQ?.matches) return;
         if (!inputRow.contains(e.target as Node)) return;

@@ -83,7 +83,7 @@ widget.destroy(); // removes listeners, uninstalls forms, clears the DOM
 | `width?`                | `string \| number`                                                                        | `400` (side panels only)                                   |
 | `launcher?`             | `boolean`                                                                                 | `true` (side panels only)                                  |
 | `defaultOpen?`          | `boolean`                                                                                 | `false` (side panels only)                                 |
-| `mobile?`               | `{ breakpoint?: number; trigger?: "focus" \| "manual" }`                                  | — (automatic; see [Mobile fullscreen](#mobile-fullscreen)) |
+| `mobile?`               | `{ breakpoint?: number; trigger?: "tap" \| "focus" \| "manual" }`                         | — (automatic; see [Mobile fullscreen](#mobile-fullscreen)) |
 | `logoUrl?`              | `string`                                                                                  | —                                                          |
 | `showAgentName?`        | `boolean`                                                                                 | `false`                                                    |
 | `agentBubble?`          | `boolean`                                                                                 | `false`                                                    |
@@ -221,7 +221,7 @@ button. When `showHeader` is `true`, the in-card header is hidden while full-scr
 so the logo/title is not duplicated.
 
 With `placement: "inline"`, the compact card morphs to a fixed full-screen sheet
-(with a logo + close bar) when the input is engaged, and back when the user closes
+(with a logo + close bar) when the card is tapped, and back when the user closes
 it. The morph uses the [View Transitions API](https://developer.mozilla.org/docs/Web/API/View_Transitions_API)
 where available and falls back to an instant swap, tracks the visible viewport so
 the input stays above the keyboard, and exposes the sheet as a `role="dialog"`
@@ -243,9 +243,10 @@ bubbles to 92%) to reclaim the screen edge on narrow devices. This is automatic 
 reflows when the viewport crosses the `breakpoint`.
 
 Tuning (all optional): `breakpoint` is the max viewport width (px) treated as
-mobile (default `768`); `trigger` is `"focus"` (default, expand when the input is
-tapped) or `"manual"` (expand only via `widget.open()`), and applies to inline
-placement. `onOpen` / `onClose` fire on expand/collapse (and on side-panel
+mobile (default `768`); `trigger` sets how the inline card enters full screen:
+`"tap"` (default, expand when anywhere on the card is tapped, while follow-up
+replies still send and links still follow), `"focus"` (expand only when the input
+is tapped), or `"manual"` (expand only via `widget.open()`). `onOpen` / `onClose` fire on expand/collapse (and on side-panel
 open/close). The fullscreen bar and spacer carry `ago`-prefixed class names
 (`.ago-chat-widget-mobile-bar`, `.ago-chat-widget-spacer`).
 
