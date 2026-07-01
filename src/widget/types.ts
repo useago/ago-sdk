@@ -237,11 +237,17 @@ export interface MountChatWidgetOptions {
     /** Max viewport width (px) treated as "mobile". Defaults to `768`. */
     breakpoint?: number;
     /**
-     * Inline placement only: how the card enters full screen. `"focus"` (default)
-     * expands when the input is tapped/focused; `"manual"` expands only via
-     * `widget.open()`. Ignored for side placements (driven by the launcher).
+     * Inline placement only: how the card enters full screen.
+     * - `"tap"` (default): expands when anywhere on the compact card is tapped
+     *   (message area, whitespace, or the input). Taps on actionable controls
+     *   (suggested follow-up replies, links, the close button) still run their
+     *   own action: a follow-up reply expands and sends, it does not just open
+     *   the sheet.
+     * - `"focus"`: expands only when the input is tapped/focused.
+     * - `"manual"`: expands only via `widget.open()`.
+     * Ignored for side placements (driven by the launcher).
      */
-    trigger?: "focus" | "manual";
+    trigger?: "tap" | "focus" | "manual";
   };
   /**
    * Load the visitor's conversation list into `widget.threads` on mount and refresh

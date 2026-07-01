@@ -1055,6 +1055,99 @@ describe("mountChatWidget", () => {
       client.destroy();
     });
 
+    it('mobile.trigger "tap" expands when the card body is tapped, not just the input', async () => {
+      stubMatchMedia({ mobile: true });
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      vi.spyOn(client, "sendMessage").mockResolvedValue(
+        makeAssistantMessage({ id: "a1" }),
+      );
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      const widget = mountChatWidget(root, {
+        client,
+        mobile: { trigger: "tap" },
+      });
+      const container = root.querySelector<HTMLElement>(".ago-chat-widget")!;
+
+      await widget.sendMessage("hi");
+      const bubble = root.querySelector<HTMLElement>(".ago-message__content")!;
+      expect(container.style.position).not.toBe("fixed");
+
+      // Tapping a plain message bubble (not the input) morphs to full screen.
+      bubble.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      expect(container.style.position).toBe("fixed");
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it('mobile.trigger "tap" leaves follow-up reply taps to expand-then-send (pointerdown does not eat the click)', async () => {
+      stubMatchMedia({ mobile: true });
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const sent: string[] = [];
+      vi.spyOn(client, "sendMessage").mockImplementation(
+        async (content: string) => {
+          sent.push(content);
+          return makeAssistantMessage({
+            id: `assistant-${sent.length}`,
+            followUpReplies: sent.length === 1 ? ["Pricing"] : undefined,
+          });
+        },
+      );
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      const widget = mountChatWidget(root, {
+        client,
+        mobile: { trigger: "tap" },
+      });
+      const container = root.querySelector<HTMLElement>(".ago-chat-widget")!;
+
+      await widget.sendMessage("hello");
+      const button = root.querySelector<HTMLButtonElement>(
+        ".ago-message__followup-btn",
+      )!;
+
+      // pointerdown on the pill must NOT expand: the morph would flip the card to
+      // position:fixed mid-tap and eat the click, so the reply would open the
+      // sheet without sending. The pill's own click handler owns the morph.
+      button.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      expect(container.style.position).not.toBe("fixed");
+
+      button.click();
+      expect(container.style.position).toBe("fixed");
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(sent).toEqual(["hello", "Pricing"]);
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it('mobile.trigger defaults to "focus": tapping the card body does not expand', async () => {
+      stubMatchMedia({ mobile: true });
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      vi.spyOn(client, "sendMessage").mockResolvedValue(
+        makeAssistantMessage({ id: "a1" }),
+      );
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      const widget = mountChatWidget(root, { client });
+      const container = root.querySelector<HTMLElement>(".ago-chat-widget")!;
+
+      await widget.sendMessage("hi");
+      const bubble = root.querySelector<HTMLElement>(".ago-message__content")!;
+
+      // Under the default trigger only the input opens the sheet.
+      bubble.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      expect(container.style.position).not.toBe("fixed");
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
     it("widens message bubbles on a mobile viewport", async () => {
       const mq = stubMatchMedia({ mobile: true });
       const client = new AgoClient({ baseUrl: "https://example.test" });
