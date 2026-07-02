@@ -137,6 +137,35 @@ useAgoNavigation((path) => router.push(path), [
 
 ---
 
+## 4b. Let the agent change the page: `useAgoPageState`
+
+The mirror of `useAgoNavigation`: let the agent change the current page's state
+(filters, sort, view mode…) and read it back. Each control becomes one optional
+property of a single synthesized `setPageState` function, and every control's
+`get()` value is sent as context.
+
+```vue
+<script setup lang="ts">
+import { ref } from "vue";
+import { useAgoPageState } from "@useago/sdk/vue";
+
+const status = ref("all");
+useAgoPageState([
+  {
+    name: "statusFilter",
+    description: "Filter the list by status",
+    schema: { type: "string", enum: ["all", "paid", "overdue"] },
+    get: () => status.value,
+    set: (v) => { status.value = v as string; },
+  },
+]);
+</script>
+```
+
+Pass `{ functionName }` to rename the synthesized function.
+
+---
+
 ## 5. Subscribe to events: `useAgoEvents`
 
 Auto-cleans up on unmount.

@@ -7,7 +7,13 @@ import type {
   AgoEventName,
   SendMessageOptions,
 } from "../client/types";
-import type { ClientFunctionDefinition, ClientFunctionHandler, ClientFunctionSchema } from "../functions/types";
+import type {
+  AgoPageStateOptions,
+  AgoStateControl,
+  ClientFunctionDefinition,
+  ClientFunctionHandler,
+  ClientFunctionSchema,
+} from "../functions/types";
 
 interface Observable<T> {
   subscribe(observer: { next?: (value: T) => void; error?: (err: unknown) => void }): { unsubscribe: () => void };
@@ -143,6 +149,19 @@ export class AgoService {
     routes: Array<{ name: string; path: string; description: string }>
   ): void {
     this.client.registerNavigationFunction(navigate, routes);
+  }
+
+  /** Register editable page-state controls (filters, sort, view mode…) */
+  registerPageStateFunction(
+    controls: AgoStateControl[],
+    opts?: AgoPageStateOptions
+  ): void {
+    this.client.registerPageStateFunction(controls, opts);
+  }
+
+  /** Unregister a page-state function and its dynamic context */
+  unregisterPageStateFunction(functionName?: string): void {
+    this.client.unregisterPageStateFunction(functionName);
   }
 
   /** Subscribe to a client event */

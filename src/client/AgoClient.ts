@@ -5,7 +5,13 @@ import type {
   SubmitConfig,
 } from "../forms/createFormCollector";
 import { FunctionRegistry } from "../functions/FunctionRegistry";
-import type { ClientFunctionDefinition, ClientFunctionHandler, ClientFunctionSchema } from "../functions/types";
+import type {
+  AgoPageStateOptions,
+  AgoStateControl,
+  ClientFunctionDefinition,
+  ClientFunctionHandler,
+  ClientFunctionSchema,
+} from "../functions/types";
 import { ClientContextRegistry } from "../state/ClientContextRegistry";
 import type {
   ContextEntry,
@@ -90,6 +96,11 @@ export class AgoClient {
       body.client_context = clientContext;
     }
 
+    // Hidden messages stay in the model's context but are not displayed.
+    if (options?.hidden) {
+      body.hidden = true;
+    }
+
     let response: Response;
 
     if (options?.files && options.files.length > 0) {
@@ -111,6 +122,10 @@ export class AgoClient {
 
       if (clientContext) {
         formData.append("client_context", JSON.stringify(clientContext));
+      }
+
+      if (options.hidden) {
+        formData.append("hidden", "true");
       }
 
       for (const file of options.files) {
@@ -309,6 +324,7 @@ export class AgoClient {
         role: "user" | "assistant";
         status: string;
         created_at: string;
+        hidden?: boolean;
         tool_call_data?: Array<Record<string, unknown>>;
         attachments?: Array<Record<string, unknown>>;
       }>;
@@ -325,6 +341,7 @@ export class AgoClient {
         role: m.role,
         status: m.status as AgoMessage["status"],
         createdAt: new Date(m.created_at),
+        hidden: m.hidden,
         toolCalls: AgoClient.mapPersistedToolCalls(m.tool_call_data),
         attachments:
           m.attachments && m.attachments.length > 0
@@ -576,6 +593,99 @@ export class AgoClient {
         },
       }
     );
+  }
+
+  /**
+   * Register a "page state" function that lets AGO change the current page's
+   * state (filters, sort, view mode, selection…) and reads the current state
+   * back as dynamic context. This is the state-mutation mirror of
+   * {@link registerNavigationFunction}.
+   *
+   * It does two things:
+   * - Synthesizes ONE client function (default name `setPageState`) whose
+   *   properties are the controls — all optional, so the agent sets only the
+   *   ones the user asked for.
+   * - Registers a dynamic context provider (keyed `page-state:<fnName>`) that
+   *   reports each control's current `get()` value on every message.
+   *
+   * ```ts
+   * client.registerPageStateFunction([
+   *   {
+   *     name: "statusFilter",
+   *     description: "Filter the list by review status",
+   *     schema: { type: "string", enum: ["all", "pending", "approved"] },
+   *     get: () => filters.status,
+   *     set: (v) => setFilters({ ...filters, status: v }),
+   *   },
+   * ]);
+   * ```
+   */
+  registerPageStateFunction(
+    controls: AgoStateControl[],
+    opts?: AgoPageStateOptions
+  ): void {
+    const fnName = opts?.functionName ?? "setPageState";
+    const byName = new Map(controls.map((c) => [c.name, c]));
+
+    const controlDescriptions = controls
+      .map((c) => `- "${c.name}": ${c.description}`)
+      .join("\n");
+
+    this.registerFunction(
+      fnName,
+      async (args) => {
+        const applied: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(args)) {
+          if (value === undefined) continue;
+          const control = byName.get(key);
+          // Ignore unknown controls cleanly.
+          if (!control) continue;
+          await control.set(value);
+          applied[key] = value;
+        }
+        return { success: true, applied };
+      },
+      {
+        description: `Change the state of the current page. Set ONLY the controls the user explicitly asked for; leave the others unset. Available controls:\n${controlDescriptions}`,
+        parameters: {
+          type: "object",
+          properties: Object.fromEntries(
+            controls.map((c) => [
+              c.name,
+              { ...c.schema, description: c.description },
+            ])
+          ),
+          // All optional: the agent sets only what the user asked for.
+        },
+      }
+    );
+
+    // Surface the current value of every control that can be read, so the agent
+    // knows what to change. Re-evaluated on every message (like navigation is
+    // static, this mirror is live).
+    this.addDynamicContext(`page-state:${fnName}`, () => {
+      const readable = controls.filter((c) => typeof c.get === "function");
+      if (readable.length === 0) return null;
+      const data: Record<string, unknown> = {};
+      for (const control of readable) {
+        data[control.name] = control.get!();
+      }
+      return {
+        name: "Page state",
+        description: "Current, editable state of the page the user is viewing.",
+        data,
+      };
+    });
+  }
+
+  /**
+   * Unregister a page state function and its dynamic context provider.
+   * Mirror of unregistering `navigateToPage`.
+   */
+  unregisterPageStateFunction(functionName?: string): void {
+    const fnName = functionName ?? "setPageState";
+    this.unregisterFunction(fnName);
+    this.removeDynamicContext(`page-state:${fnName}`);
   }
 
   // ─────────────────────────────────────────────────────────────────

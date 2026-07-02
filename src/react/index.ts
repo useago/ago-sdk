@@ -28,8 +28,12 @@ export type { UseConversationOptions, UseConversationResult } from "./hooks/useC
 export { useChat } from "./hooks/useChat";
 export type { UseChatOptions, UseChatResult } from "./hooks/useChat";
 
-export { useAgoFunction, useAgoNavigation } from "./hooks/useAgoFunction";
+export { useAgoFunction, useAgoNavigation, useAgoPageState } from "./hooks/useAgoFunction";
 export type { UseAgoFunctionOptions, AgoRoute } from "./hooks/useAgoFunction";
+export type { AgoStateControl, AgoPageStateOptions } from "../functions/types";
+
+export { useAgoAutoContinueAfterNavigation } from "./hooks/useAgoAutoContinue";
+export type { AgoAutoContinueOptions } from "./hooks/useAgoAutoContinue";
 
 export { useAgoContext } from "./hooks/useAgoContext";
 

@@ -110,6 +110,74 @@ This registers a `navigateToPage` function whose `page` parameter is an enum of
 your route names. React/Vue offer `useAgoNavigation(navigate, routes)` with
 lifecycle cleanup.
 
+### Page state shortcut
+
+The mirror of navigation: instead of moving the user to another page, let the
+agent change the state of the page they're on (filters, sort, view mode,
+selection…) and read the current state back. One helper builds both halves.
+
+```ts
+client.registerPageStateFunction([
+  {
+    name: "statusFilter",
+    description: "Filter the list by review status",
+    schema: { type: "string", enum: ["all", "pending", "approved"] },
+    get: () => filters.status,          // current value → context
+    set: (v) => setFilters({ ...filters, status: v }), // apply the change
+  },
+  {
+    name: "sort",
+    description: "Sort order of the list",
+    schema: { type: "string", enum: ["newest", "oldest"] },
+    get: () => filters.sort,
+    set: (v) => setFilters({ ...filters, sort: v }),
+  },
+]);
+
+client.unregisterPageStateFunction(); // pass the functionName if you customised it
+```
+
+This does two things:
+
+- Synthesizes **one** client function (`setPageState` by default; override with
+  `{ functionName }`). Each control becomes one optional property, so the agent
+  sets only the controls the user asked for and leaves the rest untouched.
+- Registers a dynamic context entry ("Page state") reporting each control's
+  current `get()` value, so the agent knows what to change. Controls without a
+  `get()` are write-only and don't appear in context.
+
+It's fire-and-forget: the handler applies each `set()` locally and returns
+`{ success, applied }`. The new state reaches the agent through the context on
+the next message. React/Vue offer `useAgoPageState(controls, opts?)` with
+lifecycle cleanup; Angular exposes `agoService.registerPageStateFunction(...)`.
+
+### Navigate then change the page in one go
+
+A request like "open the invoices page and show only the overdue ones" needs two
+steps: the agent navigates, then changes the new page's state. But the
+destination page only registers its `setPageState` (and current state) once it
+mounts, so the agent can't do both in a single turn.
+
+`useAgoAutoContinueAfterNavigation()` closes the gap. Mount it once inside
+`AgoProvider`. When the agent calls the navigation function and that turn ends,
+it waits for the destination page's `useAgoPageState` to register, then sends a
+hidden continuation message so the agent applies the state in a second turn. To
+the user it is one gesture.
+
+```tsx
+function AppShell() {
+  useAgoNavigation(navigate, routes);
+  useAgoPageState(controls);            // on each pilotable page
+  useAgoAutoContinueAfterNavigation();  // once, near the provider
+  return <Outlet />;
+}
+```
+
+The continuation is sent with `{ hidden: true }`: the backend keeps it in the
+model's context but flags it so the UI never shows it (`useMessages` and
+`ChatWidget` filter hidden messages). This needs backend support for the `hidden`
+flag; without it the mechanism still works but the nudge shows as a message.
+
 ### Observe invocations
 
 ```ts

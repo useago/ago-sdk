@@ -39,6 +39,13 @@ export interface SendMessageOptions {
   agentId?: string;
   /** File attachments */
   files?: File[];
+  /**
+   * Mark this message as hidden. The backend keeps it in the model's context but
+   * flags it so the UI never displays it. Used by auto-continuation to nudge the
+   * agent after a navigation without polluting the visible transcript.
+   * Requires backend support for the `hidden` flag; older backends ignore it.
+   */
+  hidden?: boolean;
 }
 
 /**
@@ -77,6 +84,12 @@ export interface AgoMessage {
   followUpReplies?: string[];
   /** Uploaded files on this message (usually the user's). */
   attachments?: AgoAttachment[];
+  /**
+   * True when the backend flagged this message as hidden (e.g. an
+   * auto-continuation nudge). Kept in the model's context but not displayed;
+   * UI helpers like `useMessages`/`ChatWidget` filter these out.
+   */
+  hidden?: boolean;
   createdAt: Date;
 }
 

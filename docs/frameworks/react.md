@@ -376,6 +376,72 @@ A full version of this pattern is in [`examples/glacier`](../../examples/glacier
 
 ---
 
+## 5b. Let the agent change the page: `useAgoPageState`
+
+The mirror of `useAgoNavigation`. Instead of moving the user to another page,
+let the agent change the state of the page they're on (filters, sort, view
+mode…) and read the current state back.
+
+```tsx
+import { useAgoPageState } from "@useago/sdk/react";
+
+function InvoiceList() {
+  const [status, setStatus] = useState("all");
+  const [sort, setSort] = useState("newest");
+
+  useAgoPageState([
+    {
+      name: "statusFilter",
+      description: "Filter the list by invoice status",
+      schema: { type: "string", enum: ["all", "paid", "overdue"] },
+      get: () => status,
+      set: setStatus,
+    },
+    {
+      name: "sort",
+      description: "Sort order of the list",
+      schema: { type: "string", enum: ["newest", "oldest"] },
+      get: () => sort,
+      set: setSort,
+    },
+  ]);
+
+  return /* … */;
+}
+```
+
+Each control becomes one optional property of a single synthesized
+`setPageState` function, so the agent sets only what the user asked for. Every
+control's current `get()` value is sent as context, so the agent knows the
+state before it changes it. Pass `{ functionName }` to rename the function, and
+it re-registers only when the client or that name changes (`set`/`get` closures
+can change every render without churn). The glacier example dogfoods this: the
+ice cream's cone, scoops and toppings are page-state controls.
+
+### Navigate then change the page: `useAgoAutoContinueAfterNavigation`
+
+A cross-page request ("open the parfums page and show only lactose-free, sorted
+by price") needs the agent to navigate, then set the new page's state. The
+destination only registers its controls once it mounts, so it can't happen in one
+turn. Mount this hook once (near your router) to bridge it:
+
+```tsx
+function AppShell() {
+  useAgoNavigation(navigate, routes);
+  useAgoAutoContinueAfterNavigation();
+  return <Outlet />;
+}
+```
+
+When the agent navigates, the hook waits for the destination's `useAgoPageState`
+to register, then sends a hidden continuation so the agent applies the state in a
+second turn. It only continues if the destination has editable state, caps
+continuations per gesture, and cancels if the user takes a new turn. Options:
+`navigationFunctions`, `continuationPrompt`, `maxDepth`, `readinessTimeoutMs`,
+`enabled`. The glacier example wires this to its parfums page.
+
+---
+
 ## 6. Give the agent context: `useAgoContext`
 
 Expose what the user is looking at, sent with every message. A unique key is

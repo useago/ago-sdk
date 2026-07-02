@@ -137,6 +137,7 @@ ago.getMessages(conversationId)
 ago.registerFunction(definition)           // or (name, handler, schema)
 ago.unregisterFunction(name)
 ago.registerNavigationFunction(navigate, routes)
+ago.registerPageStateFunction(controls, opts?) / ago.unregisterPageStateFunction(functionName?)
 
 ago.submitToolCallForm(toolCallId, formData)
 ago.confirmToolCall(toolCallId)
@@ -178,6 +179,21 @@ Register navigation (works with Angular's `Router`):
 const router = inject(Router);
 this.ago.registerNavigationFunction((path) => router.navigateByUrl(path), [
   { name: "dashboard", path: "/dashboard", description: "Main dashboard" },
+]);
+```
+
+Register page state, the mirror of navigation (change the current page's state
+and read it back):
+
+```ts
+this.ago.registerPageStateFunction([
+  {
+    name: "statusFilter",
+    description: "Filter the list by status",
+    schema: { type: "string", enum: ["all", "paid", "overdue"] },
+    get: () => this.status,
+    set: (v) => { this.status = v as string; },
+  },
 ]);
 ```
 

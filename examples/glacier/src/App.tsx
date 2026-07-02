@@ -1,13 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { ChatWidget, useAgoClient, useAgoFunction, useAgoNavigation } from '@useago/sdk/react';
+import {
+  ChatWidget,
+  useAgoAutoContinueAfterNavigation,
+  useAgoClient,
+  useAgoFunction,
+  useAgoNavigation,
+  useAgoPageState,
+  type AgoStateControl,
+} from '@useago/sdk/react';
 import { initDevPanel } from '@useago/sdk/devtools';
 import IceCream, { IceCreamSvg, IceCreamState } from './IceCream';
+import FlavorsPage from './FlavorsPage';
 import {
+  buildIceCreamControls,
   buildIceCreamFunctions,
   CartItem,
   computeCartTotal,
   computePrice,
+  OrderStore,
 } from './functions';
 import { CONES, FLAVORS, TOPPINGS } from './flavors';
 import { IngredientsContent } from './IngredientsPage';
@@ -43,6 +54,12 @@ const ROUTES = {
     description:
       "Page Origines des ingrédients : index des terroirs et producteurs (vanille de Tahiti, pistache de Bronte, citron de Menton, mangue Alphonso, noisette du Piémont, cacao d'Équateur, fraise Gariguette, café Sidamo). À ouvrir si le client demande d'où viennent les ingrédients.",
   },
+  flavors: {
+    name: 'flavors',
+    path: '/parfums',
+    description:
+      "Page Parfums : liste filtrable/triable des parfums. À ouvrir si le client veut parcourir, filtrer (sans lactose, sans fruits à coque, sans gluten) ou trier les parfums. Une fois sur cette page, ses filtres/tri/affichage sont modifiables via setPageState.",
+  },
 } as const;
 
 // Route de détail (rendu seulement) : l'agent atteint une origine précise via
@@ -69,18 +86,41 @@ export default function App() {
   const cartRef = useRef(cart);
   cartRef.current = cart;
 
-  // Expose the live order state as dynamic context. It is re-evaluated on every
-  // snapshot, so the dev panel's JSON pane shows it (and the agent receives it
-  // with every message instead of having to call getState).
+  // The store is the single source of truth shared by the cart functions and
+  // the page-state controls. It updates the ref synchronously, then mirrors
+  // into React state. The agent often fires several changes in the same tick
+  // (e.g. setPageState with cone + scoops, then addToCart); without the
+  // immediate ref write each handler reads the same stale value and the later
+  // setCurrent clobbers the earlier one.
+  const store = useMemo<OrderStore>(
+    () => ({
+      get: () => ({ current: currentRef.current, cart: cartRef.current }),
+      setCurrent: (next) => {
+        currentRef.current = next;
+        setCurrent(next);
+      },
+      setCart: (next) => {
+        cartRef.current = next;
+        setCart(next);
+      },
+    }),
+    [],
+  );
+
+  const fns = useMemo(() => buildIceCreamFunctions(store), [store]);
+  const controls = useMemo(() => buildIceCreamControls(store), [store]);
+
+  // The composition (cone/scoops/toppings) now reaches the agent through the
+  // page-state controls' get(). This dynamic context carries the rest of the
+  // order — the cart and the running totals — which aren't editable controls.
   useEffect(() => {
     client.addDynamicContext('order', () => {
       const cur = currentRef.current;
       const items = cartRef.current;
       return {
         name: 'Commande',
-        description: 'Glace en cours de composition, panier et totaux (euros).',
+        description: 'Panier et totaux (euros). La glace en cours est exposée via le page state.',
         data: {
-          current: cur,
           cart: items,
           currentPriceEuros: computePrice(cur),
           cartTotalEuros: computeCartTotal(items),
@@ -92,29 +132,12 @@ export default function App() {
     };
   }, [client]);
 
-  const fns = useMemo(
-    () =>
-      buildIceCreamFunctions({
-        get: () => ({ current: currentRef.current, cart: cartRef.current }),
-        // Update the ref synchronously, then mirror into React state. The agent
-        // often fires several functions in the same tick (e.g. setCone +
-        // updateScoops); without the immediate ref write each handler reads the
-        // same stale value and the later setCurrent clobbers the earlier one.
-        setCurrent: (next) => {
-          currentRef.current = next;
-          setCurrent(next);
-        },
-        setCart: (next) => {
-          cartRef.current = next;
-          setCart(next);
-        },
-      }),
-    [],
-  );
+  // Cone/scoops/toppings are editable page state, but registered ONLY on the
+  // shop page (see <ShopStateBridge /> below) — you compose an ice cream where
+  // it's visible. So "je veux une glace pistache" from the parfums or origines
+  // page makes the agent navigate to the shop first; useAgoAutoContinueAfterNavigation
+  // then composes it in the same gesture.
 
-  useAgoFunction(fns.setCone.name, fns.setCone);
-  useAgoFunction(fns.updateScoops.name, fns.updateScoops);
-  useAgoFunction(fns.updateToppings.name, fns.updateToppings);
   useAgoFunction(fns.resetCurrent.name, fns.resetCurrent);
   useAgoFunction(fns.addToCart.name, fns.addToCart);
   useAgoFunction(fns.updateCart.name, fns.updateCart);
@@ -132,6 +155,11 @@ export default function App() {
   );
 
   useAgoNavigation(navigate, [...Object.values(ROUTES), ...originRoutes]);
+
+  // After the agent navigates, auto-send a hidden continuation once the
+  // destination page's useAgoPageState has registered — so "va sur la page
+  // parfums et montre les parfums sans lactose" resolves in one user gesture.
+  useAgoAutoContinueAfterNavigation();
 
   const currentPrice = computePrice(current);
   const cartTotal = computeCartTotal(cart);
@@ -160,6 +188,7 @@ export default function App() {
               path={ROUTES.shop.path}
               element={
                 <>
+                  <ShopStateBridge controls={controls} />
                   <CartStrip cart={cart} />
                   <IceCream state={current} />
                   <Recap
@@ -173,6 +202,7 @@ export default function App() {
               }
             />
             <Route path={ROUTES.ingredients.path} element={<IngredientsContent />} />
+            <Route path={ROUTES.flavors.path} element={<FlavorsPage />} />
             <Route path={ROUTES.origins.path} element={<OriginsIndex />} />
             <Route path={ORIGIN_DETAIL_PATH} element={<OriginDetail />} />
             <Route path="*" element={<NotFound />} />
@@ -181,6 +211,14 @@ export default function App() {
       </main>
     </div>
   );
+}
+
+// Registers the ice-cream composition controls (cone/scoops/toppings) only while
+// the shop page is mounted. Rendered inside the shop <Route>, so leaving the page
+// unregisters setPageState — the agent can only compose an ice cream here.
+function ShopStateBridge({ controls }: { controls: AgoStateControl[] }) {
+  useAgoPageState(controls);
+  return null;
 }
 
 function AppHeader({

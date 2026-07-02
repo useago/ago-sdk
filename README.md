@@ -92,6 +92,46 @@ guards, auth and layouts keep working exactly as they do today.
 `react-router-dom` here is *your* router, not an SDK dependency:
 `useAgoNavigation` accepts any `(path: string) => void` function.
 
+## Let the agent change the page
+
+The mirror of navigation. Same idea, applied to the page the user is already on:
+describe its editable state (filters, sort, view mode…) and *"show me only the
+overdue ones, newest first"* actually updates the view. The agent also reads the
+current state, so it knows what to change.
+
+```tsx
+import { useAgoPageState } from "@useago/sdk/react";
+
+function InvoiceList() {
+  const [status, setStatus] = useState("all");
+  const [sort, setSort] = useState("newest");
+
+  useAgoPageState([
+    {
+      name: "statusFilter",
+      description: "Filter invoices by status",
+      schema: { type: "string", enum: ["all", "paid", "overdue"] },
+      get: () => status,   // current value → the agent sees it
+      set: setStatus,      // the agent changes it
+    },
+    {
+      name: "sort",
+      description: "Sort order of the list",
+      schema: { type: "string", enum: ["newest", "oldest"] },
+      get: () => sort,
+      set: setSort,
+    },
+  ]);
+
+  return /* your existing list, driven by status + sort */;
+}
+```
+
+Each control becomes one optional property of a single `setPageState` function,
+so the agent changes only what the user asked for. The current value from each
+`get()` is sent with every message, so the agent knows the state before it
+changes it. Vue and Angular have the same helper.
+
 ## Turn a JavaScript function into an agent tool
 
 Keep your application logic as a regular JavaScript function, then describe its
