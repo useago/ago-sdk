@@ -215,6 +215,7 @@ react-router navigation), Vue, Angular, plain TypeScript, and no-build HTML.
 - [**Events & streaming**](docs/general/events-and-streaming.md): low-level hooks into the message stream
 - [**Testing**](docs/general/testing.md): mock client for unit tests
 - [**Configuration & auth**](docs/general/configuration.md): every `AgoConfig` option, headers, errors
+- [**Custom domain (reverse proxy)**](docs/general/custom-domain.md): serve AGO from your own domain, same-origin
 
 Full documentation: [ago.mintlify.app](https://ago.mintlify.app/)
 
