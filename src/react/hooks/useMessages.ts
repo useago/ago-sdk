@@ -77,6 +77,29 @@ export function useMessages({
       if (!conversationId) {
         setConversationId(data.conversationId);
       }
+      // A stream can begin without going through this hook's `sendMessage`. The
+      // hidden auto-continuation after navigation sends straight through the
+      // client, so there's no optimistic assistant placeholder in that case. Add
+      // one (keyed on the real messageId so `message:chunk` appends to it) and
+      // flip `isLoading`, making the second turn visible as a streaming reply.
+      setIsLoading(true);
+      setMessages((prev) => {
+        const alreadyStreaming = prev.some(
+          (m) => m.role === "assistant" && m.status === "IN_PROGRESS"
+        );
+        if (alreadyStreaming) return prev;
+        return [
+          ...prev,
+          {
+            id: data.messageId,
+            conversationId: data.conversationId,
+            content: "",
+            role: "assistant",
+            status: "IN_PROGRESS",
+            createdAt: new Date(),
+          },
+        ];
+      });
     };
 
     const handleMessageChunk = (data: {
