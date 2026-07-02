@@ -174,9 +174,14 @@ ago.registerNavigationFunction(
   [
     { name: "pricing", path: "/pricing", description: "Pricing page" },
     { name: "docs", path: "/docs", description: "Documentation" },
+    { name: "orderDetail", path: "/orders/:id", description: "One order's detail page" },
   ],
 );
 ```
+
+Paths can contain `:param` placeholders. Each placeholder becomes a top-level
+argument of `navigateToPage`, so `{ page: "orderDetail", id: "42" }` navigates
+to `/orders/42`. One route covers every detail page of an entity.
 
 This also reports the current page (by route name, plus URL and title) as context
 on every message, so the agent knows which page the user is on.

@@ -187,9 +187,9 @@ function AppShell() {
 ```
 
 The `description` is what the agent reads to pick a page. Write it like you'd
-explain the page to a colleague. For a `/invoices/:id` detail page, keep the
-`:id` route for rendering only and feed the agent concrete paths derived from your
-data (`/invoices/123`).
+explain the page to a colleague. A `/invoices/:id` detail page can be registered
+as-is: `:id` becomes a top-level `id` argument of `navigateToPage`, so one
+route covers every record.
 
 ## 5b. Let the agent change the page: `useAgoPageState`
 

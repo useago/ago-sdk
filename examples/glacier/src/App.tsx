@@ -62,9 +62,21 @@ const ROUTES = {
   },
 } as const;
 
-// Route de détail (rendu seulement) : l'agent atteint une origine précise via
-// les entrées dérivées de ORIGINS, pas via le chemin paramétré `:id`.
+// Route de détail paramétrée : une seule entrée couvre toutes les fiches.
+// `:id` devient un argument `id` de navigateToPage, que l'agent passe au
+// premier niveau ({ page: "originDetail", id: "vanille-tahiti" }). Comme il
+// choisit une origine par son sens ("d'où vient la vanille ?"), les ids valides
+// vivent dans la description, dérivés des données pour rester en phase.
 const ORIGIN_DETAIL_PATH = '/origines/:id';
+const ORIGIN_DETAIL_ROUTE = {
+  name: 'originDetail',
+  path: ORIGIN_DETAIL_PATH,
+  description: `Fiche détaillée d'une origine : producteur, terroir, anecdotes. Valeurs possibles pour l'argument id : ${Object.values(
+    ORIGINS,
+  )
+    .map((o) => `"${o.id}" (${o.ingredient}, ${o.terroir})`)
+    .join(', ')}.`,
+};
 
 export default function App() {
   const [current, setCurrent] = useState<IceCreamState>(INITIAL_CURRENT);
@@ -144,17 +156,7 @@ export default function App() {
   useAgoFunction(fns.getState.name, fns.getState);
   useAgoFunction(fns.placeOrder.name, fns.placeOrder);
 
-  const originRoutes = useMemo(
-    () =>
-      Object.values(ORIGINS).map((o) => ({
-        name: `origin-${o.id}`,
-        path: `/origines/${o.id}`,
-        description: `${o.ingredient} de ${o.terroir} (${o.country}). ${o.tagline}`,
-      })),
-    [],
-  );
-
-  useAgoNavigation(navigate, [...Object.values(ROUTES), ...originRoutes]);
+  useAgoNavigation(navigate, [...Object.values(ROUTES), ORIGIN_DETAIL_ROUTE]);
 
   // After the agent navigates, auto-send a hidden continuation once the
   // destination page's useAgoPageState has registered — so "va sur la page

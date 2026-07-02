@@ -357,9 +357,23 @@ function AppShell() {
 }
 ```
 
-For a detail page with a param (`/invoices/:id`), keep the `:id` route for
-rendering only and give the agent concrete paths derived from your data, so it can
-navigate to a specific record:
+A detail page with a param (`/invoices/:id`) can be registered as-is. The
+placeholder becomes a top-level `id` argument of `navigateToPage`, so *"open
+invoice 42"* navigates to `/invoices/42`. One route covers every record:
+
+```tsx
+useAgoNavigation(navigate, [
+  ...Object.values(ROUTES),
+  { name: "invoiceDetail", path: "/invoices/:id", description: "One invoice's detail page" },
+]);
+```
+
+When the agent should pick a record by meaning instead of by id (*"the invoice
+for Acme"*), it needs to know which ids exist. For a small, stable set, keep the
+single parameterized route and list the ids in its `description`, derived from
+your data so they stay in sync ([`examples/glacier`](../../examples/glacier)
+does this for its origin pages). For larger or user-specific sets, register
+concrete paths derived from your data instead:
 
 ```tsx
 const invoiceRoutes = invoices.map((inv) => ({
@@ -369,10 +383,7 @@ const invoiceRoutes = invoices.map((inv) => ({
 }));
 
 useAgoNavigation(navigate, [...Object.values(ROUTES), ...invoiceRoutes]);
-// <Route path="/invoices/:id" element={<Invoice />} /> stays render-only
 ```
-
-A full version of this pattern is in [`examples/glacier`](../../examples/glacier).
 
 ---
 
