@@ -14,7 +14,8 @@ export interface ClientFunctionSchema {
       {
         type: string;
         description?: string;
-        enum?: string[];
+        enum?: (string | number)[];
+        items?: { type: string; enum?: (string | number)[] };
         default?: unknown;
       }
     >;
@@ -28,6 +29,37 @@ export interface ClientFunctionSchema {
 export type ClientFunctionHandler = (
   args: Record<string, unknown>
 ) => Promise<unknown> | unknown;
+
+/**
+ * A single editable control on the current page (a filter, a sort, a view mode,
+ * a selection…). It becomes one optional property of the synthesized
+ * `setPageState` function, and its current value is surfaced back to the agent
+ * as dynamic context. This is the state-mutation mirror of a navigation route.
+ */
+export interface AgoStateControl<T = unknown> {
+  /** Machine name of the control, e.g. "statusFilter". Becomes a property of the tool. */
+  name: string;
+  /** Description for the LLM, e.g. "Filter the list by review status". */
+  description: string;
+  /** JSON schema for a SINGLE field (like one property of navigateToPage). */
+  schema: {
+    type: "string" | "number" | "boolean" | "array";
+    enum?: (string | number)[];
+    items?: { type: string; enum?: (string | number)[] };
+  };
+  /** Current value → pushed as dynamic context so the agent knows what to change. */
+  get?: () => T;
+  /** Apply the state change on the page. May be async. */
+  set: (value: T) => void | Promise<void>;
+}
+
+/**
+ * Options for {@link AgoClient.registerPageStateFunction}.
+ */
+export interface AgoPageStateOptions {
+  /** Name of the synthesized client function. Defaults to "setPageState". */
+  functionName?: string;
+}
 
 /**
  * Registered function with handler

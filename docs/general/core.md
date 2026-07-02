@@ -178,6 +178,21 @@ ago.registerNavigationFunction(
 );
 ```
 
+Page state is the mirror: let the agent change the current page's state
+(filters, sort, view mode…) and read it back.
+
+```ts
+ago.registerPageStateFunction([
+  {
+    name: "statusFilter",
+    description: "Filter the list by status",
+    schema: { type: "string", enum: ["all", "paid", "overdue"] },
+    get: () => filters.status,
+    set: (v) => { filters.status = v as string; },
+  },
+]);
+```
+
 ---
 
 ## 5. Give the agent context
@@ -364,6 +379,7 @@ Prefer callbacks over raw events? See the
 - `unregisterFunction(name)` → `boolean`
 - `getRegisteredFunctions()` → `ClientFunctionSchema[]`
 - `registerNavigationFunction(navigate, routes)`
+- `registerPageStateFunction(controls, opts?)` · `unregisterPageStateFunction(functionName?)`
 
 ### Context
 

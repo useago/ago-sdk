@@ -62,7 +62,9 @@ export function useMessages({
   const loadMessages = async (convId: string) => {
     try {
       const loadedMessages = await client.getMessages(convId);
-      setMessages(loadedMessages);
+      // Hidden messages (e.g. auto-continuation nudges) stay in the model's
+      // context but must never surface in the visible transcript.
+      setMessages(loadedMessages.filter((m) => !m.hidden));
     } catch (err) {
       setError(err instanceof Error ? err : new Error("Failed to load messages"));
     }

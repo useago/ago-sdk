@@ -1,5 +1,10 @@
 import { useEffect, useRef } from "react";
-import type { ClientFunctionDefinition, ClientFunctionHandler } from "../../functions/types";
+import type {
+  AgoPageStateOptions,
+  AgoStateControl,
+  ClientFunctionDefinition,
+  ClientFunctionHandler,
+} from "../../functions/types";
 import { useAgoClient } from "../context/AgoContext";
 
 export interface UseAgoFunctionOptions {
@@ -11,7 +16,8 @@ export interface UseAgoFunctionOptions {
       {
         type: string;
         description?: string;
-        enum?: string[];
+        enum?: (string | number)[];
+        items?: { type: string; enum?: (string | number)[] };
         default?: unknown;
       }
     >;
@@ -113,4 +119,59 @@ export function useAgoNavigation(
       client.unregisterFunction("navigateToPage");
     };
   }, [client, routes]);
+}
+
+/**
+ * Declaratively register editable page-state controls with the AGO agent.
+ * The state-mutation mirror of `useAgoNavigation`: it wraps
+ * `registerPageStateFunction` with React lifecycle management, so the agent can
+ * change the current page's state (filters, sort, view mode…) and read the
+ * current state back.
+ *
+ * ```tsx
+ * const [status, setStatus] = useState("all");
+ * useAgoPageState([
+ *   {
+ *     name: "statusFilter",
+ *     description: "Filter the list by review status",
+ *     schema: { type: "string", enum: ["all", "pending", "approved"] },
+ *     get: () => status,
+ *     set: setStatus,
+ *   },
+ * ]);
+ * ```
+ */
+export function useAgoPageState(
+  controls: AgoStateControl[],
+  opts?: AgoPageStateOptions
+): void {
+  const client = useAgoClient();
+  const fnName = opts?.functionName ?? "setPageState";
+
+  // Capture the latest controls without re-registering on every render — the
+  // get/set closures change each render, but the schema is stable.
+  const controlsRef = useRef(controls);
+  controlsRef.current = controls;
+
+  useEffect(() => {
+    // Stable wrappers: name/description/schema are read once (at register
+    // time), while get/set always resolve against the freshest controls.
+    const stableControls: AgoStateControl[] = controlsRef.current.map((c) => {
+      const findLatest = () =>
+        controlsRef.current.find((next) => next.name === c.name) ?? c;
+      return {
+        name: c.name,
+        description: c.description,
+        schema: c.schema,
+        get: c.get ? () => findLatest().get?.() : undefined,
+        set: (value) => findLatest().set(value),
+      };
+    });
+
+    client.registerPageStateFunction(stableControls, { functionName: fnName });
+
+    return () => {
+      client.unregisterPageStateFunction(fnName);
+    };
+  }, [client, fnName]);
 }

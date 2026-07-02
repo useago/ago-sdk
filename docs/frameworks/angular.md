@@ -183,6 +183,24 @@ this.ago.registerNavigationFunction((path) => router.navigateByUrl(path), [
 ]);
 ```
 
+Register page state, the mirror of navigation: let the agent change the current
+page's state (filters, sort, view mode…) and read it back. Each control becomes
+one optional property of a single synthesized `setPageState` function, and every
+control's `get()` value is sent as context.
+
+```ts
+this.ago.registerPageStateFunction([
+  {
+    name: "statusFilter",
+    description: "Filter the list by status",
+    schema: { type: "string", enum: ["all", "paid", "overdue"] },
+    get: () => this.status,
+    set: (v) => { this.status = v as string; },
+  },
+]);
+// on teardown: this.ago.unregisterPageStateFunction();
+```
+
 For client context, reach the client via `getClient()`:
 
 ```ts

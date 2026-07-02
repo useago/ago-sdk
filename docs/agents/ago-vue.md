@@ -140,6 +140,31 @@ useAgoNavigation((path) => router.push(path), [
 The `description` is what the agent reads to pick a page. Write it like you'd
 explain the page to a colleague.
 
+## 4b. Let the agent change the page: `useAgoPageState`
+
+The mirror of navigation. Let the agent change the current page's state
+(filters, sort, view mode…) and read it back. Each control becomes one optional
+property of a single synthesized `setPageState` function, and every control's
+`get()` value is sent as context.
+
+```vue
+<script setup lang="ts">
+import { ref } from "vue";
+import { useAgoPageState } from "@useago/sdk/vue";
+
+const status = ref("all");
+useAgoPageState([
+  {
+    name: "statusFilter",
+    description: "Filter the list by status",
+    schema: { type: "string", enum: ["all", "paid", "overdue"] },
+    get: () => status.value,
+    set: (v) => { status.value = v as string; },
+  },
+]);
+</script>
+```
+
 ## 5. Subscribe to events: `useAgoEvents`
 
 Auto-cleans up on unmount.
@@ -198,7 +223,7 @@ const state = useAgoStore(cart);
 
 - Setup: `AgoPlugin`, `useAgo`, `AGO_CLIENT_KEY`
 - Composables: `useChat`, `useMessages`, `useConversation`, `useAgoFunction`,
-  `useAgoNavigation`, `useAgoEvents`, `useAgoStore`
+  `useAgoNavigation`, `useAgoPageState`, `useAgoEvents`, `useAgoStore`
 - Types: `AgoConfig`, `AgoMessage`, `Conversation`, `AgoAgent`, `AgoSource`,
   `ToolCallData`, `AgoPluginOptions`
 

@@ -1,3 +1,8 @@
 node_modules
 dist
 .gstack/
+
+# Never commit secrets — applies to every .env anywhere in the repo
+.env
+.env.*
+!.env.example

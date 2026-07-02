@@ -110,6 +110,22 @@ ago.registerNavigationFunction((path) => (window.location.href = path), [
 ]);
 ```
 
+Page state is the mirror: let the agent change the current page's state
+(filters, sort, view mode…) and read it back via each control's `get()`. One
+synthesized `setPageState` function, one optional property per control.
+
+```ts
+ago.registerPageStateFunction([
+  {
+    name: "statusFilter",
+    description: "Filter the list by status",
+    schema: { type: "string", enum: ["all", "paid", "overdue"] },
+    get: () => filters.status,
+    set: (v) => { filters.status = v as string; },
+  },
+]);
+```
+
 ## 5. Give the agent context
 
 ```ts

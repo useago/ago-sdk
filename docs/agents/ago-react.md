@@ -191,6 +191,28 @@ explain the page to a colleague. For a `/invoices/:id` detail page, keep the
 `:id` route for rendering only and feed the agent concrete paths derived from your
 data (`/invoices/123`).
 
+## 5b. Let the agent change the page: `useAgoPageState`
+
+The mirror of navigation. Let the agent change the current page's state
+(filters, sort, view mode…) and read it back. Each control becomes one optional
+property of a single synthesized `setPageState` function, and every control's
+`get()` value is sent as context so the agent knows the state before changing it.
+
+```tsx
+import { useAgoPageState } from "@useago/sdk/react";
+
+const [status, setStatus] = useState("all");
+useAgoPageState([
+  {
+    name: "statusFilter",
+    description: "Filter the list by invoice status",
+    schema: { type: "string", enum: ["all", "paid", "overdue"] },
+    get: () => status,
+    set: setStatus,
+  },
+]);
+```
+
 ## 6. Give the agent context: `useAgoContext`
 
 Expose what the user is looking at, sent with every message.
@@ -244,7 +266,7 @@ Key events: `message:start`, `message:chunk` (`{ content }` per token),
 
 - Provider/context: `AgoProvider`, `useAgoClient`, `useOptionalAgoClient`
 - Hooks: `useAgo`, `useChat`, `useMessages`, `useConversation`, `useAgoFunction`,
-  `useAgoNavigation`, `useAgoContext`, `useAgoStore`, `useFormCollector`
+  `useAgoNavigation`, `useAgoPageState`, `useAgoContext`, `useAgoStore`, `useFormCollector`
 - Components: `ChatWidget`, `Message`, `ChatInput`, `Markdown`
 - Forms: `createFormCollector`
 - Testing: `createMockClient`

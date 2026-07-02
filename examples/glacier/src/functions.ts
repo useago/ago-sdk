@@ -1,4 +1,5 @@
 import { defineFunction } from '@useago/sdk';
+import type { AgoStateControl } from '@useago/sdk';
 import { CONES, ConeType, FLAVORS, FLAVOR_IDS, TOPPINGS, TOPPING_IDS } from './flavors';
 import type { IceCreamState } from './IceCream';
 
@@ -32,125 +33,50 @@ function summarizeItem(item: IceCreamState) {
   };
 }
 
+// The ice cream currently being composed is now editable page state, not a set
+// of bespoke mutation functions. cone/scoops/toppings each map to one control
+// of the synthesized `setPageState` function, and their `get()` feeds the agent
+// the live composition as dynamic context. The agent sets the whole array for
+// scoops/toppings (bottom-to-top) rather than issuing add/remove actions.
+export function buildIceCreamControls(store: OrderStore): AgoStateControl[] {
+  return [
+    {
+      name: 'cone',
+      description: 'The container for the ice cream currently being composed: a waffle cone, a waffle cup, or a plain cup.',
+      schema: { type: 'string', enum: Object.keys(CONES) },
+      get: () => store.get().current.cone,
+      set: (value) => {
+        const cone = String(value) as ConeType;
+        if (!CONES[cone]) return;
+        store.setCurrent({ ...store.get().current, cone });
+      },
+    },
+    {
+      name: 'scoops',
+      description: `The scoops on the ice cream currently being composed, listed bottom-to-top. Set the full list. Available flavors: ${FLAVOR_IDS.join(', ')}. Max ${MAX_SCOOPS} scoops.`,
+      schema: { type: 'array', items: { type: 'string', enum: FLAVOR_IDS } },
+      get: () => store.get().current.scoops,
+      set: (value) => {
+        const ids = Array.isArray(value) ? value.map(String) : [];
+        const cleaned = ids.filter((f) => FLAVORS[f]).slice(0, MAX_SCOOPS);
+        store.setCurrent({ ...store.get().current, scoops: cleaned });
+      },
+    },
+    {
+      name: 'toppings',
+      description: `The toppings on the ice cream currently being composed. Set the full list. Available: ${TOPPING_IDS.join(', ')}.`,
+      schema: { type: 'array', items: { type: 'string', enum: TOPPING_IDS } },
+      get: () => store.get().current.toppings,
+      set: (value) => {
+        const ids = Array.isArray(value) ? value.map(String) : [];
+        const cleaned = Array.from(new Set(ids.filter((t) => TOPPINGS[t])));
+        store.setCurrent({ ...store.get().current, toppings: cleaned });
+      },
+    },
+  ];
+}
+
 export function buildIceCreamFunctions(store: OrderStore) {
-  const setCone = defineFunction({
-    name: 'setCone',
-    description: 'Choose the container for the ice cream currently being composed: a waffle cone, a waffle cup, or a plain cup.',
-    parameters: {
-      type: 'object',
-      properties: {
-        cone: { type: 'string', enum: Object.keys(CONES), description: 'Container type' },
-      },
-      required: ['cone'],
-    },
-    handler: async (args: Record<string, unknown>) => {
-      const cone = String(args.cone) as ConeType;
-      if (!CONES[cone]) {
-        return { ok: false, error: `Unknown container: ${cone}` };
-      }
-      const current = store.get().current;
-      store.setCurrent({ ...current, cone });
-      return { ok: true, cone };
-    },
-  });
-
-  const updateScoops = defineFunction({
-    name: 'updateScoops',
-    description: `Add, remove, or replace scoops on the ice cream currently being composed. Available flavors: ${FLAVOR_IDS.join(', ')}. Max ${MAX_SCOOPS} scoops.`,
-    parameters: {
-      type: 'object',
-      properties: {
-        action: {
-          type: 'string',
-          enum: ['add', 'remove', 'replace'],
-          description: '"add" appends one scoop (needs flavor). "remove" removes one (default = topmost; optional index, 0=bottom). "replace" sets the full list (needs flavors, comma-separated, bottom-to-top).',
-        },
-        flavor: { type: 'string', enum: FLAVOR_IDS, description: 'Flavor id — required for action=add' },
-        index: { type: 'number', description: '0-based index of the scoop to remove (0 = bottom). Optional for action=remove; defaults to topmost.' },
-        flavors: { type: 'string', description: 'Comma-separated flavor ids, bottom-to-top — required for action=replace (e.g. "vanilla,chocolate,pistachio")' },
-      },
-      required: ['action'],
-    },
-    handler: async (args: Record<string, unknown>) => {
-      const action = String(args.action);
-      const current = store.get().current;
-
-      if (action === 'add') {
-        const flavor = String(args.flavor ?? '');
-        if (!FLAVORS[flavor]) {
-          return { ok: false, error: `Unknown flavor: ${flavor}` };
-        }
-        if (current.scoops.length >= MAX_SCOOPS) {
-          return { ok: false, error: `Maximum ${MAX_SCOOPS} scoops reached.` };
-        }
-        const next = { ...current, scoops: [...current.scoops, flavor] };
-        store.setCurrent(next);
-        return { ok: true, scoops: next.scoops };
-      }
-
-      if (action === 'remove') {
-        if (current.scoops.length === 0) {
-          return { ok: false, error: 'No scoops to remove.' };
-        }
-        const idx = typeof args.index === 'number' ? Number(args.index) : current.scoops.length - 1;
-        if (idx < 0 || idx >= current.scoops.length) {
-          return { ok: false, error: `Index ${idx} out of range.` };
-        }
-        const scoops = current.scoops.filter((_, i) => i !== idx);
-        store.setCurrent({ ...current, scoops });
-        return { ok: true, scoops };
-      }
-
-      if (action === 'replace') {
-        const raw = String(args.flavors ?? '');
-        const flavors = raw.split(',').map((s) => s.trim()).filter(Boolean);
-        const cleaned = flavors.filter((f) => FLAVORS[f]).slice(0, MAX_SCOOPS);
-        store.setCurrent({ ...current, scoops: cleaned });
-        return { ok: true, scoops: cleaned };
-      }
-
-      return { ok: false, error: `Unknown action: ${action}` };
-    },
-  });
-
-  const updateToppings = defineFunction({
-    name: 'updateToppings',
-    description: `Add or remove a topping on the ice cream currently being composed. Available: ${TOPPING_IDS.join(', ')}.`,
-    parameters: {
-      type: 'object',
-      properties: {
-        action: { type: 'string', enum: ['add', 'remove'], description: '"add" or "remove"' },
-        topping: { type: 'string', enum: TOPPING_IDS, description: 'Topping id' },
-      },
-      required: ['action', 'topping'],
-    },
-    handler: async (args: Record<string, unknown>) => {
-      const action = String(args.action);
-      const topping = String(args.topping);
-      if (!TOPPINGS[topping]) {
-        return { ok: false, error: `Unknown topping: ${topping}` };
-      }
-      const current = store.get().current;
-
-      if (action === 'add') {
-        if (current.toppings.includes(topping)) {
-          return { ok: true, toppings: current.toppings, note: 'already added' };
-        }
-        const toppings = [...current.toppings, topping];
-        store.setCurrent({ ...current, toppings });
-        return { ok: true, toppings };
-      }
-
-      if (action === 'remove') {
-        const toppings = current.toppings.filter((t) => t !== topping);
-        store.setCurrent({ ...current, toppings });
-        return { ok: true, toppings };
-      }
-
-      return { ok: false, error: `Unknown action: ${action}` };
-    },
-  });
-
   const resetCurrent = defineFunction({
     name: 'resetCurrent',
     description: 'Empty the ice cream currently being composed — no scoops, no toppings. Keeps the chosen container. Does not touch the cart.',
@@ -282,9 +208,6 @@ export function buildIceCreamFunctions(store: OrderStore) {
   });
 
   return {
-    setCone,
-    updateScoops,
-    updateToppings,
     resetCurrent,
     addToCart,
     updateCart,
