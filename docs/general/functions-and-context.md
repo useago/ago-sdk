@@ -102,6 +102,7 @@ client.registerNavigationFunction(
   [
     { name: "pricing", path: "/pricing", description: "Pricing page" },
     { name: "docs", path: "/docs", description: "Documentation" },
+    { name: "orderDetail", path: "/orders/:id", description: "One order's detail page" },
   ],
 );
 ```
@@ -109,6 +110,13 @@ client.registerNavigationFunction(
 This registers a `navigateToPage` function whose `page` parameter is an enum of
 your route names. React/Vue offer `useAgoNavigation(navigate, routes)` with
 lifecycle cleanup.
+
+Paths can contain `:param` placeholders. Each placeholder becomes an explicit
+top-level argument of `navigateToPage` (`{ page: "orderDetail", id: "42" }`
+navigates to `/orders/42`), so one route covers every detail page of an entity.
+Values are URL-encoded. A call that misses a required param navigates nowhere
+and returns an error telling the agent what to retry with. Placeholders cannot
+be named `page` (that argument selects the route).
 
 It also registers a dynamic context entry ("Current page") that reports the page
 the user is on (by route name, plus URL and title) on every message, so the agent

@@ -79,6 +79,7 @@ function AppLayout() {
   useAgoNavigation(navigate, [
     { name: "dashboard", path: "/dashboard", description: "KPIs and recent activity" },
     { name: "invoices", path: "/invoices", description: "List, search and download invoices" },
+    { name: "invoiceDetail", path: "/invoices/:id", description: "One invoice's detail page" },
     { name: "settings", path: "/settings", description: "Account, billing and team settings" },
   ]);
 
@@ -87,7 +88,9 @@ function AppLayout() {
 ```
 
 Each route needs a `name`, its existing `path`, and a `description` the agent
-uses to pick the right page. It calls **your** `navigate` function, so route
+uses to pick the right page. Paths can contain `:param` placeholders: the agent
+fills them in (*"open invoice 42"* navigates to `/invoices/42`), so one route
+covers every detail page. It calls **your** `navigate` function, so route
 guards, auth and layouts keep working exactly as they do today.
 `react-router-dom` here is *your* router, not an SDK dependency:
 `useAgoNavigation` accepts any `(path: string) => void` function.

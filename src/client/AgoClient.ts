@@ -49,6 +49,40 @@ function escapeRegExp(value: string): string {
  * longest static path that prefixes the pathname (nested routes). Returns
  * `undefined` when nothing matches.
  */
+/** Names of the `:param` placeholders in a route path, in order. */
+function routeParamNames(path: string): string[] {
+  return path
+    .split("/")
+    .filter((seg) => seg.startsWith(":"))
+    .map((seg) => seg.slice(1));
+}
+
+/**
+ * Fill the `:param` placeholders of a route path with agent-supplied values.
+ * Returns the resolved path plus the placeholders that had no value, so the
+ * caller can send the agent a correctable error instead of a broken URL.
+ */
+function fillRouteParams(
+  path: string,
+  params: Record<string, unknown>
+): { path: string; missing: string[] } {
+  const missing: string[] = [];
+  const filled = path
+    .split("/")
+    .map((seg) => {
+      if (!seg.startsWith(":")) return seg;
+      const name = seg.slice(1);
+      const value = params[name];
+      if (value === undefined || value === null || value === "") {
+        missing.push(name);
+        return seg;
+      }
+      return encodeURIComponent(String(value));
+    })
+    .join("/");
+  return { path: filled, missing };
+}
+
 function matchRoute(pathname: string, routes: NavRoute[]): NavRoute | undefined {
   const exact = routes.find((r) => r.path === pathname);
   if (exact) return exact;
@@ -597,6 +631,12 @@ export class AgoClient {
    * the agent know *where* it is after it navigates (e.g. so auto-continuation
    * can apply page state on the destination), not just how to navigate away.
    *
+   * Routes may contain `:param` placeholders (`/users/:id`). Each distinct
+   * placeholder becomes a top-level string argument of `navigateToPage`
+   * (`{ page: "userDetail", id: "42" }`), so one route covers every detail
+   * page of an entity. Flat arguments only: nested object parameters are not
+   * reliably rendered to the model, so placeholders must not be named `page`.
+   *
    * @param navigate - A callback that performs the navigation (e.g. react-router's navigate)
    * @param routes - Map of route names to paths, with descriptions for the LLM
    */
@@ -606,8 +646,46 @@ export class AgoClient {
   ): void {
     const routeNames = routes.map((r) => r.name);
     const routeDescriptions = routes
-      .map((r) => `- "${r.name}": ${r.description}`)
+      .map((r) => {
+        const params = routeParamNames(r.path);
+        const paramNote =
+          params.length > 0
+            ? ` (requires ${params.map((p) => `"${p}"`).join(", ")})`
+            : "";
+        return `- "${r.name}"${paramNote}: ${r.description}`;
+      })
       .join("\n");
+
+    // One top-level argument per distinct placeholder, listing the pages that
+    // need it. Flat scalar properties are what schemas support end to end.
+    const paramUsage = new Map<string, string[]>();
+    for (const r of routes) {
+      for (const param of routeParamNames(r.path)) {
+        paramUsage.set(param, [...(paramUsage.get(param) ?? []), r.name]);
+      }
+    }
+
+    const properties: ClientFunctionSchema["parameters"]["properties"] = {
+      page: {
+        type: "string",
+        description: "The page to navigate to",
+        enum: routeNames,
+      },
+    };
+    for (const [param, usedBy] of paramUsage) {
+      if (param === "page") {
+        logger.error(
+          'registerNavigationFunction: a ":page" placeholder collides with the "page" argument and is ignored. Rename the placeholder.'
+        );
+        continue;
+      }
+      properties[param] = {
+        type: "string",
+        description: `Value for ":${param}" in the page path. Required when page is ${usedBy
+          .map((n) => `"${n}"`)
+          .join(" or ")}.`,
+      };
+    }
 
     this.registerFunction(
       "navigateToPage",
@@ -617,20 +695,44 @@ export class AgoClient {
         if (!route) {
           return { success: false, error: `Unknown page: ${pageName}` };
         }
-        navigate(route.path);
-        return { success: true, navigatedTo: route.path };
+
+        // Params arrive as top-level arguments. Some models still nest them
+        // under a "params" object (or a JSON string of one); accept those too.
+        let nested: Record<string, unknown> = {};
+        if (typeof args.params === "string") {
+          try {
+            nested = JSON.parse(args.params) as Record<string, unknown>;
+          } catch {
+            // fall through to the missing-params error below
+          }
+        } else if (args.params && typeof args.params === "object") {
+          nested = args.params as Record<string, unknown>;
+        }
+
+        const values: Record<string, unknown> = {};
+        for (const name of routeParamNames(route.path)) {
+          values[name] = args[name] ?? nested[name];
+        }
+
+        const { path, missing } = fillRouteParams(route.path, values);
+        if (missing.length > 0) {
+          const example = missing.map((m) => `"${m}": "..."`).join(", ");
+          return {
+            success: false,
+            error: `Page "${pageName}" needs ${missing
+              .map((m) => `"${m}"`)
+              .join(", ")}. Retry with { "page": "${pageName}", ${example} }.`,
+          };
+        }
+
+        navigate(path);
+        return { success: true, navigatedTo: path };
       },
       {
         description: `Navigate the user to a page in the application. Available pages:\n${routeDescriptions}`,
         parameters: {
           type: "object",
-          properties: {
-            page: {
-              type: "string",
-              description: "The page to navigate to",
-              enum: routeNames,
-            },
-          },
+          properties,
           required: ["page"],
         },
       }
