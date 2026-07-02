@@ -35,6 +35,42 @@ import type {
   ToolCallData,
 } from "./types";
 
+type NavRoute = { name: string; path: string; description: string };
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Resolve which registered route a pathname corresponds to, so the agent can be
+ * told the current page by the same name it uses to navigate.
+ *
+ * Precedence: exact path, then parameterised path (`/users/:id`), then the
+ * longest static path that prefixes the pathname (nested routes). Returns
+ * `undefined` when nothing matches.
+ */
+function matchRoute(pathname: string, routes: NavRoute[]): NavRoute | undefined {
+  const exact = routes.find((r) => r.path === pathname);
+  if (exact) return exact;
+
+  const parameterised = routes.find((r) => {
+    if (!r.path.includes(":")) return false;
+    const pattern =
+      "^" +
+      r.path
+        .split("/")
+        .map((seg) => (seg.startsWith(":") ? "[^/]+" : escapeRegExp(seg)))
+        .join("/") +
+      "/?$";
+    return new RegExp(pattern).test(pathname);
+  });
+  if (parameterised) return parameterised;
+
+  return routes
+    .filter((r) => r.path !== "/" && pathname.startsWith(r.path))
+    .sort((a, b) => b.path.length - a.path.length)[0];
+}
+
 /**
  * Main SDK client for AGO Chat integration
  */
@@ -555,6 +591,12 @@ export class AgoClient {
 
   /**
    * Register a navigation function that lets AGO navigate users to different pages.
+   *
+   * Also registers a dynamic context entry (`current-page`) that reports the page
+   * the user is currently on, by route name, on every message. This is what lets
+   * the agent know *where* it is after it navigates (e.g. so auto-continuation
+   * can apply page state on the destination), not just how to navigate away.
+   *
    * @param navigate - A callback that performs the navigation (e.g. react-router's navigate)
    * @param routes - Map of route names to paths, with descriptions for the LLM
    */
@@ -593,6 +635,34 @@ export class AgoClient {
         },
       }
     );
+
+    // Report the current page (by route name) as dynamic context, re-evaluated
+    // on every message. Without this the agent knows how to navigate but never
+    // which page the user is actually on.
+    this.addDynamicContext("current-page", () => {
+      if (typeof window === "undefined" || !window.location) return null;
+      const url = window.location.href;
+      const title = typeof document !== "undefined" ? document.title : undefined;
+      const match = matchRoute(window.location.pathname, routes);
+
+      const data: Record<string, unknown> = { url };
+      if (match) data.page = match.name;
+      if (title) data.title = title;
+
+      return {
+        name: "Current page",
+        description: "The page the user is currently viewing.",
+        data,
+      };
+    });
+  }
+
+  /**
+   * Unregister the navigation function and its `current-page` context provider.
+   */
+  unregisterNavigationFunction(): void {
+    this.unregisterFunction("navigateToPage");
+    this.removeDynamicContext("current-page");
   }
 
   /**

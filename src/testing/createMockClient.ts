@@ -83,6 +83,7 @@ export function createMockClient(
     getContextSnapshot: () => null,
     notifyContextChanged: () => undefined,
     registerNavigationFunction: () => undefined,
+    unregisterNavigationFunction: () => undefined,
     on: (event: string, handler: (...args: unknown[]) => void) => {
       if (!listeners.has(event)) listeners.set(event, new Set());
       listeners.get(event)!.add(handler);

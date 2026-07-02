@@ -116,7 +116,7 @@ export function useAgoNavigation(
     );
 
     return () => {
-      client.unregisterFunction("navigateToPage");
+      client.unregisterNavigationFunction();
     };
   }, [client, routes]);
 }

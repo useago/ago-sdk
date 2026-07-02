@@ -68,7 +68,7 @@ export function useAgoNavigation(
   });
 
   onUnmounted(() => {
-    client.unregisterFunction("navigateToPage");
+    client.unregisterNavigationFunction();
   });
 }
 
