@@ -151,6 +151,11 @@ export class AgoService {
     this.client.registerNavigationFunction(navigate, routes);
   }
 
+  /** Unregister navigation (function + current-page context) */
+  unregisterNavigationFunction(): void {
+    this.client.unregisterNavigationFunction();
+  }
+
   /** Register editable page-state controls (filters, sort, view mode…) */
   registerPageStateFunction(
     controls: AgoStateControl[],

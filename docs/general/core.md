@@ -178,6 +178,9 @@ ago.registerNavigationFunction(
 );
 ```
 
+This also reports the current page (by route name, plus URL and title) as context
+on every message, so the agent knows which page the user is on.
+
 Page state is the mirror: let the agent change the current page's state
 (filters, sort, view mode…) and read it back.
 
@@ -378,7 +381,7 @@ Prefer callbacks over raw events? See the
 - `register(definitionOrArray)`: short alias, accepts an array
 - `unregisterFunction(name)` → `boolean`
 - `getRegisteredFunctions()` → `ClientFunctionSchema[]`
-- `registerNavigationFunction(navigate, routes)`
+- `registerNavigationFunction(navigate, routes)` · `unregisterNavigationFunction()` (also publishes a "Current page" context entry)
 - `registerPageStateFunction(controls, opts?)` · `unregisterPageStateFunction(functionName?)`
 
 ### Context

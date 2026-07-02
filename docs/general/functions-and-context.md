@@ -110,6 +110,12 @@ This registers a `navigateToPage` function whose `page` parameter is an enum of
 your route names. React/Vue offer `useAgoNavigation(navigate, routes)` with
 lifecycle cleanup.
 
+It also registers a dynamic context entry ("Current page") that reports the page
+the user is on (by route name, plus URL and title) on every message, so the agent
+knows where it is after it navigates, not just how to navigate away. Call
+`client.unregisterNavigationFunction()` to remove both the function and that
+context.
+
 ### Page state shortcut
 
 The mirror of navigation: instead of moving the user to another page, let the
