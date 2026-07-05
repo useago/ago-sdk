@@ -191,4 +191,105 @@ describe("useAgoAutoContinueAfterNavigation", () => {
       root.unmount();
     });
   });
+
+  // ── Pause mode (client_functions_mode: "pause") ────────────────────────────
+  // The SDK auto-resumes the paused turn itself; the hook only registers a
+  // resume GATE that waits for the destination page's state to register.
+
+  function waitingClient(client: AgoClient, conversationId = "c1") {
+    emit(client, "message:waiting-client", {
+      conversationId,
+      messageId: "m1",
+      waitingToolCallIds: ["bag1"],
+    });
+  }
+
+  function getGate(client: AgoClient) {
+    return (
+      client as unknown as {
+        resumeGate: (info: { conversationId: string; messageId: string }) => Promise<void> | void;
+      }
+    ).resumeGate;
+  }
+
+  it("pause mode: the gate waits for page-state when the paused turn navigated", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+
+    function Harness() {
+      useAgoAutoContinueAfterNavigation({ settleMs: 0, readinessTimeoutMs: 200 });
+      return <span>ok</span>;
+    }
+    const { root } = await mount(client, Harness);
+
+    let gateResolved = false;
+    await act(async () => {
+      navigate(client);
+      waitingClient(client);
+      void Promise.resolve(getGate(client)({ conversationId: "c1", messageId: "m1" })).then(
+        () => (gateResolved = true)
+      );
+      await tick(20);
+    });
+    // Destination page not mounted yet: the gate holds the resume.
+    expect(gateResolved).toBe(false);
+
+    await act(async () => {
+      registerPageState(client);
+      await tick(30);
+    });
+    expect(gateResolved).toBe(true);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("pause mode: the gate resolves immediately when the paused turn did not navigate", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+
+    function Harness() {
+      useAgoAutoContinueAfterNavigation({ settleMs: 0, readinessTimeoutMs: 200 });
+      return <span>ok</span>;
+    }
+    const { root } = await mount(client, Harness);
+
+    let gateResolved = false;
+    await act(async () => {
+      // A non-navigation client function paused the turn (e.g. openCart).
+      waitingClient(client);
+      void Promise.resolve(getGate(client)({ conversationId: "c1", messageId: "m1" })).then(
+        () => (gateResolved = true)
+      );
+      await tick(10);
+    });
+    expect(gateResolved).toBe(true);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("pause mode: no legacy hidden prompt after the resumed turn completes", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const send = vi.spyOn(client, "sendMessage").mockResolvedValue({} as AgoMessage);
+
+    function Harness() {
+      useAgoAutoContinueAfterNavigation({ settleMs: 0, readinessTimeoutMs: 50 });
+      return <span>ok</span>;
+    }
+    const { root } = await mount(client, Harness);
+
+    await act(async () => {
+      registerPageState(client);
+      navigate(client);
+      waitingClient(client); // pause path takes over the navigation flag…
+      complete(client); // …so the resumed turn's completion sends nothing
+      await tick(100);
+    });
+
+    expect(send).not.toHaveBeenCalled();
+    await act(async () => {
+      root.unmount();
+    });
+  });
 });

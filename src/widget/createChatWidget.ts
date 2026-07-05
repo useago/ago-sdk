@@ -567,15 +567,23 @@ export function mountChatWidget(
     // while follow-up replies are still being generated.
     const last = messages[messages.length - 1];
     const isAnswering =
-      isLoading && last?.role === "assistant" && last.status === "IN_PROGRESS";
+      isLoading &&
+      last?.role === "assistant" &&
+      (last.status === "IN_PROGRESS" || last.status === "WAITING_CLIENT");
     setDisabled(isAnswering);
   }
 
   // ── Streaming event wiring ─────────────────────────────────────────
   function lastInProgressAssistant(): AgoMessage | undefined {
+    // WAITING_CLIENT counts as in-progress: the resumed stream of a paused turn
+    // keeps appending its chunks to the same assistant bubble.
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
-      if (m.role === "assistant" && m.status === "IN_PROGRESS") return m;
+      if (
+        m.role === "assistant" &&
+        (m.status === "IN_PROGRESS" || m.status === "WAITING_CLIENT")
+      )
+        return m;
     }
     return undefined;
   }
@@ -785,7 +793,11 @@ export function mountChatWidget(
         else messages.push(response);
       }
       messages = messages.filter((m) => !m.id.startsWith("temp-"));
-      isLoading = false;
+      // A paused turn (WAITING_CLIENT) is not over: the SDK is about to resume it
+      // and onComplete will clear the loading state when the turn really ends.
+      if (response.status !== "WAITING_CLIENT") {
+        isLoading = false;
+      }
       render();
       // Keep the exposed thread list current (new thread, bumped last-message date).
       if (loadThreads) void refreshThreads();

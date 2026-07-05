@@ -27,6 +27,7 @@ const final = await client.waitFor("message:complete", { timeout: 10_000 });
 | `message:chunk` | `{ content, conversationId, messageId }` |
 | `message:answer-complete` | `AgoMessage`: the main answer text is done, but follow-up replies may still be pending; fires once, before `message:complete` |
 | `message:complete` | `AgoMessage` |
+| `message:waiting-client` | `{ conversationId, messageId, waitingToolCallIds }`: the turn paused on client function call(s) (`clientFunctionsMode: "pause"`). `message:complete` does not fire for the paused stream — it fires when the resumed turn concludes. The SDK submits the results and resumes on its own; listen to this to keep a "working…" indicator up |
 | `message:empty` | `{ conversationId, messageId }`: the reply completed as `DONE` with no content, tool calls, or follow-ups (usually an unknown `agent` slug). Fires after `message:complete` AND after `sendMessage` resolves, so subscribing right after the `await` still catches it. Both ids are `""` when the stream carried no message data at all. See [Empty replies](configuration.md#empty-replies). |
 | `message:error` | `{ error, code?, conversationId?, messageId? }`: `code` is the stable [error code](configuration.md#error-codes) when the failure was an `AgoError` |
 | `conversation:loaded` | `Conversation`: a full conversation was loaded from the server (e.g. after a page reload), with messages and persisted tool calls |

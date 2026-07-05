@@ -27,7 +27,20 @@ export interface AgoConfig {
    * event fires regardless of this setting.
    */
   warnOnEmptyReply?: boolean;
+  /**
+   * How the agent loop treats client function calls (requires backend support):
+   * - `"placeholder"` (default): the turn continues immediately on a placeholder
+   *   result; the real result is only visible to the agent on later turns.
+   * - `"pause"`: the turn stops on client function call(s) with status
+   *   `WAITING_CLIENT`; once every result is submitted, the SDK resumes the SAME
+   *   turn via `POST /messages/{id}/continue`, so the agent sees the real results.
+   * Older backends ignore the flag, so `"pause"` degrades to legacy behavior.
+   */
+  clientFunctionsMode?: ClientFunctionsMode;
 }
+
+/** See {@link AgoConfig.clientFunctionsMode}. */
+export type ClientFunctionsMode = "placeholder" | "pause";
 
 /**
  * Options for sending a message
@@ -46,6 +59,8 @@ export interface SendMessageOptions {
    * Requires backend support for the `hidden` flag; older backends ignore it.
    */
   hidden?: boolean;
+  /** Per-message override of {@link AgoConfig.clientFunctionsMode}. */
+  clientFunctionsMode?: ClientFunctionsMode;
 }
 
 /**
@@ -98,7 +113,28 @@ export type MessageStatus =
   | "DONE"
   | "ERROR"
   | "TODO"
-  | "CANCELED";
+  | "CANCELED"
+  /**
+   * The turn paused on client function call(s) (pause mode): the agent waits for
+   * every waiting call to be submitted, then the turn resumes via
+   * `continueMessage`. Not a final state.
+   */
+  | "WAITING_CLIENT";
+
+/**
+ * Response of `POST /tool-calls/{id}/submit`. `resume` is only present when the
+ * tool call belongs to a turn paused on client functions (pause mode): `ready`
+ * flips to `true` once ALL waiting calls of that message are submitted, meaning
+ * the turn can be resumed via `continueMessage(resume.message_id)`.
+ */
+export interface SubmitToolCallResult {
+  status: string;
+  result?: unknown;
+  resume?: {
+    message_id: string;
+    ready: boolean;
+  };
+}
 
 /**
  * Agent information
@@ -241,6 +277,8 @@ export interface SSEChunkData {
   follow_up_replies?: string[];
   satisfaction_feedback?: unknown;
   ask_to_talk_to_human?: boolean;
+  /** Tool call ids still awaiting a client result, sent with the final `WAITING_CLIENT` event. */
+  waiting_tool_call_ids?: string[];
 }
 
 /**
@@ -277,6 +315,19 @@ export interface AgoClientEvents {
    */
   "message:answer-complete": AgoMessage;
   "message:complete": AgoMessage;
+  /**
+   * The turn paused on client function call(s) (pause mode): the stream closed
+   * with status `WAITING_CLIENT` instead of `DONE`. `message:complete` does NOT
+   * fire for this stream — it fires when the resumed turn concludes, so one
+   * logical turn still emits exactly one `message:complete`. The SDK submits the
+   * function results and resumes automatically; listen to this to know the agent
+   * is waiting on the page (e.g. to keep a "working…" indicator up).
+   */
+  "message:waiting-client": {
+    conversationId: string;
+    messageId: string;
+    waitingToolCallIds: string[];
+  };
   /**
    * A reply finished as `DONE` with empty content and no tool calls, client
    * functions, or follow-up replies — usually an unknown `agent` slug (the

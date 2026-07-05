@@ -6,6 +6,7 @@ import type {
   AgoClientEvents,
   AgoEventName,
   SendMessageOptions,
+  SubmitToolCallResult,
 } from "../client/types";
 import type {
   AgoPageStateOptions,
@@ -104,7 +105,10 @@ export class AgoService {
   }
 
   /** Submit form data for a tool call */
-  submitToolCallForm(toolCallId: string, formData: Record<string, unknown>): Promise<void> {
+  submitToolCallForm(
+    toolCallId: string,
+    formData: Record<string, unknown>
+  ): Promise<SubmitToolCallResult> {
     return this.client.submitToolCallForm(toolCallId, formData);
   }
 

@@ -16,9 +16,15 @@ npm install
 npm run dev
 ```
 
-It defaults to the public demo backend (`https://playground.api.useago.com`, agent
-`glacier`), so it answers out of the box. Point `VITE_AGO_BASE_URL` at your own
-domain (e.g. `https://YOUR-DOMAIN.api.useago.com`) to use your own agents.
+It defaults to a local AGO backend (`http://localhost:55301`, agent `glacier`).
+Point `VITE_AGO_BASE_URL` at another domain (e.g. `https://YOUR-DOMAIN.api.useago.com`)
+to use your own agents.
+
+The example runs with `clientFunctionsMode="pause"`: the agent pauses on client
+function calls (navigation, cart actions) and resumes the same turn once their
+results are submitted, instead of continuing on a placeholder. Cross-page
+requests ("va sur la page parfums et montre les parfums sans lactose") need the
+backend's pause/resume support and an agent with `reasoning_iterations >= 2`.
 
 Open the app with `?dev` (e.g. `http://localhost:5173/?dev`) to mount the dev
 panel: it lists the registered functions, shows the live context snapshot, and

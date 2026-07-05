@@ -72,6 +72,11 @@ export function useMessages({
 
   // Subscribe to message events
   useEffect(() => {
+    // A paused entry (WAITING_CLIENT) is still the turn's streaming bubble: the
+    // resumed stream re-targets it, so it counts as "streaming" everywhere below.
+    const isStreamingStatus = (status: AgoMessage["status"]) =>
+      status === "IN_PROGRESS" || status === "WAITING_CLIENT";
+
     const handleMessageStart = (data: { conversationId: string; messageId: string }) => {
       // Update conversation ID if this is a new conversation
       if (!conversationId) {
@@ -84,8 +89,17 @@ export function useMessages({
       // flip `isLoading`, making the second turn visible as a streaming reply.
       setIsLoading(true);
       setMessages((prev) => {
+        // A resumed paused turn streams into the SAME assistant message: revive
+        // the existing entry instead of appending a duplicate id (duplicate React
+        // keys break the transcript rendering).
+        const existingIndex = prev.findIndex((m) => m.id === data.messageId);
+        if (existingIndex >= 0) {
+          return prev.map((m, i) =>
+            i === existingIndex ? { ...m, status: "IN_PROGRESS" as const } : m
+          );
+        }
         const alreadyStreaming = prev.some(
-          (m) => m.role === "assistant" && m.status === "IN_PROGRESS"
+          (m) => m.role === "assistant" && isStreamingStatus(m.status)
         );
         if (alreadyStreaming) return prev;
         return [
@@ -107,15 +121,15 @@ export function useMessages({
       conversationId: string;
       messageId: string;
     }) => {
+      // Append by id, wherever the entry sits. Optimistic `temp-` placeholders
+      // never match a real messageId, so hook-initiated sends keep revealing
+      // their text at answer-complete, exactly as before.
       setMessages((prev) => {
-        const lastMessage = prev[prev.length - 1];
-        if (lastMessage && lastMessage.id === data.messageId) {
-          return [
-            ...prev.slice(0, -1),
-            { ...lastMessage, content: lastMessage.content + data.content },
-          ];
-        }
-        return prev;
+        const index = prev.findIndex((m) => m.id === data.messageId);
+        if (index < 0) return prev;
+        return prev.map((m, i) =>
+          i === index ? { ...m, content: m.content + data.content } : m
+        );
       });
     };
 
@@ -127,7 +141,7 @@ export function useMessages({
       setMessages((prev) => {
         let streamingIndex = -1;
         for (let i = prev.length - 1; i >= 0; i--) {
-          if (prev[i].role === "assistant" && prev[i].status === "IN_PROGRESS") {
+          if (prev[i].role === "assistant" && isStreamingStatus(prev[i].status)) {
             streamingIndex = i;
             break;
           }
