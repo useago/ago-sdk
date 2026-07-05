@@ -46,6 +46,17 @@ export interface SSEHandlerCallbacks {
    * with the message as it stands at that moment (no `followUpReplies` yet).
    */
   onAnswerComplete?: (message: AgoMessage) => void;
+  /**
+   * The turn paused on client function call(s) (pause mode): the backend closed
+   * the stream with `status: "WAITING_CLIENT"` and the tool call ids awaiting a
+   * result. {@link onComplete} does NOT fire for this stream — the turn is not
+   * over; it resumes in a separate request once every result is submitted.
+   */
+  onWaitingClient?: (data: {
+    conversationId: string;
+    messageId: string;
+    waitingToolCallIds: string[];
+  }) => void;
   onComplete?: (message: AgoMessage) => void;
   onError?: (error: Error) => void;
 }
@@ -61,6 +72,7 @@ export class SSEHandler {
   private followUpReplies: string[] = [];
   private isFirstChunk = true;
   private answerCompleteEmitted = false;
+  private waitingClientEmitted = false;
   // Client-function invocations already dispatched this stream, keyed by name +
   // arguments. The backend emits the same call under two SSE shapes (see below),
   // so this guards a handler from running twice (e.g. a duplicate form submit).
@@ -262,6 +274,21 @@ export class SSEHandler {
       this.answerCompleteEmitted = true;
       this.callbacks.onAnswerComplete?.(this.buildMessage());
     }
+
+    // The turn paused on client function call(s) (pause mode). The backend sends
+    // this as the stream's final event, with the tool calls awaiting a result.
+    if (
+      this.message.status === "WAITING_CLIENT" &&
+      !this.waitingClientEmitted &&
+      this.message.id
+    ) {
+      this.waitingClientEmitted = true;
+      this.callbacks.onWaitingClient?.({
+        conversationId: this.message.conversationId || "",
+        messageId: this.message.id,
+        waitingToolCallIds: data.waiting_tool_call_ids ?? [],
+      });
+    }
   }
 
   private parseToolCall(data: SSEChunkData): ToolCallData {
@@ -298,7 +325,11 @@ export class SSEHandler {
 
   private buildFinalMessage(): AgoMessage {
     const message = this.buildMessage();
-    this.callbacks.onComplete?.(message);
+    // A paused turn is not complete: onComplete stays silent for this stream and
+    // fires at the end of the resumed one, so one logical turn completes once.
+    if (message.status !== "WAITING_CLIENT") {
+      this.callbacks.onComplete?.(message);
+    }
     return message;
   }
 }

@@ -1,5 +1,6 @@
 // Main SDK exports
 export { AgoClient } from "./client/AgoClient";
+export type { ResumeGate } from "./client/AgoClient";
 
 // Types
 export type {
@@ -13,6 +14,7 @@ export type {
   AgoSource,
   ClientFunction,
   ClientFunctionInvocation,
+  ClientFunctionsMode,
   Conversation,
   FormField,
   FormSchema,
@@ -21,6 +23,7 @@ export type {
   MessageStatus,
   SendMessageOptions,
   SSEChunkData,
+  SubmitToolCallResult,
   ToolCallData,
   ToolCallType,
 } from "./client/types";

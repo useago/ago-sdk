@@ -444,12 +444,17 @@ function AppShell() {
 }
 ```
 
-When the agent navigates, the hook waits for the destination's `useAgoPageState`
-to register, then sends a hidden continuation so the agent applies the state in a
-second turn. It only continues if the destination has editable state, caps
-continuations per gesture, and cancels if the user takes a new turn. Options:
-`navigationFunctions`, `continuationPrompt`, `maxDepth`, `readinessTimeoutMs`,
-`enabled`. The glacier example wires this to its parfums page.
+With `clientFunctionsMode: "pause"` (recommended, needs backend pause/resume
+support) the backend pauses the turn on the navigation call and the SDK resumes
+it once the result is submitted; the hook only delays the resume until the
+destination's `useAgoPageState` registered — same turn, no extra prompt, and
+`continuationPrompt`/`maxDepth` are unused. In the legacy placeholder mode the
+hook instead waits for the destination to register, then sends a hidden
+continuation so the agent applies the state in a second turn; it only continues
+if the destination has editable state, caps continuations per gesture, and
+cancels if the user takes a new turn. Options: `navigationFunctions`,
+`continuationPrompt`, `maxDepth`, `readinessTimeoutMs`, `enabled`. The glacier
+example wires this to its parfums page.
 
 ---
 

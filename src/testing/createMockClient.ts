@@ -70,10 +70,13 @@ export function createMockClient(
 
   const defaults: Record<string, MockFn> = {
     sendMessage: async () => noopMessage,
+    continueMessage: async () => noopMessage,
+    resumePendingClientFunctions: async () => null,
+    registerResumeGate: () => () => undefined,
     getConversations: async () => [noopConversation],
     getConversation: async () => noopConversation,
     getMessages: async () => [noopMessage],
-    submitToolCallForm: async () => undefined,
+    submitToolCallForm: async () => ({ status: "completed" }),
     confirmToolCall: async () => undefined,
     rejectToolCall: async () => undefined,
     submitFeedback: async () => undefined,

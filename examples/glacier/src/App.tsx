@@ -158,9 +158,10 @@ export default function App() {
 
   useAgoNavigation(navigate, [...Object.values(ROUTES), ORIGIN_DETAIL_ROUTE]);
 
-  // After the agent navigates, auto-send a hidden continuation once the
-  // destination page's useAgoPageState has registered — so "va sur la page
-  // parfums et montre les parfums sans lactose" resolves in one user gesture.
+  // In pause mode (see main.tsx) the backend pauses the turn on the navigation
+  // call; this hook delays the SDK's auto-resume until the destination page's
+  // useAgoPageState has registered — so "va sur la page parfums et montre les
+  // parfums sans lactose" resolves in one user gesture, within the SAME turn.
   useAgoAutoContinueAfterNavigation();
 
   const currentPrice = computePrice(current);

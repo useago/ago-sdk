@@ -325,4 +325,50 @@ describe("SSEHandler", () => {
       expect(result.followUpReplies).toEqual(["Option 1", "Option 2"]);
     });
   });
+
+  describe("paused turn (WAITING_CLIENT)", () => {
+    const pausedChunks = [
+      'data: {"content":"On y va.","message_id":"m1","thread":{"id":"t1"}}\n\n',
+      'data: {"status":"WAITING_CLIENT","message_id":"m1","thread":{"id":"t1"},"waiting_tool_call_ids":["bag1","bag2"]}\n\n',
+    ];
+
+    it("fires onWaitingClient once with the waiting tool call ids", async () => {
+      const onWaitingClient = vi.fn();
+      const handler = new SSEHandler({ onWaitingClient });
+
+      const result = await handler.processStream(createMockSSEStream(pausedChunks));
+
+      expect(onWaitingClient).toHaveBeenCalledTimes(1);
+      expect(onWaitingClient).toHaveBeenCalledWith({
+        conversationId: "t1",
+        messageId: "m1",
+        waitingToolCallIds: ["bag1", "bag2"],
+      });
+      expect(result.status).toBe("WAITING_CLIENT");
+    });
+
+    it("does NOT fire onComplete nor onAnswerComplete for a paused stream", async () => {
+      const onComplete = vi.fn();
+      const onAnswerComplete = vi.fn();
+      const handler = new SSEHandler({ onComplete, onAnswerComplete });
+
+      await handler.processStream(createMockSSEStream(pausedChunks));
+
+      expect(onComplete).not.toHaveBeenCalled();
+      expect(onAnswerComplete).not.toHaveBeenCalled();
+    });
+
+    it("still fires onComplete for a DONE stream (regression)", async () => {
+      const onComplete = vi.fn();
+      const handler = new SSEHandler({ onComplete });
+
+      await handler.processStream(
+        createMockSSEStream([
+          'data: {"status":"DONE","message_id":"m1","thread":{"id":"t1"}}\n\n',
+        ])
+      );
+
+      expect(onComplete).toHaveBeenCalledTimes(1);
+    });
+  });
 });

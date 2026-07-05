@@ -30,12 +30,42 @@ import type {
   AgoEventName,
   AgoEventHandler,
   AgoMessage,
+  ClientFunctionsMode,
   Conversation,
   SendMessageOptions,
+  SubmitToolCallResult,
   ToolCallData,
 } from "./types";
 
 type NavRoute = { name: string; path: string; description: string };
+
+/**
+ * Hook run before a paused turn is resumed, so the app controls WHEN the
+ * continuation fires (e.g. wait for the destination page to mount after a
+ * navigation). It must resolve — throwing or hanging blocks the resume; on
+ * timeout-style situations resolve anyway and let the agent conclude.
+ */
+export type ResumeGate = (info: {
+  conversationId: string;
+  messageId: string;
+}) => Promise<void> | void;
+
+/**
+ * Auto-resume bookkeeping for one paused turn. The resume fires only when BOTH
+ * signals landed: the stream closed as WAITING_CLIENT (the backend persisted the
+ * pause) AND a submit response reported `resume.ready` (every waiting call got
+ * its result). Either can arrive first — submits run while the stream is still
+ * open, and resuming before the pause is persisted would 409.
+ */
+type PendingResume = {
+  conversationId: string;
+  /** Stream closed with WAITING_CLIENT — the backend accepts a continue now. */
+  waitingConfirmed: boolean;
+  /** A submit response reported every waiting call submitted. */
+  resultsReady: boolean;
+  /** Guards double-continue (e.g. duplicate submit responses). */
+  started: boolean;
+};
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -118,6 +148,12 @@ export class AgoClient {
   /** Conversations already warned about an empty reply (one warning each). */
   private warnedEmptyConversations = new Set<string>();
 
+  /** Paused turns awaiting auto-resume, keyed by assistant message id. */
+  private pendingResumes = new Map<string, PendingResume>();
+
+  /** App-provided gate deciding WHEN a paused turn resumes (see {@link registerResumeGate}). */
+  private resumeGate: ResumeGate | null = null;
+
   constructor(config: AgoConfig) {
     validateConfig(config, "AgoClient");
     this.config = config;
@@ -150,6 +186,8 @@ export class AgoClient {
 
     const configAgent = this.config.agent || this.config.defaultAgentId;
 
+    const mode = this.resolveClientFunctionsMode(options);
+
     const body: Record<string, unknown> = {
       content,
       conversation_id: options?.conversationId,
@@ -159,6 +197,9 @@ export class AgoClient {
     // Include client functions if any are registered
     if (clientFunctions.length > 0) {
       body.client_functions = clientFunctions;
+      if (mode === "pause") {
+        body.client_functions_mode = mode;
+      }
     }
 
     // Include client-supplied context if any is registered
@@ -188,6 +229,9 @@ export class AgoClient {
 
       if (clientFunctions.length > 0) {
         formData.append("client_functions", JSON.stringify(clientFunctions));
+        if (mode === "pause") {
+          formData.append("client_functions_mode", mode);
+        }
       }
 
       if (clientContext) {
@@ -243,6 +287,10 @@ export class AgoClient {
       onAnswerComplete: (message) => {
         this.eventEmitter.emit("message:answer-complete", message);
       },
+      onWaitingClient: (data) => {
+        this.eventEmitter.emit("message:waiting-client", data);
+        this.markResumeSignal(data.messageId, data.conversationId, "waitingConfirmed");
+      },
       onComplete: (message) => {
         this.eventEmitter.emit("message:complete", message);
       },
@@ -255,8 +303,120 @@ export class AgoClient {
     });
 
     const message = await handler.processStream(response);
-    this.maybeFlagEmptyReply(message, sawClientFunction);
+    if (message.status !== "WAITING_CLIENT") {
+      this.maybeFlagEmptyReply(message, sawClientFunction);
+    }
     return message;
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // Pause / resume (client_functions_mode: "pause")
+  // ─────────────────────────────────────────────────────────────────
+
+  private resolveClientFunctionsMode(
+    options?: SendMessageOptions
+  ): ClientFunctionsMode {
+    return (
+      options?.clientFunctionsMode ?? this.config.clientFunctionsMode ?? "placeholder"
+    );
+  }
+
+  /**
+   * Register a gate deciding WHEN a paused turn resumes. The SDK still decides
+   * *whether* (it resumes once every waiting result is submitted); the gate only
+   * delays the continue call — e.g. `useAgoAutoContinueAfterNavigation` waits for
+   * the destination page to register its page state. One gate at a time (last
+   * registration wins). Returns an unregister function.
+   */
+  registerResumeGate(gate: ResumeGate): () => void {
+    this.resumeGate = gate;
+    return () => {
+      if (this.resumeGate === gate) this.resumeGate = null;
+    };
+  }
+
+  /**
+   * Resume a turn paused on client function results (`WAITING_CLIENT`).
+   *
+   * Sends the CURRENT page's registered functions and context — the page may
+   * have changed since the pause (that's the point of pausing on a navigation) —
+   * and streams the continuation through the same event pipeline as
+   * `sendMessage`, so `message:chunk` / `message:complete` (or another
+   * `message:waiting-client` for chained pauses) fire as usual.
+   *
+   * The SDK calls this automatically after submitting the waiting results; call
+   * it manually only for custom flows (e.g. after restoring a reloaded page via
+   * {@link resumePendingClientFunctions}).
+   */
+  async continueMessage(messageId: string): Promise<AgoMessage> {
+    const clientFunctions = this.functionRegistry.getSchemas();
+    const clientContext = this.contextRegistry.getSnapshot();
+
+    const body: Record<string, unknown> = {};
+    if (clientFunctions.length > 0) {
+      body.client_functions = clientFunctions;
+    }
+    if (clientContext) {
+      body.client_context = clientContext;
+    }
+
+    const response = await this.httpClient.postStream(
+      `/api/sdk/v1/messages/${messageId}/continue`,
+      body
+    );
+    return this.processSSEResponse(response);
+  }
+
+  /**
+   * Record one of the two auto-resume preconditions for a paused turn and fire
+   * the resume when both are in (see {@link PendingResume}).
+   */
+  private markResumeSignal(
+    messageId: string,
+    conversationId: string,
+    signal: "waitingConfirmed" | "resultsReady"
+  ): void {
+    if (!messageId) return;
+    const pending: PendingResume = this.pendingResumes.get(messageId) ?? {
+      conversationId,
+      waitingConfirmed: false,
+      resultsReady: false,
+      started: false,
+    };
+    pending[signal] = true;
+    if (conversationId) pending.conversationId = conversationId;
+    this.pendingResumes.set(messageId, pending);
+
+    if (!pending.waitingConfirmed || !pending.resultsReady || pending.started) {
+      return;
+    }
+    pending.started = true;
+    void this.runAutoResume(messageId, pending.conversationId);
+  }
+
+  private async runAutoResume(
+    messageId: string,
+    conversationId: string
+  ): Promise<void> {
+    try {
+      if (this.resumeGate) {
+        await this.resumeGate({ conversationId, messageId });
+      }
+    } catch (gateError) {
+      // The gate is a "when", not a "whether": never let it strand a paused
+      // turn — resume anyway and let the agent conclude with what it has.
+      logger.warn("Resume gate threw; resuming anyway:", gateError);
+    }
+
+    this.pendingResumes.delete(messageId);
+
+    try {
+      await this.continueMessage(messageId);
+    } catch (error) {
+      // A 409 means the turn moved on (new user message abandoned it, or a
+      // concurrent continue won). That is a normal outcome, not an app error.
+      logger.warn("Auto-resume of paused turn failed:", error);
+    }
   }
 
   /**
@@ -339,11 +499,21 @@ export class AgoClient {
     // already continued with a placeholder, so we just emit the local event.
     if (data.invocationId) {
       try {
-        await this.submitToolCallForm(data.invocationId, {
+        const submitResult = await this.submitToolCallForm(data.invocationId, {
           result,
           error,
           _type: "client_function_result",
         });
+        // Pause mode: the backend flags when EVERY waiting call of the paused
+        // turn has its result. Combined with the stream's WAITING_CLIENT close,
+        // this triggers the auto-resume (see markResumeSignal).
+        if (submitResult?.resume?.ready) {
+          this.markResumeSignal(
+            submitResult.resume.message_id,
+            data.conversationId,
+            "resultsReady"
+          );
+        }
       } catch (submitError) {
         logger.error("Failed to submit function result:", submitError);
       }
@@ -459,20 +629,88 @@ export class AgoClient {
     return conversation.messages || [];
   }
 
+  /**
+   * Resume a turn left paused on client function results by a page reload.
+   *
+   * A paused turn (pause mode) survives a full reload: the backend keeps the
+   * assistant message in `WAITING_CLIENT` with its waiting tool calls. After
+   * restoring the conversation (`getConversation`) and re-registering the page's
+   * functions, call this: it re-executes each waiting client function through the
+   * registry, submits the results, and continues the turn.
+   *
+   * Opt-in on purpose — re-running functions on reload can be surprising (e.g. a
+   * navigation function would navigate again), so the app decides. Returns the
+   * resumed turn's final message, or `null` when there was nothing to resume or
+   * some waiting function is not registered on this page.
+   */
+  async resumePendingClientFunctions(
+    conversation: Conversation
+  ): Promise<AgoMessage | null> {
+    const paused = [...(conversation.messages ?? [])]
+      .reverse()
+      .find((m) => m.role === "assistant" && m.status === "WAITING_CLIENT");
+    if (!paused) return null;
+
+    const waitingCalls = (paused.toolCalls ?? []).filter(
+      (tc) =>
+        tc.type === "client_function" &&
+        tc.status === "waiting_input" &&
+        tc.functionName
+    );
+
+    const registered = new Set(
+      this.functionRegistry.getSchemas().map((f) => f.name)
+    );
+    const missing = waitingCalls.filter((tc) => !registered.has(tc.functionName!));
+    if (missing.length > 0) {
+      logger.warn(
+        "Cannot resume paused turn: function(s) not registered on this page:",
+        missing.map((tc) => tc.functionName)
+      );
+      return null;
+    }
+
+    let ready = waitingCalls.length === 0;
+    for (const call of waitingCalls) {
+      let result: unknown;
+      let error: string | undefined;
+      try {
+        result = await this.functionRegistry.execute(
+          call.functionName!,
+          call.arguments ?? {}
+        );
+      } catch (err) {
+        error = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Client function execution failed:", err);
+      }
+      const submitResult = await this.submitToolCallForm(call.id, {
+        result,
+        error,
+        _type: "client_function_result",
+      });
+      ready = submitResult?.resume?.ready ?? ready;
+    }
+
+    if (!ready) return null;
+    return this.continueMessage(paused.id);
+  }
+
   // ─────────────────────────────────────────────────────────────────
   // Tool Calls
   // ─────────────────────────────────────────────────────────────────
 
   /**
-   * Submit form data for a tool call
+   * Submit form data for a tool call. The response's `resume` field (pause mode
+   * only) tells whether the paused turn is ready to be resumed.
    */
   async submitToolCallForm(
     toolCallId: string,
     formData: Record<string, unknown>
-  ): Promise<void> {
-    await this.httpClient.post(`/api/sdk/v1/tool-calls/${toolCallId}/submit`, {
-      formData,
-    });
+  ): Promise<SubmitToolCallResult> {
+    return this.httpClient.post<SubmitToolCallResult>(
+      `/api/sdk/v1/tool-calls/${toolCallId}/submit`,
+      { formData }
+    );
   }
 
   /**
@@ -1048,6 +1286,8 @@ export class AgoClient {
     this.eventEmitter.removeAllListeners();
     this.functionRegistry.clear();
     this.contextRegistry.clear();
+    this.pendingResumes.clear();
+    this.resumeGate = null;
     logger.log("AgoClient destroyed");
   }
 }

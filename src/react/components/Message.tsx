@@ -227,7 +227,9 @@ export const Message: React.FC<MessageProps> = ({
   onFollowUpClick,
 }) => {
   const isUser = message.role === "user";
-  const isStreaming = message.status === "IN_PROGRESS";
+  // WAITING_CLIENT = paused on client function results mid-turn: still streaming
+  // from the user's point of view (the SDK resumes the same message).
+  const isStreaming = message.status === "IN_PROGRESS" || message.status === "WAITING_CLIENT";
 
   return (
     <div

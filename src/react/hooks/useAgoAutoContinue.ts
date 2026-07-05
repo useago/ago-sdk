@@ -57,12 +57,20 @@ function resolve(options?: AgoAutoContinueOptions): ResolvedOptions {
  * Auto-continue the agent after it navigates, so a "go to page B and change X"
  * request completes in one user gesture. Mount this once inside `AgoProvider`.
  *
- * How it works: when the agent calls the navigation function and that turn ends,
- * this waits for the destination page's `useAgoPageState` to register (so the
- * SDK will ship its `setPageState` + current state on the next send), then sends
- * a hidden continuation message. The agent then applies the state in a second
- * turn. The continuation is `hidden`, so it never shows in the transcript
- * (requires backend support for the `hidden` flag).
+ * Two mechanisms, picked by the turn's client-functions mode:
+ *
+ * - **Pause mode** (`clientFunctionsMode: "pause"`): the backend pauses the turn
+ *   on the navigation call (`message:waiting-client`) and the SDK resumes it once
+ *   the result is submitted. This hook only registers a *resume gate* that delays
+ *   the resume until the destination page's `useAgoPageState` registered (plus a
+ *   settle delay), so the continued turn ships the new page's `setPageState` and
+ *   current state. Same turn, no extra prompt, backend budget as the guardrail —
+ *   `continuationPrompt` and `maxDepth` are unused here.
+ *
+ * - **Placeholder mode** (legacy default): when the agent calls the navigation
+ *   function and that turn ends, this waits for the destination page's state to
+ *   register, then sends a hidden continuation message; the agent applies the
+ *   state in a second turn (requires backend support for the `hidden` flag).
  *
  * ```tsx
  * function AppShell() {
@@ -84,6 +92,7 @@ export function useAgoAutoContinueAfterNavigation(
   useEffect(() => {
     const state = {
       navigated: false, // a navigation function ran in the current turn
+      pausedTurnNavigated: false, // the turn that just paused had navigated (pause mode)
       depth: 0, // continuations sent for the current user gesture
       runId: 0, // cancels stale readiness waits when the user moves on
       ourSendPending: false, // true while our own continuation turn is streaming
@@ -155,6 +164,26 @@ export function useAgoAutoContinueAfterNavigation(
       }
     };
 
+    // Pause mode: the SDK owns the resume (submit → continue); this gate only
+    // delays it until the destination page registered its page state — and only
+    // when the paused turn actually navigated (other client functions must not
+    // pay the readiness wait). Resolves on timeout too: a destination without
+    // editable state should not strand the paused turn.
+    const unregisterGate = client.registerResumeGate(async () => {
+      if (!optsRef.current.enabled) return;
+      if (!state.pausedTurnNavigated) return;
+      state.pausedTurnNavigated = false;
+      await waitForPageState(++state.runId);
+    });
+
+    // The paused stream never fires message:complete, so capture the navigation
+    // flag here for the gate and reset it — otherwise the RESUMED turn's
+    // message:complete would see it and fire a legacy hidden-prompt continuation.
+    const onWaitingClient = () => {
+      state.pausedTurnNavigated = state.navigated;
+      state.navigated = false;
+    };
+
     // A stream starting while we are NOT mid-continuation means the user took a
     // new turn: reset the depth budget and cancel any pending continuation.
     const onStart = () => {
@@ -184,13 +213,16 @@ export function useAgoAutoContinueAfterNavigation(
 
     client.on("function:invoke", onInvoke);
     client.on("message:start", onStart);
+    client.on("message:waiting-client", onWaitingClient);
     client.on("message:complete", onComplete);
     client.on("message:error", onError);
 
     return () => {
       state.runId += 1; // invalidate any in-flight readiness wait
+      unregisterGate();
       client.off("function:invoke", onInvoke);
       client.off("message:start", onStart);
+      client.off("message:waiting-client", onWaitingClient);
       client.off("message:complete", onComplete);
       client.off("message:error", onError);
     };

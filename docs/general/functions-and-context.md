@@ -173,24 +173,35 @@ destination page only registers its `setPageState` (and current state) once it
 mounts, so the agent can't do both in a single turn.
 
 `useAgoAutoContinueAfterNavigation()` closes the gap. Mount it once inside
-`AgoProvider`. When the agent calls the navigation function and that turn ends,
-it waits for the destination page's `useAgoPageState` to register, then sends a
-hidden continuation message so the agent applies the state in a second turn. To
-the user it is one gesture.
+`AgoProvider`:
 
 ```tsx
 function AppShell() {
   useAgoNavigation(navigate, routes);
   useAgoPageState(controls);            // on each pilotable page
   useAgoAutoContinueAfterNavigation();  // once, near the provider
-  return <Outlet />;
 }
 ```
 
-The continuation is sent with `{ hidden: true }`: the backend keeps it in the
-model's context but flags it so the UI never shows it (`useMessages` and
-`ChatWidget` filter hidden messages). This needs backend support for the `hidden`
-flag; without it the mechanism still works but the nudge shows as a message.
+How the gap is bridged depends on the client-functions mode:
+
+- **Pause mode** (recommended, `clientFunctionsMode: "pause"` in the config —
+  needs a backend with pause/resume support): the backend pauses the turn on the
+  navigation call. The SDK submits the function result and resumes the SAME turn
+  via `POST /messages/{id}/continue`; the hook only delays that resume until the
+  destination's `useAgoPageState` registered. No extra prompt, no second turn,
+  and the agent sees the real function results.
+
+- **Placeholder mode** (legacy default): when the navigating turn ends, the hook
+  waits for the destination page to register, then sends a continuation message
+  with `{ hidden: true }` — kept in the model's context, never displayed
+  (`useMessages` and `ChatWidget` filter hidden messages). Without backend
+  support for `hidden` the mechanism still works but the nudge shows as a message.
+
+A paused turn also survives a full page reload: after `getConversation(...)`,
+call `client.resumePendingClientFunctions(conversation)` to re-run the waiting
+functions, submit their results, and resume the turn (opt-in — re-running a
+navigation on reload navigates again).
 
 ### Observe invocations
 

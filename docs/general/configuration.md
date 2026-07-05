@@ -19,6 +19,7 @@ interface AgoConfig {
   userJwt?: string;         // Authorization: Bearer <jwt>, authenticated users
   debug?: boolean;          // enable verbose console logging
   warnOnEmptyReply?: boolean; // default true; see "Empty replies" below
+  clientFunctionsMode?: "placeholder" | "pause"; // default "placeholder"
 }
 ```
 
@@ -32,6 +33,7 @@ interface AgoConfig {
 | `userJwt` | — | `Authorization: Bearer …` | For authenticated sessions. |
 | `debug` | — | — | Turns on the SDK's logger. |
 | `warnOnEmptyReply` | — | — | Default `true`: warn on the console (once per conversation) when a reply completes empty, usually an unknown `agent` slug. The [`message:empty` event](events-and-streaming.md#events) fires regardless. |
+| `clientFunctionsMode` | — | `client_functions_mode` in the body | `"pause"` makes the agent stop on client function call(s) and resume the SAME turn once the results are submitted (the SDK submits and resumes automatically; see the [`message:waiting-client` event](events-and-streaming.md#events)). Default `"placeholder"`: the turn continues on a placeholder and results are only visible on later turns. Needs a backend with pause/resume support; older backends ignore the flag. Per-message override via `sendMessage(..., { clientFunctionsMode })`. |
 
 ---
 

@@ -153,7 +153,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
   const isAnswering =
     isLoading &&
     lastMessage?.role === "assistant" &&
-    lastMessage.status === "IN_PROGRESS";
+    (lastMessage.status === "IN_PROGRESS" || lastMessage.status === "WAITING_CLIENT");
 
   // Default: clicking a suggested reply sends it as a new user message.
   // `onFollowUpClick={false}` disables interactivity; a function overrides it.

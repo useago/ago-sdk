@@ -241,7 +241,10 @@ export function renderMessage(
   const bubbled = isUser || agentBubble || imessage;
 
   // An attachment-only message (files, no text) shows no empty bubble.
-  const hasBubble = !!message.content || message.status === "IN_PROGRESS";
+  const hasBubble =
+    !!message.content ||
+    message.status === "IN_PROGRESS" ||
+    message.status === "WAITING_CLIENT";
 
   // Bubbles run wider on small viewports so long messages don't waste the screen
   // edge on a narrow device. Non-bubbled assistant text is already full width.
@@ -320,7 +323,7 @@ export function renderMessage(
     // GitHub-flavored markdown, rendered by a dependency-free parser that
     // escapes all message text before it reaches the DOM (see renderMarkdown).
     bubble.appendChild(renderMarkdown(message.content));
-  } else if (message.status === "IN_PROGRESS") {
+  } else if (message.status === "IN_PROGRESS" || message.status === "WAITING_CLIENT") {
     bubble.appendChild(buildStreamingDots());
   }
   if (hasBubble) wrap.appendChild(bubble);
