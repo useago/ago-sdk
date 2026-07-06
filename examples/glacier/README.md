@@ -16,7 +16,7 @@ npm install
 npm run dev
 ```
 
-It defaults to a local AGO backend (`http://localhost:55301`, agent `glacier`).
+It defaults to the AGO playground backend (`https://playground.api.useago.com`, agent `glacier`).
 Point `VITE_AGO_BASE_URL` at another domain (e.g. `https://YOUR-DOMAIN.api.useago.com`)
 to use your own agents.
 
