@@ -66,6 +66,32 @@ interface ClientFunctionDefinition {
 > `description`) is what makes the agent call the function correctly. Return a
 > small, structured object; it's fed straight back into the conversation.
 
+### Result size limit
+
+Everything a handler returns goes into the LLM context, so the SDK caps the
+serialized result at 50 KB by default. Over the cap, the agent receives a
+flagged preview instead of the full payload:
+
+```json
+{ "truncated": true, "originalBytes": 412031, "maxBytes": 50000, "preview": "...", "hint": "..." }
+```
+
+A console warning fires at 20 KB (with `debug: true`) so you catch it in dev.
+Tune the cap globally with `maxFunctionResultBytes` on the client config, or
+per function:
+
+```ts
+defineFunction({
+  name: "exportReport",
+  maxResultBytes: 200_000, // this one is allowed to be big (Infinity disables)
+  // ...
+});
+```
+
+If you hit the cap, the fix is usually in the handler: return only the fields
+the agent needs, add `limit`/filter parameters to the schema, or push the data
+to the UI (page state) and return a short summary like `{ displayed: 25, total: 1200 }`.
+
 ### Register a function
 
 ```ts

@@ -1244,6 +1244,32 @@ interface ClientFunctionDefinition {
 > `description`) is what makes the agent call the function correctly. Return a
 > small, structured object; it's fed straight back into the conversation.
 
+### Result size limit
+
+Everything a handler returns goes into the LLM context, so the SDK caps the
+serialized result at 50 KB by default. Over the cap, the agent receives a
+flagged preview instead of the full payload:
+
+```json
+{ "truncated": true, "originalBytes": 412031, "maxBytes": 50000, "preview": "...", "hint": "..." }
+```
+
+A console warning fires at 20 KB (with `debug: true`) so you catch it in dev.
+Tune the cap globally with `maxFunctionResultBytes` on the client config, or
+per function:
+
+```ts
+defineFunction({
+  name: "exportReport",
+  maxResultBytes: 200_000, // this one is allowed to be big (Infinity disables)
+  // ...
+});
+```
+
+If you hit the cap, the fix is usually in the handler: return only the fields
+the agent needs, add `limit`/filter parameters to the schema, or push the data
+to the UI (page state) and return a short summary like `{ displayed: 25, total: 1200 }`.
+
 ### Register a function
 
 ```ts
@@ -1351,24 +1377,35 @@ destination page only registers its `setPageState` (and current state) once it
 mounts, so the agent can't do both in a single turn.
 
 `useAgoAutoContinueAfterNavigation()` closes the gap. Mount it once inside
-`AgoProvider`. When the agent calls the navigation function and that turn ends,
-it waits for the destination page's `useAgoPageState` to register, then sends a
-hidden continuation message so the agent applies the state in a second turn. To
-the user it is one gesture.
+`AgoProvider`:
 
 ```tsx
 function AppShell() {
   useAgoNavigation(navigate, routes);
   useAgoPageState(controls);            // on each pilotable page
   useAgoAutoContinueAfterNavigation();  // once, near the provider
-  return <Outlet />;
 }
 ```
 
-The continuation is sent with `{ hidden: true }`: the backend keeps it in the
-model's context but flags it so the UI never shows it (`useMessages` and
-`ChatWidget` filter hidden messages). This needs backend support for the `hidden`
-flag; without it the mechanism still works but the nudge shows as a message.
+How the gap is bridged depends on the client-functions mode:
+
+- **Pause mode** (recommended, `clientFunctionsMode: "pause"` in the config —
+  needs a backend with pause/resume support): the backend pauses the turn on the
+  navigation call. The SDK submits the function result and resumes the SAME turn
+  via `POST /messages/{id}/continue`; the hook only delays that resume until the
+  destination's `useAgoPageState` registered. No extra prompt, no second turn,
+  and the agent sees the real function results.
+
+- **Placeholder mode** (legacy default): when the navigating turn ends, the hook
+  waits for the destination page to register, then sends a continuation message
+  with `{ hidden: true }` — kept in the model's context, never displayed
+  (`useMessages` and `ChatWidget` filter hidden messages). Without backend
+  support for `hidden` the mechanism still works but the nudge shows as a message.
+
+A paused turn also survives a full page reload: after `getConversation(...)`,
+call `client.resumePendingClientFunctions(conversation)` to re-run the waiting
+functions, submit their results, and resume the turn (opt-in — re-running a
+navigation on reload navigates again).
 
 ### Observe invocations
 
@@ -1541,6 +1578,7 @@ const final = await client.waitFor("message:complete", { timeout: 10_000 });
 | `message:chunk` | `{ content, conversationId, messageId }` |
 | `message:answer-complete` | `AgoMessage`: the main answer text is done, but follow-up replies may still be pending; fires once, before `message:complete` |
 | `message:complete` | `AgoMessage` |
+| `message:waiting-client` | `{ conversationId, messageId, waitingToolCallIds }`: the turn paused on client function call(s) (`clientFunctionsMode: "pause"`). `message:complete` does not fire for the paused stream — it fires when the resumed turn concludes. The SDK submits the results and resumes on its own; listen to this to keep a "working…" indicator up |
 | `message:empty` | `{ conversationId, messageId }`: the reply completed as `DONE` with no content, tool calls, or follow-ups (usually an unknown `agent` slug). Fires after `message:complete` AND after `sendMessage` resolves, so subscribing right after the `await` still catches it. Both ids are `""` when the stream carried no message data at all. See [Empty replies](configuration.md#empty-replies). |
 | `message:error` | `{ error, code?, conversationId?, messageId? }`: `code` is the stable [error code](configuration.md#error-codes) when the failure was an `AgoError` |
 | `conversation:loaded` | `Conversation`: a full conversation was loaded from the server (e.g. after a page reload), with messages and persisted tool calls |
@@ -1682,6 +1720,8 @@ interface AgoConfig {
   userJwt?: string;         // Authorization: Bearer <jwt>, authenticated users
   debug?: boolean;          // enable verbose console logging
   warnOnEmptyReply?: boolean; // default true; see "Empty replies" below
+  clientFunctionsMode?: "placeholder" | "pause"; // default "placeholder"
+  maxFunctionResultBytes?: number; // default 50000; cap on client function results
 }
 ```
 
@@ -1695,6 +1735,8 @@ interface AgoConfig {
 | `userJwt` | — | `Authorization: Bearer …` | For authenticated sessions. |
 | `debug` | — | — | Turns on the SDK's logger. |
 | `warnOnEmptyReply` | — | — | Default `true`: warn on the console (once per conversation) when a reply completes empty, usually an unknown `agent` slug. The [`message:empty` event](events-and-streaming.md#events) fires regardless. |
+| `clientFunctionsMode` | — | `client_functions_mode` in the body | `"pause"` makes the agent stop on client function call(s) and resume the SAME turn once the results are submitted (the SDK submits and resumes automatically; see the [`message:waiting-client` event](events-and-streaming.md#events)). Default `"placeholder"`: the turn continues on a placeholder and results are only visible on later turns. Needs a backend with pause/resume support; older backends ignore the flag. Per-message override via `sendMessage(..., { clientFunctionsMode })`. |
+| `maxFunctionResultBytes` | — | — | Default `50000`. Client function results larger than this (serialized) are replaced with a truncated preview before reaching the LLM. Override per function with `maxResultBytes`; see [result size limit](functions-and-context.md#result-size-limit). |
 
 ---
 

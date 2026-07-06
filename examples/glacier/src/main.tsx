@@ -18,6 +18,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       baseUrl={import.meta.env.VITE_AGO_BASE_URL ?? 'https://playground.api.useago.com'}
       defaultAgentId="glacier"
       clientFunctionsMode="pause"
+      // ?dev mounts the dev panel (see App.tsx) and turns on the SDK logger,
+      // so warnings like the function result-size guard show in the console.
+      debug={new URLSearchParams(window.location.search).has('dev')}
     >
       <BrowserRouter>
         <App />

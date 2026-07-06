@@ -10,6 +10,7 @@ import type {
   AgoStateControl,
   ClientFunctionDefinition,
   ClientFunctionHandler,
+  ClientFunctionRegisterOptions,
   ClientFunctionSchema,
 } from "../functions/types";
 import { ClientContextRegistry } from "../state/ClientContextRegistry";
@@ -158,7 +159,9 @@ export class AgoClient {
     validateConfig(config, "AgoClient");
     this.config = config;
     this.httpClient = new HttpClient(config);
-    this.functionRegistry = new FunctionRegistry();
+    this.functionRegistry = new FunctionRegistry({
+      maxResultBytes: config.maxFunctionResultBytes,
+    });
     this.contextRegistry = new ClientContextRegistry();
     this.eventEmitter = new EventEmitter();
 
@@ -813,12 +816,12 @@ export class AgoClient {
   registerFunction(
     name: string,
     handler: ClientFunctionHandler,
-    schema: Omit<ClientFunctionSchema, "name">
+    schema: ClientFunctionRegisterOptions
   ): void;
   registerFunction(
     nameOrDef: string | ClientFunctionDefinition,
     handler?: ClientFunctionHandler,
-    schema?: Omit<ClientFunctionSchema, "name">
+    schema?: ClientFunctionRegisterOptions
   ): void {
     if (typeof nameOrDef === "object") {
       this.functionRegistry.register(nameOrDef);
@@ -1276,6 +1279,12 @@ export class AgoClient {
       } else {
         logger.disable();
       }
+    }
+
+    if (cleaned.maxFunctionResultBytes !== undefined) {
+      this.functionRegistry.setDefaultMaxResultBytes(
+        cleaned.maxFunctionResultBytes
+      );
     }
   }
 

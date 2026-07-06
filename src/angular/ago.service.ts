@@ -13,7 +13,7 @@ import type {
   AgoStateControl,
   ClientFunctionDefinition,
   ClientFunctionHandler,
-  ClientFunctionSchema,
+  ClientFunctionRegisterOptions,
 } from "../functions/types";
 
 interface Observable<T> {
@@ -129,11 +129,11 @@ export class AgoService {
 
   /** Register a client-side function */
   registerFunction(definition: ClientFunctionDefinition): void;
-  registerFunction(name: string, handler: ClientFunctionHandler, schema: Omit<ClientFunctionSchema, "name">): void;
+  registerFunction(name: string, handler: ClientFunctionHandler, schema: ClientFunctionRegisterOptions): void;
   registerFunction(
     nameOrDef: string | ClientFunctionDefinition,
     handler?: ClientFunctionHandler,
-    schema?: Omit<ClientFunctionSchema, "name">
+    schema?: ClientFunctionRegisterOptions
   ): void {
     if (typeof nameOrDef === "object") {
       this.client.registerFunction(nameOrDef);

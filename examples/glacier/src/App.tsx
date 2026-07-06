@@ -19,6 +19,7 @@ import {
   computeCartTotal,
   computePrice,
   OrderStore,
+  lookupWikipediaArticle,
 } from './functions';
 import { CONES, FLAVORS, TOPPINGS } from './flavors';
 import { IngredientsContent } from './IngredientsPage';
@@ -155,6 +156,9 @@ export default function App() {
   useAgoFunction(fns.updateCart.name, fns.updateCart);
   useAgoFunction(fns.getState.name, fns.getState);
   useAgoFunction(fns.placeOrder.name, fns.placeOrder);
+  // Démo du garde-fou maxFunctionResultBytes : renvoie la réponse brute (et
+  // volumineuse) d'une API publique, que le SDK tronque avant l'envoi au LLM.
+  useAgoFunction(lookupWikipediaArticle.name, lookupWikipediaArticle);
 
   useAgoNavigation(navigate, [...Object.values(ROUTES), ORIGIN_DETAIL_ROUTE]);
 

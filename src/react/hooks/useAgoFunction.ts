@@ -24,6 +24,12 @@ export interface UseAgoFunctionOptions {
     required?: string[];
   };
   handler: ClientFunctionHandler;
+  /**
+   * Max serialized result size in bytes before the SDK truncates it to a
+   * flagged preview (default: `AgoConfig.maxFunctionResultBytes`, 50 000).
+   * `Infinity` disables the guard for this function.
+   */
+  maxResultBytes?: number;
 }
 
 /**
@@ -60,7 +66,7 @@ export function useAgoFunction(
 ): void {
   const client = useAgoClient();
 
-  const { name, description, parameters, handler } =
+  const { name, description, parameters, handler, maxResultBytes } =
     typeof nameOrDef === "string"
       ? { name: nameOrDef, ...(options as UseAgoFunctionOptions) }
       : nameOrDef;
@@ -75,12 +81,13 @@ export function useAgoFunction(
     client.registerFunction(name, stableHandler, {
       description,
       parameters,
+      maxResultBytes,
     });
 
     return () => {
       client.unregisterFunction(name);
     };
-  }, [client, name, description, parameters]);
+  }, [client, name, description, parameters, maxResultBytes]);
 }
 
 export interface AgoRoute {

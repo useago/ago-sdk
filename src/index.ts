@@ -67,6 +67,7 @@ export type {
   AgoStateControl,
   ClientFunctionDefinition,
   ClientFunctionHandler,
+  ClientFunctionRegisterOptions,
   ClientFunctionSchema,
   RegisteredFunction,
 } from "./functions/types";

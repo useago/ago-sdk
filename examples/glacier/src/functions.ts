@@ -228,3 +228,35 @@ export function computeCartTotal(items: IceCreamState[]): number {
   const total = items.reduce((sum, item) => sum + computePrice(item), 0);
   return Math.round(total * 100) / 100;
 }
+
+// Calls a public API (Wikipedia) and deliberately returns the RAW response,
+// 100 KB to several hundred KB of article HTML, to exercise the SDK's
+// result-size guard (`maxFunctionResultBytes`). The agent receives a truncated
+// preview plus a hint instead of the full payload; the console (with
+// `debug: true`) and the dev panel show the warning. A real integration would
+// fetch the summary endpoint or extract the relevant sections in the handler.
+export const lookupWikipediaArticle = defineFunction({
+  name: 'lookupWikipediaArticle',
+  description:
+    "Fetch the full French Wikipedia article on a topic, for encyclopedic background on our ingredients and their origins (e.g. 'Crème glacée', 'Vanille', 'Pistache', 'Sorbet'). Returns the complete article.",
+  parameters: {
+    type: 'object',
+    properties: {
+      title: {
+        type: 'string',
+        description: "Exact article title on fr.wikipedia.org, e.g. 'Crème glacée' or 'Vanille'",
+      },
+    },
+    required: ['title'],
+  },
+  handler: async (args: Record<string, unknown>) => {
+    const title = String(args.title);
+    const res = await fetch(
+      `https://fr.wikipedia.org/api/rest_v1/page/html/${encodeURIComponent(title)}`,
+    );
+    if (!res.ok) {
+      return { ok: false, error: `Wikipedia returned HTTP ${res.status} for "${title}"` };
+    }
+    return { title, html: await res.text() };
+  },
+});

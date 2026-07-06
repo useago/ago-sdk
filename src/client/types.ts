@@ -37,6 +37,14 @@ export interface AgoConfig {
    * Older backends ignore the flag, so `"pause"` degrades to legacy behavior.
    */
   clientFunctionsMode?: ClientFunctionsMode;
+  /**
+   * Max serialized size (bytes) of a client function result before the SDK
+   * replaces it with a flagged, truncated preview. Everything a handler
+   * returns is sent into the LLM context, so this caps runaway payloads
+   * (raw API responses, full tables). Default `50000`. Override per function
+   * with `maxResultBytes` on its definition; `Infinity` disables the guard.
+   */
+  maxFunctionResultBytes?: number;
 }
 
 /** See {@link AgoConfig.clientFunctionsMode}. */
