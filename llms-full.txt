@@ -1,0 +1,1868 @@
+# AGO SDK (@useago/sdk) — coding-agent guide
+
+Single-file guide for a coding agent (Cursor, Claude Code, Copilot, Windsurf, ...)
+integrating AGO chat into an app. It has two parts:
+
+1. SKILLS — one self-contained section per stack. Jump to the one that matches
+   the project, follow it exactly. Each is everything you need to wire AGO in.
+2. CONCEPTS — cross-cutting reference (functions/context, events/streaming,
+   configuration) to understand what the skills do.
+
+Pick your stack:
+- Embeddable <script> widget, no build step -> "AGO SDK skill: Widget"
+- Plain JavaScript / TypeScript          -> "AGO SDK skill: Vanilla"
+- React                                   -> "AGO SDK skill: React"
+- Vue 3                                   -> "AGO SDK skill: Vue"
+- Angular                                 -> "AGO SDK skill: Angular"
+
+Runnable snippets hit the live demo (baseUrl https://playground.api.useago.com,
+agent generic-guide) so they work with zero setup. For a real tenant, swap in
+https://YOUR-DOMAIN.api.useago.com and your own agent slug, and read baseUrl from
+an env var (never hardcode a tenant URL).
+
+Source: https://github.com/useago/ago-sdk
+
+---
+
+# SKILLS
+
+---
+
+<!-- source: docs/agents/ago-widget.md -->
+
+# AGO SDK skill: embeddable `<script>` widget
+
+You are adding the AGO chat widget to a website with a `<script>` tag. No build
+step and no npm install. This is the right approach for a marketing site, a CMS
+(WordPress, Webflow), or any server-rendered page where you don't control a JS
+bundle. For a React/Vue/Angular app, use the framework binding instead. This file
+is everything you need. Follow it exactly.
+
+## Endpoint
+
+Set `basepath` to the project's AGO instance, `https://YOUR-DOMAIN.api.useago.com`.
+Grab the widget API key and the recommended `integrity` hash from the AGO
+dashboard, and add the embedding domain to the dashboard's allowed-domains list.
+
+## 1. Add the widget script
+
+Configure `window.AGO` BEFORE loading the script, and place both tags just before
+the closing `</body>` tag (not in `<head>`).
+
+```html
+<script>
+  window.AGO = {
+    basepath: "https://YOUR-DOMAIN.api.useago.com",
+    widgetApiKey: "YOUR-WIDGET-API-KEY",
+    defaultAgent: "support-bot",
+    title: "Support",
+    prompt: "Hi! How can I help?",
+  };
+</script>
+<script
+  async
+  src="https://useago.github.io/widgetjs/frame.js"
+  crossorigin="anonymous"
+></script>
+```
+
+A floating chat bubble appears in the bottom-right corner. The panel itself is an
+iframe, so it cannot leak styles into the host page.
+
+## 2. Customize appearance
+
+```html
+<script>
+  window.AGO = {
+    basepath: "https://YOUR-DOMAIN.api.useago.com",
+    widgetApiKey: "YOUR-WIDGET-API-KEY",
+    title: "Support",
+    icon: "https://example.com/logo.svg",
+    colors: {
+      button: "#4F46E5",
+      header: "#4F46E5",
+      userMessage: "#4F46E5",
+      userMessageFont: "#FFFFFF",
+    },
+  };
+</script>
+```
+
+## 3. Identify the user (optional)
+
+```html
+<script>
+  window.AGO = {
+    basepath: "https://YOUR-DOMAIN.api.useago.com",
+    widgetApiKey: "YOUR-WIDGET-API-KEY",
+    email: "user@example.com",
+    jwt: "jwt-token-here",
+    metadata: { plan: "pro", company: "Acme Inc" },
+  };
+</script>
+```
+
+## 4. Framework-specific placement
+
+**Next.js (App Router)**, in `app/layout.tsx`:
+
+```tsx
+export default function RootLayout({ children }) {
+  return (
+    <html>
+      <body>
+        {children}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `window.AGO = { basepath: "${process.env.NEXT_PUBLIC_AGO_BASE_URL}", widgetApiKey: "${process.env.NEXT_PUBLIC_AGO_WIDGET_KEY}" };`,
+          }}
+        />
+        <script async src="https://useago.github.io/widgetjs/frame.js" crossOrigin="anonymous" />
+      </body>
+    </html>
+  );
+}
+```
+
+**WordPress**: add both tags via the theme's `footer.php` or a "Custom HTML"
+widget placed in a footer area.
+
+**Webflow**: Project Settings > Custom Code > Footer Code.
+
+## 5. Type the config (TypeScript projects)
+
+The SDK ships the types and augments the global `Window`, so `window.AGO` is typed
+anywhere this import is in scope:
+
+```ts
+import type { AgoWidgetConfig } from "@useago/sdk/widget";
+
+const config: AgoWidgetConfig = {
+  basepath: "https://YOUR-DOMAIN.api.useago.com",
+  widgetApiKey: "YOUR-WIDGET-API-KEY",
+  defaultAgent: "support-bot",
+};
+window.AGO = config;
+```
+
+## `AgoWidgetConfig` reference
+
+| Field            | Type    | Description |
+| ---------------- | ------- | ----------- |
+| `basepath`       | string  | AGO instance URL (required) |
+| `widgetApiKey`   | string  | Widget API key from the dashboard (required) |
+| `defaultAgent?`  | string  | Agent id/slug to start conversations with |
+| `email?`         | string  | Identify the end user |
+| `title?`         | string  | Header title |
+| `icon?`          | string  | Launcher/header icon URL |
+| `prompt?`        | string  | Greeting / opening message |
+| `notifications?` | boolean | Enable a proactive notification bubble |
+| `colors?`        | object  | `button`, `header`, `agentMessage`, `background`, `font`, `userMessage`, ... |
+| `hideFooter?`    | boolean | Hide the "powered by" footer |
+| `jwt?`           | string  | Authenticated-session token |
+| `metadata?`      | object  | Arbitrary key-value pairs sent with the session |
+
+## When to use `mountChatWidget` instead
+
+If the project is a pure TS/JS app where you DO control the DOM (but use no
+framework), prefer `mountChatWidget` from `@useago/sdk/widget`: it renders an
+inline panel instead of a floating iframe and supports conversational forms. See
+the plain JS/TS skill for that.
+
+## Checklist before you finish
+
+1. The `window.AGO` config script comes BEFORE the `frame.js` script.
+2. Both tags are just before `</body>`, not in `<head>`.
+3. `basepath` and `widgetApiKey` are set.
+4. The embedding domain is on the dashboard's allowed-domains list.
+5. Reload the page and confirm the chat bubble appears bottom-right; check the
+   browser console for errors if it doesn't.
+
+---
+
+<!-- source: docs/agents/ago-vanilla.md -->
+
+# AGO SDK skill: plain JavaScript / TypeScript
+
+You are integrating the AGO SDK (`@useago/sdk`) into a plain JS/TS app (no React,
+Vue, or Angular), a Node service, or a web component. AGO is a chat agent that can
+answer questions, run functions in the user's browser, and navigate your app. The
+core `AgoClient` documented here is what every framework binding wraps. This file
+is everything you need. Follow it exactly.
+
+## Endpoints
+
+Use the live demo for anything runnable so it answers with zero setup:
+
+```
+baseUrl: https://playground.api.useago.com
+agent:   generic-guide
+```
+
+When the project has its own tenant, swap to `https://YOUR-DOMAIN.api.useago.com`
+and the project's own agent slug. Read `baseUrl` from an env var, never hardcode a
+real tenant URL.
+
+## Install
+
+```bash
+npm install @useago/sdk
+```
+
+## 1. Create a client
+
+```ts
+import { AgoClient } from "@useago/sdk";
+
+const ago = new AgoClient({
+  baseUrl: "https://playground.api.useago.com", // required
+  agent: "generic-guide",                        // optional default agent
+  userEmail: "jane@acme.com",                    // optional end-user identity
+  debug: true,                                   // optional verbose logging
+});
+```
+
+If the page already exposes config (a `window.AGO` object, `<meta name="ago-base-url">`
+tags, or `data-ago-*` attributes), let the SDK find it with `createAgo()` (throws
+if it can't resolve a `baseUrl`).
+
+## 2. Send a message and stream the reply
+
+`sendMessage` resolves with the final assistant message, but the text arrives
+incrementally through events. Subscribe BEFORE you send.
+
+```ts
+const outputEl = document.getElementById("output");
+
+ago.on("message:start", ({ messageId }) => console.log("New message", messageId));
+ago.on("message:chunk", ({ content }) => { outputEl.textContent += content; }); // token-by-token
+ago.on("message:complete", (message) => console.log("sources:", message.sources));
+ago.on("message:error", ({ error }) => console.error(error));
+
+const reply = await ago.sendMessage("How do I reset my password?");
+```
+
+Continue a conversation by reusing `conversationId`:
+
+```ts
+const first = await ago.sendMessage("Hi");
+await ago.sendMessage("Tell me more", { conversationId: first.conversationId });
+```
+
+Attach files (`File[]`, sent as multipart) and override the agent per message:
+
+```ts
+await ago.sendMessage("Summarise this", { files: [fileInput.files[0]], conversationId });
+await ago.sendMessage("Escalate this", { agentId: "human-handoff" });
+```
+
+## 3. Conversations
+
+```ts
+const conversations = await ago.getConversations();          // [{ id, title, lastMessageDate }]
+const thread = await ago.getConversation(conversations[0].id); // includes messages
+const messages = await ago.getMessages(conversations[0].id);
+```
+
+## 4. Let the agent run code in the browser
+
+```ts
+ago.registerFunction({
+  name: "lookupOrder",
+  description: "Look up an order by its ID",
+  parameters: {
+    type: "object",
+    properties: { id: { type: "string", description: "Order ID" } },
+    required: ["id"],
+  },
+  handler: async (args) => fetchOrder(args.id as string),
+});
+```
+
+Rules for functions:
+- Every parameter property needs a `description`. The agent reads it to decide
+  what to pass.
+- `required` lists only the params the function truly needs.
+- The handler must return serializable data (no DOM nodes, no circular refs).
+
+Navigation is a built-in convenience:
+
+```ts
+ago.registerNavigationFunction((path) => (window.location.href = path), [
+  { name: "pricing", path: "/pricing", description: "Pricing page" },
+  { name: "docs", path: "/docs", description: "Documentation" },
+]);
+```
+
+Page state is the mirror: let the agent change the current page's state
+(filters, sort, view mode…) and read it back via each control's `get()`. One
+synthesized `setPageState` function, one optional property per control.
+
+```ts
+ago.registerPageStateFunction([
+  {
+    name: "statusFilter",
+    description: "Filter the list by status",
+    schema: { type: "string", enum: ["all", "paid", "overdue"] },
+    get: () => filters.status,
+    set: (v) => { filters.status = v as string; },
+  },
+]);
+```
+
+## 5. Give the agent context
+
+```ts
+ago.setContext("order-page", {
+  name: "Order detail",
+  description: "User is viewing an order",
+  data: { orderId: "123", status: "shipped" },
+});
+
+// Re-evaluated on every send, great for live state:
+ago.addDynamicContext("cart", () => ({ name: "Cart", data: { itemCount: cart.length } }));
+
+// Attach the current URL + page title:
+ago.enableAutoPageContext();
+```
+
+Hold shared state both the agent's functions and your UI mutate with
+`createStore` (a tiny `get` / `set` / `subscribe` holder):
+
+```ts
+import { createStore } from "@useago/sdk";
+
+const store = createStore({ items: [] as string[] });
+store.subscribe((state) => render(state));
+ago.addDynamicContext("cart", () => ({ name: "Cart", data: store.get() }));
+store.set({ items: [...store.get().items, "SKU-1"] });
+```
+
+Pass `{ key: "cart" }` as a second arg to persist across reloads (localStorage by
+default; pass `storage: sessionStorage` to swap).
+
+## 6. Drop-in chat panel: `mountChatWidget`
+
+A complete chat panel (header, streaming messages, input) you mount into any DOM
+element, no framework. Supports conversational forms and clickable suggested
+replies, same as the React `<ChatWidget>`.
+
+```ts
+import { mountChatWidget } from "@useago/sdk/widget";
+
+const widget = mountChatWidget("#chat", {
+  config: { baseUrl: "https://playground.api.useago.com", agent: "generic-guide" },
+  title: "Ask me anything",
+  welcomeMessage: "Hi! How can I help?",
+});
+
+widget.sendMessage("Hello");
+widget.destroy(); // removes listeners, uninstalls forms, clears the DOM
+```
+
+Set `placement: "left"` or `"right"` for a fixed full-height side panel with a
+launcher button. Set `persistConversation: true` to resume the visitor's last
+thread across reloads. Theme it with the `theme` option or `--ago-*` CSS variables
+on `.ago-chat-widget`. Message text renders as GitHub-flavored markdown and is
+HTML-escaped before it touches the DOM.
+
+For a fully custom UI, build from `sendMessage` + the `message:chunk` event (see
+section 2); `renderMarkdown(source)` is exported if you want the same markdown
+rendering.
+
+## 7. Tool calls, feedback, lifecycle
+
+```ts
+await ago.submitToolCallForm(toolCallId, { quantity: 3 });
+await ago.confirmToolCall(toolCallId);
+await ago.rejectToolCall(toolCallId);
+await ago.submitFeedback(messageId, "positive");
+ago.updateConfig({ userJwt: token });   // e.g. after login
+ago.destroy();                           // clean up listeners, functions, context
+```
+
+## Key events
+
+`message:start`, `message:chunk` (`{ content }` per token), `message:complete`
+(`AgoMessage`), `message:error`, `conversation:loaded`, `context:changed`,
+`toolCall:received`, `function:invoke`, `function:result`, `connection:status`.
+Use `on` / `off` / `once`, or `await ago.waitFor("message:complete", { timeout })`.
+
+## Key types
+
+```ts
+interface AgoMessage {
+  id: string;
+  conversationId: string;
+  content: string;
+  role: "user" | "assistant";
+  status: "IN_PROGRESS" | "DONE" | "ERROR" | "TODO" | "CANCELED";
+  sources?: AgoSource[];          // knowledge-base citations { id, title, url? }
+  toolCalls?: ToolCallData[];
+  followUpReplies?: string[];     // suggested next questions
+  createdAt: Date;
+}
+```
+
+All types are exported from `@useago/sdk`.
+
+## Checklist before you finish
+
+1. Event subscriptions are added BEFORE the first `sendMessage`.
+2. `baseUrl` comes from an env var, not a hardcoded tenant URL.
+3. Every registered function's parameters have descriptions and the handler
+   returns serializable data.
+4. `ago.destroy()` runs when the client is no longer needed.
+5. Run the project's typecheck and lint.
+
+---
+
+<!-- source: docs/agents/ago-react.md -->
+
+# AGO SDK skill: React
+
+You are integrating the AGO SDK (`@useago/sdk`) into a React app. AGO is a chat
+agent that can answer questions, run functions in the user's browser, and
+navigate your app's routes. This file is everything you need. Follow it exactly.
+
+## Endpoints
+
+Use the live demo for anything runnable so it answers with zero setup:
+
+```
+baseUrl: https://playground.api.useago.com
+agent:   generic-guide
+```
+
+When the project has its own tenant, swap to `https://YOUR-DOMAIN.api.useago.com`
+and the project's own agent slug. Read `baseUrl` from an env var, never hardcode a
+real tenant URL. React `>=17` is an optional peer dependency of the SDK; the app
+already provides it.
+
+## Install
+
+```bash
+npm install @useago/sdk
+```
+
+## 1. Wrap the app in `<AgoProvider>`
+
+The provider creates one `AgoClient` and shares it with every hook and component.
+
+```tsx
+import { AgoProvider } from "@useago/sdk/react";
+
+function Root() {
+  return (
+    <AgoProvider baseUrl="https://playground.api.useago.com" agent="generic-guide">
+      <App />
+    </AgoProvider>
+  );
+}
+```
+
+It can also wire app-wide tools, pre-built helpers, and page context:
+
+```tsx
+<AgoProvider
+  baseUrl={import.meta.env.VITE_AGO_BASE_URL}
+  tools={[lookupOrder, cancelOrder]}        // registered app-wide
+  helpers={{ copyToClipboard: true, showToast: (a) => toast(a.message) }}
+  pageContext="auto"                         // auto-capture URL + title
+>
+  <App />
+</AgoProvider>
+```
+
+Pass `client={myClient}` to bring your own client (handy in tests).
+
+## 2. Fastest UI: `<ChatWidget>`
+
+A complete, styled chat panel. Drop it anywhere under the provider.
+
+```tsx
+import { ChatWidget } from "@useago/sdk/react";
+
+function Support() {
+  return (
+    <ChatWidget
+      title="Support"
+      welcomeMessage="Hi! How can I help?"
+      placeholder="Ask anything..."
+      height={600}
+      allowFiles
+    />
+  );
+}
+```
+
+Common props: `title`, `welcomeMessage`, `placeholder`, `allowFiles`, `height`,
+`logoUrl`, `showAgentName`, `forms`, `onMessageSent`, `onMessageReceived`,
+`onFollowUpClick`, `className`. When the agent returns follow-up suggestions the
+widget renders them as clickable buttons (clicking sends the reply by default).
+
+`ChatWidget` is a high-level component. For a custom interface, use `useChat`.
+
+## 3. Custom UI with `useChat`
+
+All-in-one state for a custom chat interface (composes `useMessages` +
+`useConversation`).
+
+```tsx
+import { useChat } from "@useago/sdk/react";
+
+function Chat() {
+  const { messages, sendMessage, isLoading, error } = useChat();
+
+  return (
+    <div>
+      {messages.map((m) => (
+        <p key={m.id}><b>{m.role}:</b> {m.content}</p>
+      ))}
+      <button onClick={() => sendMessage("Hello!")} disabled={isLoading}>Send</button>
+      {error && <p role="alert">{error.message}</p>}
+    </div>
+  );
+}
+```
+
+`messages` updates token-by-token as the reply streams (the optimistic user
+message is included). `sendMessage(content, files?)` resolves with the final
+message or `null` on error.
+
+Show the knowledge sources the agent retrieved via `m.sources` (an `AgoSource[]`,
+each `{ id, title, url? }`):
+
+```tsx
+{m.sources?.map((s) => (
+  <a key={s.id} href={s.url} target="_blank" rel="noreferrer">{s.title || s.url}</a>
+))}
+```
+
+Finer-grained hooks: `useMessages({ conversationId? })`,
+`useConversation({ autoLoad? })`. All hooks read the client from context; pass
+`{ client }` to override. Get the raw client with `useAgoClient()` (throws
+outside a provider) or `useOptionalAgoClient()`.
+
+## 4. Let the agent call your code: `useAgoFunction`
+
+Registers a client-side function on mount, cleans it up on unmount.
+
+```tsx
+import { useAgoFunction } from "@useago/sdk/react";
+
+useAgoFunction({
+  name: "lookupOrder",
+  description: "Look up an order by ID",
+  parameters: {
+    type: "object",
+    properties: { id: { type: "string", description: "Order ID" } },
+    required: ["id"],
+  },
+  handler: async (args) => fetchOrder(args.id as string),
+});
+```
+
+Rules for functions:
+- Every parameter property needs a `description`. The agent reads it to decide
+  what to pass.
+- `required` lists only the params the function truly needs.
+- The handler must return serializable data (no DOM nodes, no circular refs).
+
+Reuse a definition made with `defineFunction` from `@useago/sdk`:
+
+```tsx
+const lookupOrder = defineFunction({ name: "lookupOrder", /* ... */ });
+useAgoFunction(lookupOrder);
+```
+
+## 5. Let the agent navigate: `useAgoNavigation`
+
+Wire AGO into your router. The agent calls your `navigate`, so guards, auth
+redirects, and lazy loading keep working.
+
+Define each route once. React Router's `<Route>` has no `description` prop, so
+keep one route table and read both the router and `useAgoNavigation` off it
+instead of duplicating paths.
+
+```tsx
+import { Routes, Route, useNavigate } from "react-router-dom";
+import { useAgoNavigation } from "@useago/sdk/react";
+
+const ROUTES = {
+  dashboard: { name: "dashboard", path: "/dashboard", description: "KPIs and recent activity" },
+  invoices: { name: "invoices", path: "/invoices", description: "List and download invoices" },
+} as const;
+
+function AppShell() {
+  const navigate = useNavigate();
+  useAgoNavigation(navigate, Object.values(ROUTES)); // agent reads paths + descriptions
+
+  return (
+    <Routes>
+      <Route path={ROUTES.dashboard.path} element={<Dashboard />} />
+      <Route path={ROUTES.invoices.path} element={<Invoices />} />
+    </Routes>
+  );
+}
+```
+
+The `description` is what the agent reads to pick a page. Write it like you'd
+explain the page to a colleague. A `/invoices/:id` detail page can be registered
+as-is: `:id` becomes a top-level `id` argument of `navigateToPage`, so one
+route covers every record.
+
+## 5b. Let the agent change the page: `useAgoPageState`
+
+The mirror of navigation. Let the agent change the current page's state
+(filters, sort, view mode…) and read it back. Each control becomes one optional
+property of a single synthesized `setPageState` function, and every control's
+`get()` value is sent as context so the agent knows the state before changing it.
+
+```tsx
+import { useAgoPageState } from "@useago/sdk/react";
+
+const [status, setStatus] = useState("all");
+useAgoPageState([
+  {
+    name: "statusFilter",
+    description: "Filter the list by invoice status",
+    schema: { type: "string", enum: ["all", "paid", "overdue"] },
+    get: () => status,
+    set: setStatus,
+  },
+]);
+```
+
+## 6. Give the agent context: `useAgoContext`
+
+Expose what the user is looking at, sent with every message.
+
+```tsx
+// Static, captured from props/state
+useAgoContext({
+  name: "Order detail",
+  description: "The user is viewing a specific order",
+  data: { orderId: order.id, status: order.status },
+});
+
+// Dynamic, re-evaluated on every send (fresh data from a store)
+useAgoContext(() => ({ name: "App shell", data: { userId: store.getState().auth.userId } }));
+```
+
+## 7. Reactive external state: `useAgoStore`
+
+If shared state lives in a core `createStore`, `useAgoStore` reads it reactively
+(re-renders on every `store.set`). It is SSR-safe.
+
+```tsx
+import { createStore } from "@useago/sdk";
+import { useAgoStore } from "@useago/sdk/react";
+
+const cart = createStore({ items: [] as string[] });
+
+function CartBadge() {
+  const { items } = useAgoStore(cart);
+  return <span>{items.length}</span>;
+}
+```
+
+## 8. Events
+
+Use the client from `useAgoClient()` with `on` / `off` in an effect:
+
+```tsx
+useEffect(() => {
+  const handler = (m) => toast(`AGO: ${m.content}`);
+  client.on("message:complete", handler);
+  return () => client.off("message:complete", handler);
+}, [client]);
+```
+
+Key events: `message:start`, `message:chunk` (`{ content }` per token),
+`message:complete` (`AgoMessage`), `message:error`, `toolCall:received`,
+`function:invoke`, `function:result`.
+
+## Exports cheat-sheet (`@useago/sdk/react`)
+
+- Provider/context: `AgoProvider`, `useAgoClient`, `useOptionalAgoClient`
+- Hooks: `useAgo`, `useChat`, `useMessages`, `useConversation`, `useAgoFunction`,
+  `useAgoNavigation`, `useAgoPageState`, `useAgoContext`, `useAgoStore`, `useFormCollector`
+- Components: `ChatWidget`, `Message`, `ChatInput`, `Markdown`
+- Forms: `createFormCollector`
+- Testing: `createMockClient`
+- Types: `AgoConfig`, `AgoMessage`, `Conversation`, `AgoAgent`, `AgoSource`,
+  `ToolCallData` (import `AgoAttachment` from `@useago/sdk`, not the `/react` subpath)
+
+## Checklist before you finish
+
+1. `AgoProvider` wraps the component tree.
+2. `baseUrl` comes from an env var, not a hardcoded tenant URL.
+3. Every registered function's parameters have descriptions and the handler
+   returns serializable data.
+4. Run `npm run typecheck` and `npm run lint` (or the project's equivalents).
+
+---
+
+<!-- source: docs/agents/ago-vue.md -->
+
+# AGO SDK skill: Vue 3
+
+You are integrating the AGO SDK (`@useago/sdk`) into a Vue 3 app. AGO is a chat
+agent that can answer questions, run functions in the user's browser, and
+navigate your app's routes. This file is everything you need. Follow it exactly.
+
+## Endpoints
+
+Use the live demo for anything runnable so it answers with zero setup:
+
+```
+baseUrl: https://playground.api.useago.com
+agent:   generic-guide
+```
+
+When the project has its own tenant, swap to `https://YOUR-DOMAIN.api.useago.com`
+and the project's own agent slug. Read `baseUrl` from an env var, never hardcode a
+real tenant URL. Vue `>=3.3` is an optional peer dependency. Composables use the
+Composition API and must be called from `setup` / `<script setup>`.
+
+## Install
+
+```bash
+npm install @useago/sdk
+```
+
+## 1. Install the plugin
+
+`AgoPlugin` creates one `AgoClient` and provides it to the whole app.
+
+```ts
+import { createApp } from "vue";
+import { AgoPlugin } from "@useago/sdk/vue";
+import App from "./App.vue";
+
+createApp(App)
+  .use(AgoPlugin, {
+    baseUrl: "https://playground.api.useago.com",
+    agent: "generic-guide",
+  })
+  .mount("#app");
+```
+
+Prefer no plugin? Every composable accepts an explicit client, or create one
+standalone with `useAgo`:
+
+```ts
+import { useAgo } from "@useago/sdk/vue";
+
+const client = useAgo();                              // from plugin
+const standalone = useAgo({ baseUrl: "https://..." }); // no plugin needed
+```
+
+There is no polished `<ChatWidget>` component in Vue (it is React-only). Build the
+UI from `useChat`; it is a handful of lines, shown below.
+
+## 2. Build a chat with `useChat`
+
+All-in-one reactive state (messages + conversations). Everything returned is a
+`ref`/`computed`, so it stays reactive. `messages` updates token-by-token.
+
+```vue
+<script setup lang="ts">
+import { ref } from "vue";
+import { useChat } from "@useago/sdk/vue";
+
+const { messages, sendMessage, isLoading, error } = useChat();
+const draft = ref("");
+
+async function onSend() {
+  if (!draft.value.trim()) return;
+  const text = draft.value;
+  draft.value = "";
+  await sendMessage(text);
+}
+</script>
+
+<template>
+  <div v-for="m in messages" :key="m.id">
+    <b>{{ m.role }}:</b> {{ m.content }}
+  </div>
+  <form @submit.prevent="onSend">
+    <input v-model="draft" :disabled="isLoading" placeholder="Ask anything..." />
+    <button :disabled="isLoading">Send</button>
+  </form>
+  <p v-if="error" role="alert">{{ error.message }}</p>
+</template>
+```
+
+Each assistant message carries the knowledge sources it used in `m.sources` (an
+`AgoSource[]`, each `{ id, title, url? }`). Render them as links.
+
+Finer-grained composables: `useMessages({ conversationId? })`,
+`useConversation({ autoLoad? })`. Each accepts `{ client }` to override the
+injected client.
+
+## 3. Let the agent call your code: `useAgoFunction`
+
+Registers on mount, unregisters on unmount.
+
+```vue
+<script setup lang="ts">
+import { useAgoFunction } from "@useago/sdk/vue";
+
+useAgoFunction("lookupOrder", {
+  description: "Look up an order by ID",
+  parameters: {
+    type: "object",
+    properties: { id: { type: "string", description: "Order ID" } },
+    required: ["id"],
+  },
+  handler: async (args) => fetchOrder(args.id as string),
+});
+</script>
+```
+
+Rules for functions:
+- Every parameter property needs a `description`. The agent reads it to decide
+  what to pass.
+- `required` lists only the params the function truly needs.
+- The handler must return serializable data (no DOM nodes, no circular refs).
+
+## 4. Let the agent navigate: `useAgoNavigation`
+
+Works with `vue-router`.
+
+```vue
+<script setup lang="ts">
+import { useRouter } from "vue-router";
+import { useAgoNavigation } from "@useago/sdk/vue";
+
+const router = useRouter();
+useAgoNavigation((path) => router.push(path), [
+  { name: "dashboard", path: "/dashboard", description: "Main dashboard" },
+  { name: "settings", path: "/settings", description: "User settings" },
+]);
+</script>
+```
+
+The `description` is what the agent reads to pick a page. Write it like you'd
+explain the page to a colleague.
+
+## 4b. Let the agent change the page: `useAgoPageState`
+
+The mirror of navigation. Let the agent change the current page's state
+(filters, sort, view mode…) and read it back. Each control becomes one optional
+property of a single synthesized `setPageState` function, and every control's
+`get()` value is sent as context.
+
+```vue
+<script setup lang="ts">
+import { ref } from "vue";
+import { useAgoPageState } from "@useago/sdk/vue";
+
+const status = ref("all");
+useAgoPageState([
+  {
+    name: "statusFilter",
+    description: "Filter the list by status",
+    schema: { type: "string", enum: ["all", "paid", "overdue"] },
+    get: () => status.value,
+    set: (v) => { status.value = v as string; },
+  },
+]);
+</script>
+```
+
+## 5. Subscribe to events: `useAgoEvents`
+
+Auto-cleans up on unmount.
+
+```vue
+<script setup lang="ts">
+import { useAgoEvents } from "@useago/sdk/vue";
+
+useAgoEvents("message:complete", (msg) => console.log("Got reply:", msg.content));
+</script>
+```
+
+Key events: `message:start`, `message:chunk` (`{ content }` per token),
+`message:complete` (`AgoMessage`), `message:error`.
+
+## 6. Client context
+
+There is no dedicated Vue composable for context. Use the core client API, which
+is reactive-friendly:
+
+```vue
+<script setup lang="ts">
+import { onMounted, onUnmounted } from "vue";
+import { useAgo } from "@useago/sdk/vue";
+
+const client = useAgo();
+
+onMounted(() => {
+  // Re-evaluated on every send, so it always reflects current state
+  client.addDynamicContext("cart", () => ({ name: "Cart", data: { itemCount: cart.value.length } }));
+});
+onUnmounted(() => client.removeDynamicContext("cart"));
+</script>
+```
+
+For a static snapshot use `client.setContext(key, entry)`. Attach the current URL
++ title with `client.enableAutoPageContext()`.
+
+## 7. Reactive external state: `useAgoStore`
+
+Hold shared state in a core `createStore` and expose it as a reactive ref.
+
+```vue
+<script setup lang="ts">
+import { createStore } from "@useago/sdk";
+import { useAgoStore } from "@useago/sdk/vue";
+
+const cart = createStore({ items: [] as string[] });
+const state = useAgoStore(cart);
+</script>
+
+<template><span>{{ state.items.length }}</span></template>
+```
+
+## Exports cheat-sheet (`@useago/sdk/vue`)
+
+- Setup: `AgoPlugin`, `useAgo`, `AGO_CLIENT_KEY`
+- Composables: `useChat`, `useMessages`, `useConversation`, `useAgoFunction`,
+  `useAgoNavigation`, `useAgoPageState`, `useAgoEvents`, `useAgoStore`
+- Types: `AgoConfig`, `AgoMessage`, `Conversation`, `AgoAgent`, `AgoSource`,
+  `ToolCallData`, `AgoPluginOptions`
+
+## Checklist before you finish
+
+1. `AgoPlugin` is installed on the app (or a client is passed explicitly).
+2. `baseUrl` comes from an env var, not a hardcoded tenant URL.
+3. Every registered function's parameters have descriptions and the handler
+   returns serializable data.
+4. Run `npm run typecheck` and `npm run lint` (or the project's equivalents).
+
+---
+
+<!-- source: docs/agents/ago-angular.md -->
+
+# AGO SDK skill: Angular
+
+You are integrating the AGO SDK (`@useago/sdk`) into an Angular app. AGO is a chat
+agent that can answer questions, run functions in the user's browser, and
+navigate your app's routes. This file is everything you need. Follow it exactly.
+
+## Endpoints
+
+Use the live demo for anything runnable so it answers with zero setup:
+
+```
+baseUrl: https://playground.api.useago.com
+agent:   generic-guide
+```
+
+When the project has its own tenant, swap to `https://YOUR-DOMAIN.api.useago.com`
+and the project's own agent slug. Read `baseUrl` from the environment, never
+hardcode a real tenant URL.
+
+The Angular bindings have no hard dependency on Angular: they ship a minimal
+Observable shape compatible with RxJS, so streaming events arrive as Observables.
+
+## Install
+
+```bash
+npm install @useago/sdk
+```
+
+## 1. Provide the service
+
+Standalone bootstrap:
+
+```ts
+import { bootstrapApplication } from "@angular/platform-browser";
+import { provideAgo } from "@useago/sdk/angular";
+import { AppComponent } from "./app.component";
+
+bootstrapApplication(AppComponent, {
+  providers: [
+    provideAgo({
+      baseUrl: "https://playground.api.useago.com",
+      agent: "generic-guide",
+    }),
+  ],
+});
+```
+
+`provideAgo(config)` returns `{ provide: AgoService, useValue: <singleton> }`,
+which Angular's injector accepts directly. In an `NgModule`, add it to the
+`providers` array the same way. With no DI, construct it:
+`new AgoService({ baseUrl: "..." })`.
+
+## 2. Inject and use
+
+Subscribe to the streaming Observables to render messages token-by-token.
+
+```ts
+import { Component, inject, OnDestroy } from "@angular/core";
+import { AgoService } from "@useago/sdk/angular";
+import type { AgoMessage } from "@useago/sdk/angular";
+
+@Component({
+  selector: "app-chat",
+  standalone: true,
+  template: `
+    <div *ngFor="let m of messages"><b>{{ m.role }}:</b> {{ m.content }}</div>
+    <form (submit)="send(input.value); input.value = ''">
+      <input #input placeholder="Ask anything..." />
+      <button>Send</button>
+    </form>
+  `,
+})
+export class ChatComponent implements OnDestroy {
+  private ago = inject(AgoService);
+  messages: AgoMessage[] = [];
+  private streaming?: AgoMessage;
+
+  private subs = [
+    // A new assistant message starts: push a placeholder to stream into
+    this.ago.messageStart$.subscribe(({ messageId }) => {
+      this.streaming = {
+        id: messageId, conversationId: "", content: "",
+        role: "assistant", status: "IN_PROGRESS", createdAt: new Date(),
+      };
+      this.messages = [...this.messages, this.streaming];
+    }),
+    // Append streamed tokens
+    this.ago.chunks$.subscribe(({ content, messageId }) => {
+      this.messages = this.messages.map((m) =>
+        m.id === messageId ? { ...m, content: m.content + content } : m);
+    }),
+    // Final message replaces the placeholder
+    this.ago.messages$.subscribe((msg) => {
+      this.messages = this.messages.map((m) => (m.id === msg.id ? msg : m));
+    }),
+    this.ago.errors$.subscribe(({ error }) => console.error(error)),
+  ];
+
+  async send(content: string) {
+    if (!content.trim()) return;
+    this.messages = [...this.messages, {
+      id: `u-${Date.now()}`, conversationId: "", content,
+      role: "user", status: "DONE", createdAt: new Date(),
+    }];
+    await this.ago.sendMessage(content);
+  }
+
+  ngOnDestroy() {
+    this.subs.forEach((s) => s.unsubscribe());
+    this.ago.destroy();
+  }
+}
+```
+
+## 3. Observables
+
+| Observable      | Emits |
+| --------------- | ----- |
+| `messageStart$` | `{ conversationId, messageId }` when a reply begins |
+| `chunks$`       | `{ content, conversationId, messageId }` per streamed token |
+| `messages$`     | the final `AgoMessage` on completion |
+| `errors$`       | `{ error, conversationId?, messageId? }` |
+
+Each `subscribe()` returns an object with `unsubscribe()`. For any other event,
+use `ago.on(event, handler)` / `ago.off(event, handler)`.
+
+## 4. Methods
+
+`AgoService` forwards the full client surface:
+
+```ts
+ago.sendMessage(content, options?)        // Promise<AgoMessage>
+ago.getConversations()                     // Promise<Conversation[]>
+ago.getConversation(id)
+ago.getMessages(conversationId)
+
+ago.registerFunction(definition)           // or (name, handler, schema)
+ago.unregisterFunction(name)
+ago.registerNavigationFunction(navigate, routes)
+ago.registerPageStateFunction(controls, opts?) / ago.unregisterPageStateFunction(functionName?)
+
+ago.submitToolCallForm(toolCallId, formData)
+ago.confirmToolCall(toolCallId)
+ago.rejectToolCall(toolCallId)
+ago.submitFeedback(messageId, "positive" | "negative")
+
+ago.on(event, handler) / ago.off(event, handler)
+ago.updateConfig(partialConfig)
+ago.getClient()                            // underlying AgoClient
+ago.destroy()
+```
+
+## 5. Functions, navigation and context
+
+Register a client-side function the agent can call:
+
+```ts
+this.ago.registerFunction({
+  name: "lookupOrder",
+  description: "Look up an order by ID",
+  parameters: {
+    type: "object",
+    properties: { id: { type: "string", description: "Order ID" } },
+    required: ["id"],
+  },
+  handler: async (args) => this.orders.fetch(args.id as string),
+});
+```
+
+Rules for functions:
+- Every parameter property needs a `description`. The agent reads it to decide
+  what to pass.
+- `required` lists only the params the function truly needs.
+- The handler must return serializable data (no DOM nodes, no circular refs).
+
+Register navigation (works with Angular's `Router`):
+
+```ts
+const router = inject(Router);
+this.ago.registerNavigationFunction((path) => router.navigateByUrl(path), [
+  { name: "dashboard", path: "/dashboard", description: "Main dashboard" },
+]);
+```
+
+Register page state, the mirror of navigation (change the current page's state
+and read it back):
+
+```ts
+this.ago.registerPageStateFunction([
+  {
+    name: "statusFilter",
+    description: "Filter the list by status",
+    schema: { type: "string", enum: ["all", "paid", "overdue"] },
+    get: () => this.status,
+    set: (v) => { this.status = v as string; },
+  },
+]);
+```
+
+For client context, reach the client via `getClient()`:
+
+```ts
+this.ago.getClient().enableAutoPageContext();
+this.ago.getClient().setContext("order", { name: "Order", data: { id } });
+```
+
+## Exports cheat-sheet (`@useago/sdk/angular`)
+
+- `AgoService`, `provideAgo`, `AgoProvideOptions`
+- Types: `AgoConfig`, `AgoMessage`, `Conversation`, `AgoAgent`, `AgoSource`,
+  `ToolCallData`, `AgoClientEvents`, `AgoEventName`
+
+## Checklist before you finish
+
+1. `provideAgo(...)` is registered (or `AgoService` constructed directly).
+2. `baseUrl` comes from the environment, not a hardcoded tenant URL.
+3. Every subscription is torn down in `ngOnDestroy`, and `ago.destroy()` is called.
+4. Every registered function's parameters have descriptions and the handler
+   returns serializable data.
+5. Run the project's typecheck and lint.
+
+---
+
+# CONCEPTS
+
+---
+
+<!-- source: docs/general/functions-and-context.md -->
+
+# Client-side functions & context
+
+Two capabilities that turn AGO from a chatbot into an agent that acts inside
+**your** app. Both work in every framework; this page is the canonical
+reference, and the framework guides show the idiomatic wrappers.
+
+- [Client-side functions](#client-side-functions): the agent runs code in the browser
+- [Pre-built helpers](#pre-built-helpers): a catalogue of ready-made functions
+- [Client context](#client-context): tell the agent what the user is doing
+
+---
+
+## Client-side functions
+
+You expose functions (with a name, description and JSON-Schema parameters). The
+SDK sends those schemas with each message; when the agent decides to call one,
+the SDK runs your handler in the browser, then submits the result back so the
+agent can continue. Great for: looking up data, mutating UI, navigation,
+triggering app actions.
+
+### Define a function
+
+```ts
+import { defineFunction } from "@useago/sdk";
+
+export const lookupOrder = defineFunction({
+  name: "lookupOrder",
+  description: "Look up an order by its ID and return its status.",
+  parameters: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "The order ID" },
+    },
+    required: ["id"],
+  },
+  handler: async (args) => {
+    // fetchOrder: your own API call
+    const order = await fetchOrder(args.id as string);
+    return { status: order.status, total: order.total }; // returned to the agent
+  },
+});
+```
+
+`defineFunction` is an identity helper: it just gives you typing and a reusable
+object. The shape is:
+
+```ts
+interface ClientFunctionDefinition {
+  name: string;        // unique
+  description: string; // the LLM reads this to decide when to call it
+  parameters: {
+    type: "object";
+    properties: Record<string, {
+      type: string;            // "string" | "number" | "boolean" | "array" | ...
+      description?: string;
+      enum?: string[];
+      default?: unknown;
+    }>;
+    required?: string[];
+  };
+  handler: (args: Record<string, unknown>) => unknown | Promise<unknown>;
+}
+```
+
+> **Tip:** write descriptions for the model. A clear `description` (and per-field
+> `description`) is what makes the agent call the function correctly. Return a
+> small, structured object; it's fed straight back into the conversation.
+
+### Register a function
+
+```ts
+// Single object (preferred)
+client.registerFunction(lookupOrder);
+
+// Short alias, also accepts an array
+client.register([lookupOrder, cancelOrder]);
+
+// Classic 3-arg form
+client.registerFunction("lookupOrder", handler, { description, parameters });
+
+// Remove it
+client.unregisterFunction("lookupOrder");
+```
+
+Per framework:
+
+| Framework | Idiomatic API |
+| --- | --- |
+| Core | `client.registerFunction(def)` / `client.register([...])` |
+| React | `useAgoFunction(def)` (auto-cleanup) or `<AgoProvider tools={[…]}>` |
+| Vue | `useAgoFunction(name, options)` (auto-cleanup) |
+| Angular | `agoService.registerFunction(def)` |
+
+### Navigation shortcut
+
+A common case (letting the agent move the user around) has a dedicated helper
+that builds the function for you:
+
+```ts
+client.registerNavigationFunction(
+  (path) => router.push(path),   // your navigate fn
+  [
+    { name: "pricing", path: "/pricing", description: "Pricing page" },
+    { name: "docs", path: "/docs", description: "Documentation" },
+    { name: "orderDetail", path: "/orders/:id", description: "One order's detail page" },
+  ],
+);
+```
+
+This registers a `navigateToPage` function whose `page` parameter is an enum of
+your route names. React/Vue offer `useAgoNavigation(navigate, routes)` with
+lifecycle cleanup.
+
+Paths can contain `:param` placeholders. Each placeholder becomes an explicit
+top-level argument of `navigateToPage` (`{ page: "orderDetail", id: "42" }`
+navigates to `/orders/42`), so one route covers every detail page of an entity.
+Values are URL-encoded. A call that misses a required param navigates nowhere
+and returns an error telling the agent what to retry with. Placeholders cannot
+be named `page` (that argument selects the route).
+
+It also registers a dynamic context entry ("Current page") that reports the page
+the user is on (by route name, plus URL and title) on every message, so the agent
+knows where it is after it navigates, not just how to navigate away. Call
+`client.unregisterNavigationFunction()` to remove both the function and that
+context.
+
+### Page state shortcut
+
+The mirror of navigation: instead of moving the user to another page, let the
+agent change the state of the page they're on (filters, sort, view mode,
+selection…) and read the current state back. One helper builds both halves.
+
+```ts
+client.registerPageStateFunction([
+  {
+    name: "statusFilter",
+    description: "Filter the list by review status",
+    schema: { type: "string", enum: ["all", "pending", "approved"] },
+    get: () => filters.status,          // current value → context
+    set: (v) => setFilters({ ...filters, status: v }), // apply the change
+  },
+  {
+    name: "sort",
+    description: "Sort order of the list",
+    schema: { type: "string", enum: ["newest", "oldest"] },
+    get: () => filters.sort,
+    set: (v) => setFilters({ ...filters, sort: v }),
+  },
+]);
+
+client.unregisterPageStateFunction(); // pass the functionName if you customised it
+```
+
+This does two things:
+
+- Synthesizes **one** client function (`setPageState` by default; override with
+  `{ functionName }`). Each control becomes one optional property, so the agent
+  sets only the controls the user asked for and leaves the rest untouched.
+- Registers a dynamic context entry ("Page state") reporting each control's
+  current `get()` value, so the agent knows what to change. Controls without a
+  `get()` are write-only and don't appear in context.
+
+It's fire-and-forget: the handler applies each `set()` locally and returns
+`{ success, applied }`. The new state reaches the agent through the context on
+the next message. React/Vue offer `useAgoPageState(controls, opts?)` with
+lifecycle cleanup; Angular exposes `agoService.registerPageStateFunction(...)`.
+
+### Navigate then change the page in one go
+
+A request like "open the invoices page and show only the overdue ones" needs two
+steps: the agent navigates, then changes the new page's state. But the
+destination page only registers its `setPageState` (and current state) once it
+mounts, so the agent can't do both in a single turn.
+
+`useAgoAutoContinueAfterNavigation()` closes the gap. Mount it once inside
+`AgoProvider`. When the agent calls the navigation function and that turn ends,
+it waits for the destination page's `useAgoPageState` to register, then sends a
+hidden continuation message so the agent applies the state in a second turn. To
+the user it is one gesture.
+
+```tsx
+function AppShell() {
+  useAgoNavigation(navigate, routes);
+  useAgoPageState(controls);            // on each pilotable page
+  useAgoAutoContinueAfterNavigation();  // once, near the provider
+  return <Outlet />;
+}
+```
+
+The continuation is sent with `{ hidden: true }`: the backend keeps it in the
+model's context but flags it so the UI never shows it (`useMessages` and
+`ChatWidget` filter hidden messages). This needs backend support for the `hidden`
+flag; without it the mechanism still works but the nudge shows as a message.
+
+### Observe invocations
+
+```ts
+client.on("function:invoke", ({ functionName, arguments: args }) =>
+  console.log("Agent called", functionName, args),
+);
+client.on("function:result", ({ result, error }) =>
+  console.log("Returned", result, error),
+);
+```
+
+---
+
+## Pre-built helpers
+
+The SDK ships a catalogue of common browser actions as ready-made function
+definitions. Import them from `@useago/sdk` (or `@useago/sdk/helpers`), wire up a
+handler where needed, and register.
+
+| Helper | What it does | Handler needed? |
+| --- | --- | --- |
+| `showToast` | Show a toast notification | ✅ wire to your toast lib |
+| `showNotification` | Browser `Notification` (asks permission) | built-in |
+| `openUrl` | Open a URL in a new tab | built-in |
+| `copyToClipboard` | Copy text to clipboard | built-in |
+| `setTheme` | Set `data-theme` on `<html>` (light/dark/system) | built-in |
+| `showConfirmDialog` | `window.confirm` and return the choice | built-in |
+| `getUserLocation` | Geolocation (asks permission) | built-in |
+| `scrollToElement` | Scroll to a CSS selector | built-in |
+| `setLocalStorage` / `getLocalStorage` | Read/write `localStorage` | built-in |
+| `highlightElement` | Outline an element (guided tours) | built-in |
+| `submitForm` | Fill & submit an HTML form | built-in |
+| `trackEvent` | Custom analytics event | ➖ logs to console by default |
+
+### Wiring a handler
+
+Some helpers ship a no-op/console default (`showToast`, `trackEvent`). Attach
+your implementation without mutating the original with `withHandler`:
+
+```ts
+import { showToast, withHandler } from "@useago/sdk";
+
+client.register(
+  withHandler(showToast, (args) => {
+    myToast(args.message as string); // myToast: your own toast handler
+    return { shown: true };
+  }),
+);
+```
+
+In React you can wire helpers declaratively on the provider:
+
+```tsx
+<AgoProvider
+  baseUrl="…"
+  helpers={{
+    copyToClipboard: true,                          // built-in handler
+    showToast: (args) => toast(args.message as string), // custom
+  }}
+>
+```
+
+---
+
+## Client context
+
+Context is structured data describing the user's current situation. It's sent
+with **every** message so the agent answers in context, without the user having
+to explain where they are.
+
+### Static context
+
+```ts
+client.setContext("order-page", {
+  name: "Order detail",
+  description: "User is viewing an order",
+  data: { orderId: "123", status: "shipped" },
+});
+
+client.removeContext("order-page");
+```
+
+Shape:
+
+```ts
+interface ContextEntry {
+  name?: string;        // human label, e.g. "Order detail"
+  description?: string; // what this context represents
+  data?: Record<string, unknown>; // structured data for the AI
+}
+```
+
+### Dynamic context
+
+A function evaluated on every send, perfect for data outside your render state
+(global stores, refs, computed values). Return `null` to skip.
+
+```ts
+// cart / cartTotal(): a variable and helper from your outer scope or store
+client.addDynamicContext("cart", () => ({
+  name: "Cart",
+  data: { itemCount: cart.length, total: cartTotal() },
+}));
+
+client.removeDynamicContext("cart");
+```
+
+### Auto page context
+
+One call attaches the current URL + document title on every message:
+
+```ts
+client.enableAutoPageContext();
+```
+
+(In React, set `<AgoProvider pageContext="auto">`.)
+
+### Per framework
+
+| Framework | Idiomatic API |
+| --- | --- |
+| Core | `setContext` / `addDynamicContext` / `enableAutoPageContext` |
+| React | `useAgoContext(entryOrFn, key?)` + `pageContext="auto"` |
+| Vue | core API inside `onMounted` / `onUnmounted` |
+| Angular | `agoService.getClient().setContext(…)` |
+
+### Inspect what's being sent
+
+```ts
+const snapshot = client.getContextSnapshot();
+// → { entries: { "order-page": { name, description, data }, … } } | null
+```
+
+---
+
+See also: [Events & streaming](events-and-streaming.md) ·
+[Core API](core.md) · [Testing](testing.md)
+
+---
+
+<!-- source: docs/general/events-and-streaming.md -->
+
+# Events & streaming
+
+`AgoClient` streams responses over Server-Sent Events and re-emits them as typed
+events. You can consume them three ways, from lowest to highest level:
+
+1. Raw events: `client.on(event, handler)`
+2. Callback helpers: `onMessage`, `onMessageChunk`, …
+3. An async generator: `createMessageStream`
+
+All three are framework-agnostic and live in `@useago/sdk`.
+
+---
+
+## 1. Raw events
+
+```ts
+client.on("message:chunk", ({ content }) => append(content)); // append: your own render fn
+client.off("message:chunk", handler);
+client.once("message:complete", (m) => console.log(m.content));
+
+const final = await client.waitFor("message:complete", { timeout: 10_000 });
+```
+
+| Event | Payload |
+| --- | --- |
+| `message:start` | `{ conversationId, messageId }` |
+| `message:chunk` | `{ content, conversationId, messageId }` |
+| `message:answer-complete` | `AgoMessage`: the main answer text is done, but follow-up replies may still be pending; fires once, before `message:complete` |
+| `message:complete` | `AgoMessage` |
+| `message:empty` | `{ conversationId, messageId }`: the reply completed as `DONE` with no content, tool calls, or follow-ups (usually an unknown `agent` slug). Fires after `message:complete` AND after `sendMessage` resolves, so subscribing right after the `await` still catches it. Both ids are `""` when the stream carried no message data at all. See [Empty replies](configuration.md#empty-replies). |
+| `message:error` | `{ error, code?, conversationId?, messageId? }`: `code` is the stable [error code](configuration.md#error-codes) when the failure was an `AgoError` |
+| `conversation:loaded` | `Conversation`: a full conversation was loaded from the server (e.g. after a page reload), with messages and persisted tool calls |
+| `context:changed` | `ContextSnapshot \| null`: the client-side context changed (entry added/removed, or a stateful helper updated its store) |
+| `toolCall:received` | `ToolCallData` |
+| `toolCall:form` | `ToolCallData` (only when the tool call is a form) |
+| `function:invoke` | `{ invocationId, functionName, arguments, conversationId }` |
+| `function:result` | `{ invocationId, result, error? }` |
+| `form:submitted` | `{ name, values, result }`: a form collector submitted successfully; `result` is the submit response (the third-party API's answer) |
+| `form:error` | `{ name, values, error }`: a form collector submit failed at the network/server level (HTTP non-2xx or a thrown handler/fetch). Validation pre-checks (missing fields, no submit target) do not fire this |
+| `connection:status` | `{ connected }` |
+
+`waitFor` rejects if the optional `timeout` (ms) elapses first.
+
+---
+
+## 2. Callback helpers
+
+Thin wrappers that return an **unsubscribe** function, handy when you don't want
+to keep a reference to the handler.
+
+```ts
+import {
+  onMessage,
+  onMessageChunk,
+  onMessageStart,
+  onMessageError,
+  onToolCall,
+  onFunctionInvoke,
+} from "@useago/sdk";
+
+const unsub = onMessageChunk(client, ({ content }) => {
+  outputEl.textContent += content;
+});
+// later
+unsub();
+
+onMessage(client, (msg) => console.log("complete:", msg.content));
+```
+
+| Helper | Subscribes to |
+| --- | --- |
+| `onMessage(client, cb)` | `message:complete` |
+| `onMessageChunk(client, cb)` | `message:chunk` |
+| `onMessageStart(client, cb)` | `message:start` |
+| `onMessageError(client, cb)` | `message:error` |
+| `onToolCall(client, cb)` | `toolCall:received` |
+| `onFunctionInvoke(client, cb)` | `function:invoke` |
+| `onFormSubmitted(client, cb)` | `form:submitted` |
+| `onFormError(client, cb)` | `form:error` |
+
+---
+
+## 3. Async generator
+
+`createMessageStream` fires a message and yields a typed event for each step:
+no manual subscribe/unsubscribe, just `for await`.
+
+```ts
+import { createMessageStream } from "@useago/sdk";
+
+for await (const ev of createMessageStream(client, "Hello!", { conversationId })) {
+  switch (ev.type) {
+    case "start":    console.log("started", ev.data.messageId); break;
+    case "chunk":    process.stdout.write(ev.data.content); break;
+    case "toolCall": console.log("tool call", ev.data); break;
+    case "complete": console.log("\ndone:", ev.data.content); break;
+    case "error":    console.error(ev.data.error); break;
+  }
+}
+```
+
+Options: `{ conversationId?, agentId?, files? }`. The generator cleans up its
+listeners automatically when the loop ends.
+
+---
+
+## Tool calls
+
+When the agent needs structured input (a form), a confirmation, or shows a
+status/progress indicator, it emits a tool call. Listen and respond:
+
+```ts
+client.on("toolCall:form", async (toolCall) => {
+  // toolCall.formSchema describes the fields to render
+  const values = await renderFormSomehow(toolCall.formSchema); // render your own form UI here
+  await client.submitToolCallForm(toolCall.id, values);
+});
+
+client.on("toolCall:received", async (toolCall) => {
+  if (toolCall.type === "confirmation_input") {
+    const ok = window.confirm(toolCall.message ?? "Confirm?");
+    ok ? await client.confirmToolCall(toolCall.id)
+       : await client.rejectToolCall(toolCall.id);
+  }
+});
+```
+
+`ToolCallType` is one of: `form`, `confirmation_input`, `status_message`,
+`progress_indicator`, `client_function`, `reasoning`, `mcp_ui_resource`.
+
+---
+
+## Framework equivalents
+
+| Framework | How to subscribe |
+| --- | --- |
+| Core | `client.on(...)` or the helpers above |
+| React | `client.on(...)` in `useEffect` (get the client via `useAgoClient()`), or rely on `useChat`/`useMessages` which manage this for you |
+| Vue | `useAgoEvents(event, handler)` (auto-cleanup) |
+| Angular | `messages$`, `chunks$`, `errors$`, `messageStart$` Observables, or `ago.on(...)` |
+
+---
+
+See also: [Core API](core.md) · [Functions & context](functions-and-context.md)
+
+---
+
+<!-- source: docs/general/configuration.md -->
+
+# Configuration & auth
+
+Every entry point ultimately builds an `AgoClient` from an `AgoConfig`. This
+page documents each option, how it maps to request headers, runtime updates,
+auto-detection, and error handling.
+
+---
+
+## `AgoConfig`
+
+```ts
+interface AgoConfig {
+  baseUrl: string;          // required, e.g. https://YOUR-DOMAIN.useago.com
+  widgetId?: string;        // X-User-Anon-Id header; auto-generated + persisted if omitted
+  agent?: string;           // default agent (id or slug) for new conversations
+  defaultAgentId?: string;  // same as `agent`; `agent` is preferred
+  permission?: string;      // X-Widget-Permission header
+  userEmail?: string;       // X-User-Email header, identify the end user
+  userJwt?: string;         // Authorization: Bearer <jwt>, authenticated users
+  debug?: boolean;          // enable verbose console logging
+  warnOnEmptyReply?: boolean; // default true; see "Empty replies" below
+}
+```
+
+| Option | Required | Maps to | Notes |
+| --- | :---: | --- | --- |
+| `baseUrl` | ✅ | request URL | Trailing slash is trimmed automatically. Missing/empty throws `config_missing_base_url` at construct time. `/path` values (same-origin proxy) are allowed. |
+| `widgetId` | — | `X-User-Anon-Id` | Per-visitor anonymous id. If omitted, a UUID is generated and cached in `localStorage` (`ago_widget_id`) so a returning visitor keeps the same id. |
+| `agent` / `defaultAgentId` | — | `agent_id` in the body | Per-message `agentId` overrides it. `agent` wins if both are set. |
+| `permission` | — | `X-Widget-Permission` | Mirrors the widget's `window.AGO.permission`. |
+| `userEmail` | — | `X-User-Email` | Identifies the user to AGO. |
+| `userJwt` | — | `Authorization: Bearer …` | For authenticated sessions. |
+| `debug` | — | — | Turns on the SDK's logger. |
+| `warnOnEmptyReply` | — | — | Default `true`: warn on the console (once per conversation) when a reply completes empty, usually an unknown `agent` slug. The [`message:empty` event](events-and-streaming.md#events) fires regardless. |
+
+---
+
+## Debug logging
+
+`debug: true` turns on the SDK's internal logger. While enabled, the client
+writes verbose messages to the browser console, each prefixed with `[AGO SDK]`:
+client init, HTTP/stream requests, and registered functions/context. Examples:
+
+```
+[AGO SDK] AgoClient initialized
+[AGO SDK] POST (stream) https://acme.useago.com/api/sdk/v1/messages {…}
+[AGO SDK] ClientContext set: order-page
+```
+
+- **Default is `false`**: all of those messages are silent.
+- **Errors are always logged** (`console.error`), whether `debug` is on or off.
+- Use it in development; **leave it off in production** to keep users' consoles
+  clean.
+- Toggle it at runtime with `client.updateConfig({ debug: true })` (or `false`).
+
+```ts
+const ago = new AgoClient({ baseUrl: "https://acme.useago.com", debug: true });
+
+// Or detect config from the DOM and only override `debug`:
+import { createAgo } from "@useago/sdk";
+const ago2 = createAgo({ debug: true });
+```
+
+---
+
+## Examples per framework
+
+```ts
+// Core
+const ago = new AgoClient({ baseUrl: "https://acme.useago.com", agent: "support" });
+```
+
+```tsx
+// React
+<AgoProvider baseUrl="https://acme.useago.com" agent="support" />
+```
+
+```ts
+// Vue
+app.use(AgoPlugin, { baseUrl: "https://acme.useago.com", agent: "support" });
+```
+
+```ts
+// Angular
+provideAgo({ baseUrl: "https://acme.useago.com", agent: "support" });
+```
+
+---
+
+## Zero-config auto-detection
+
+`createAgo()` and `autoDetectConfig()` resolve config from the page, in priority
+order:
+
+1. **`window.AGO`** (the widget config object): `basepath`, `widgetId`,
+   `agent`/`defaultAgent`, `permission`, `email`, `jwt`.
+2. **`<meta>` tags**: `ago-base-url`, `ago-widget-id`, `ago-agent`
+   (or `ago-agent-id`), `ago-permission`, `ago-user-email`.
+3. **`data-ago-*` attributes** on `<body>` or a `<script>` tag:
+   `data-ago-base-url`, `data-ago-widget-id`, `data-ago-agent`
+   (or `data-ago-agent-id`), `data-ago-permission`, `data-ago-user-email`.
+4. **Explicit overrides** passed to the function.
+
+```html
+<meta name="ago-base-url" content="https://acme.useago.com" />
+<meta name="ago-agent" content="support" />
+```
+
+```ts
+import { createAgo, autoDetectConfig } from "@useago/sdk";
+
+const client = createAgo();              // throws if no baseUrl found
+const client2 = createAgo({ debug: true }); // detect + override
+
+const config = autoDetectConfig();       // → AgoConfig | null (no throw)
+```
+
+---
+
+## Updating config at runtime
+
+Common after login (attaching a JWT) or switching agents:
+
+```ts
+client.updateConfig({ userJwt: token, userEmail: "jane@acme.com" });
+```
+
+Changing `permission` to a falsy value removes the header. In React, the
+`useAgo` hook re-applies `agent`, `permission`, `userEmail`, `userJwt`,
+`debug` and `warnOnEmptyReply` automatically when those props change (changing
+`baseUrl`/`widgetId` recreates the client).
+
+`updateConfig` validates the merged result: omitting a key (or passing it as
+`undefined`) keeps the current value; an explicit empty or non-string `baseUrl`
+throws `config_missing_base_url` and leaves the client unchanged.
+
+---
+
+## Errors
+
+All SDK errors extend `AgoError` (`code`, optional `statusCode`). Catch and
+branch on the subclass:
+
+```ts
+import {
+  AgoError,
+  AgoApiError,      // non-2xx HTTP response (has type, statusCode, param, docUrl)
+  AgoNetworkError,  // fetch failed / offline (has originalError)
+  AgoStreamError,   // SSE stream failure
+  AgoFunctionError, // a client-side function handler threw (has functionName)
+} from "@useago/sdk";
+
+try {
+  await client.sendMessage("hi");
+} catch (err) {
+  if (err instanceof AgoApiError) {
+    console.error(`API ${err.statusCode}: ${err.message} (${err.code})`);
+  } else if (err instanceof AgoNetworkError) {
+    console.error("Network problem", err.originalError);
+  } else if (err instanceof AgoError) {
+    console.error(err.code, err.message);
+  }
+}
+```
+
+`isStreamNetworkError(err)` is exported for detecting recoverable stream drops.
+
+### Error codes
+
+`code` is the compatibility surface: match on it, never on message text, which
+may be reworded in any release.
+
+| Code | Thrown by | Meaning | Fix |
+| --- | --- | --- | --- |
+| `config_missing_base_url` | `AgoError` | `baseUrl` missing, empty, or not a string (also from `createAgo()` and `mountChatWidget`) | Pass `baseUrl`, e.g. `https://YOUR-DOMAIN.api.useago.com` (the live demo endpoint `https://playground.api.useago.com` works without a tenant) |
+| `config_suspect_base_url` | console warning only | `baseUrl` has no protocol and is not a `/path` | Add `https://`, or use a `/path` for a same-origin proxy |
+| `network_error` | `AgoNetworkError` | fetch failed (offline, DNS, unreachable host) | Check `baseUrl` is reachable and includes the protocol |
+| `http_error` | `AgoApiError` | non-2xx without a structured error body | 401/403: check `userJwt`. 404: check `baseUrl` points at the API root |
+| `stream_no_body` | `AgoStreamError` | the endpoint returned no streamable body | Check `baseUrl` targets an AGO API and no proxy/mock strips the SSE stream |
+| `stream_error` | `AgoStreamError` | the stream failed mid-flight | Usually a dropped connection; retry the message |
+| `function_invalid_registration` | `AgoError` | `registerFunction` called without a handler or schema | Use `registerFunction({ name, parameters, handler })` |
+| `function_error` | `AgoFunctionError` | a registered client function threw | Inspect `functionName` and `originalError` |
+
+Server-supplied errors (`AgoApiError` with a structured body) keep the
+backend's own `code` and, when provided, link their docs in the message
+(`docUrl`).
+
+### Empty replies
+
+The backend currently answers an unknown `agent` slug with an empty 200, which
+would otherwise fail silently (an empty bubble, nothing thrown). When a reply
+completes as `DONE` with no content, no tool calls, no client-function
+invocations and no follow-up replies, the SDK:
+
+1. emits [`message:empty`](events-and-streaming.md#events) (always), and
+2. warns on the console, once per conversation, unless
+   `warnOnEmptyReply: false`.
+
+Listen for `message:empty` to handle it in your UI. This client-side detection
+is temporary: it goes away once the backend returns an explicit error for
+unknown agents.
+
+---
+
+See also: [Core API](core.md) · [Events & streaming](events-and-streaming.md) · [Custom domain (reverse proxy)](custom-domain.md)

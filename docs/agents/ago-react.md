@@ -271,7 +271,7 @@ Key events: `message:start`, `message:chunk` (`{ content }` per token),
 - Forms: `createFormCollector`
 - Testing: `createMockClient`
 - Types: `AgoConfig`, `AgoMessage`, `Conversation`, `AgoAgent`, `AgoSource`,
-  `AgoAttachment`, `ToolCallData`
+  `ToolCallData` (import `AgoAttachment` from `@useago/sdk`, not the `/react` subpath)
 
 ## Checklist before you finish
 

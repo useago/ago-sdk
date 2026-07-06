@@ -546,13 +546,15 @@ A runnable React example lives in [`examples/simple-react`](../examples/simple-r
 
 - **Provider/context:** `AgoProvider`, `useAgoClient`, `useOptionalAgoClient`
 - **Hooks:** `useAgo`, `useChat`, `useMessages`, `useConversation`,
-  `useAgoFunction`, `useAgoNavigation`, `useAgoContext`, `useAgoStore`,
+  `useAgoFunction`, `useAgoNavigation`, `useAgoPageState`,
+  `useAgoAutoContinueAfterNavigation`, `useAgoContext`, `useAgoStore`,
   `useFormCollector`
 - **Components:** `ChatWidget`, `Message`, `ChatInput`, `Markdown`
 - **Forms:** `createFormCollector` (+ `CreateFormCollectorOptions`, `SubmitConfig`, …)
 - **Testing:** `createMockClient`
 - **Types:** `AgoConfig`, `AgoMessage`, `Conversation`, `AgoAgent`, `AgoSource`,
-  `AgoAttachment`, `ToolCallData`, plus per-export prop/option types
+  `ToolCallData`, plus per-export prop/option types (`AgoAttachment` lives on the
+  root `@useago/sdk` entry, not the `/react` subpath)
 
 See also: [Client functions & context](../general/functions-and-context.md) ·
 [Testing](../general/testing.md) · [Configuration](../general/configuration.md)

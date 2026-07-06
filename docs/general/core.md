@@ -353,7 +353,7 @@ const msg = await ago.waitFor("message:complete", { timeout: 10_000 });
 | `message:chunk`     | `{ content, conversationId, messageId }`                    |
 | `message:answer-complete` | `AgoMessage`: main answer done, follow-up replies may still be pending; fires before `message:complete` |
 | `message:complete`  | `AgoMessage`                                                |
-| `message:error`     | `{ error, conversationId?, messageId? }`                    |
+| `message:error`     | `{ error, code?, conversationId?, messageId? }`             |
 | `conversation:loaded` | `Conversation`: full conversation loaded from the server (e.g. after a page reload) |
 | `context:changed`   | `ContextSnapshot \| null`: client-side context changed     |
 | `toolCall:received` | `ToolCallData`                                              |
