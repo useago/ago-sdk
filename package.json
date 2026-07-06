@@ -107,11 +107,13 @@
     "README.md",
     "CHANGELOG.md",
     "LICENSE",
-    "NOTICE"
+    "NOTICE",
+    "llms-full.txt"
   ],
   "scripts": {
     "clean": "rm -rf dist",
-    "build": "npm run clean && vite build && npm run build:cts-types",
+    "build:llms": "node scripts/build-llms.mjs",
+    "build": "npm run clean && vite build && npm run build:cts-types && npm run build:llms",
     "build:cts-types": "for f in $(find dist -name '*.d.ts'); do cp \"$f\" \"${f%.d.ts}.d.cts\"; done",
     "prepublishOnly": "npm run lint && npm run typecheck && npm test && npm run build && npm run check:package",
     "check:package": "publint --strict && attw --pack . --profile node16",

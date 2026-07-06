@@ -40,7 +40,7 @@ completeness.
 - **Show, don't catalogue.** Prefer one working snippet over an exhaustive option
   list. Push deep reference (full prop/option/event tables) below the fold or into
   a dedicated page; in the README, collapse them behind `<details>`.
-- **Use the live endpoint** `https://ago.api.useago.com` in runnable examples so
+- **Use the live endpoint** `https://playground.api.useago.com` in runnable examples so
   readers get a real response with zero setup. Note they swap it for their own
   `https://YOUR-DOMAIN.api.useago.com` when they have a tenant.
 - **Lead with the three things devs test first:** (1) send a message and see a
