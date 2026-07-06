@@ -140,6 +140,100 @@ describe("FunctionRegistry", () => {
     });
   });
 
+  describe("result size guard", () => {
+    const schema = {
+      description: "Returns data",
+      parameters: { type: "object" as const, properties: {} },
+    };
+
+    it("should return small results unchanged", async () => {
+      registry.register("small", () => ({ ok: true }), schema);
+
+      const result = await registry.execute("small", {});
+
+      expect(result).toEqual({ ok: true });
+    });
+
+    it("should truncate results over the per-function limit", async () => {
+      registry.register("big", () => ({ data: "x".repeat(500) }), {
+        ...schema,
+        maxResultBytes: 100,
+      });
+
+      const result = (await registry.execute("big", {})) as Record<
+        string,
+        unknown
+      >;
+
+      expect(result.truncated).toBe(true);
+      expect(result.maxBytes).toBe(100);
+      expect(result.originalBytes).toBeGreaterThan(100);
+      expect(typeof result.preview).toBe("string");
+      expect(result.hint).toContain('"big"');
+    });
+
+    it("should truncate results over the registry-level default", async () => {
+      const limited = new FunctionRegistry({ maxResultBytes: 50 });
+      limited.register("big", () => ({ data: "x".repeat(500) }), schema);
+
+      const result = (await limited.execute("big", {})) as Record<
+        string,
+        unknown
+      >;
+
+      expect(result.truncated).toBe(true);
+      expect(result.maxBytes).toBe(50);
+    });
+
+    it("should let a per-function limit exceed the registry default", async () => {
+      const limited = new FunctionRegistry({ maxResultBytes: 50 });
+      limited.register("allowed", () => ({ data: "x".repeat(500) }), {
+        ...schema,
+        maxResultBytes: Infinity,
+      });
+
+      const result = await limited.execute("allowed", {});
+
+      expect(result).toEqual({ data: "x".repeat(500) });
+    });
+
+    it("should apply a limit updated via setDefaultMaxResultBytes", async () => {
+      registry.register("big", () => ({ data: "x".repeat(500) }), schema);
+      registry.setDefaultMaxResultBytes(50);
+
+      const result = (await registry.execute("big", {})) as Record<
+        string,
+        unknown
+      >;
+
+      expect(result.truncated).toBe(true);
+    });
+
+    it("should pass non-serializable results through unchanged", async () => {
+      const circular: Record<string, unknown> = {};
+      circular.self = circular;
+      registry.register("circular", () => circular, {
+        ...schema,
+        maxResultBytes: 10,
+      });
+
+      const result = await registry.execute("circular", {});
+
+      expect(result).toBe(circular);
+    });
+
+    it("should not send maxResultBytes to the backend in schemas", () => {
+      registry.register("big", () => ({}), {
+        ...schema,
+        maxResultBytes: 100,
+      });
+
+      const schemas = registry.getSchemas();
+
+      expect(schemas[0]).not.toHaveProperty("maxResultBytes");
+    });
+  });
+
   describe("clear", () => {
     it("should remove all registered functions", () => {
       registry.register("func1", () => {}, {

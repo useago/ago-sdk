@@ -62,11 +62,30 @@ export interface AgoPageStateOptions {
 }
 
 /**
+ * Schema-plus-settings object accepted when registering a function: the schema
+ * (minus `name`) and SDK-side options that are NOT sent to the backend.
+ */
+export type ClientFunctionRegisterOptions = Omit<
+  ClientFunctionSchema,
+  "name"
+> & {
+  /**
+   * Max serialized result size in bytes before the SDK truncates it to a
+   * flagged preview. Overrides the client-level default
+   * (`AgoConfig.maxFunctionResultBytes`, 50 000 by default). `Infinity`
+   * disables the guard for this function.
+   */
+  maxResultBytes?: number;
+};
+
+/**
  * Registered function with handler
  */
 export interface RegisteredFunction {
   schema: ClientFunctionSchema;
   handler: ClientFunctionHandler;
+  /** Per-function result-size ceiling; falls back to the registry default. */
+  maxResultBytes?: number;
 }
 
 /**
@@ -87,4 +106,10 @@ export interface ClientFunctionDefinition {
   description: string;
   parameters: ClientFunctionSchema["parameters"];
   handler: ClientFunctionHandler;
+  /**
+   * Max serialized result size in bytes before the SDK truncates it to a
+   * flagged preview (default: `AgoConfig.maxFunctionResultBytes`, 50 000).
+   * `Infinity` disables the guard for this function.
+   */
+  maxResultBytes?: number;
 }

@@ -3,15 +3,39 @@ import { logger } from "../utils/logger";
 import type {
   ClientFunctionDefinition,
   ClientFunctionHandler,
+  ClientFunctionRegisterOptions,
   ClientFunctionSchema,
   RegisteredFunction,
 } from "./types";
+
+/** Default ceiling for a serialized function result (~12k LLM tokens). */
+const DEFAULT_MAX_RESULT_BYTES = 50_000;
+/** Results above this size log a warning even when under the ceiling. */
+const WARN_RESULT_BYTES = 20_000;
+/** How much of the original JSON a truncated result keeps as a preview. */
+const TRUNCATED_PREVIEW_CHARS = 2_000;
+
+export interface FunctionRegistryOptions {
+  /** Client-level default for the result-size ceiling, in bytes. */
+  maxResultBytes?: number;
+}
 
 /**
  * Registry for client-side functions that AGO can call
  */
 export class FunctionRegistry {
   private functions: Map<string, RegisteredFunction> = new Map();
+  private defaultMaxResultBytes: number;
+
+  constructor(options?: FunctionRegistryOptions) {
+    this.defaultMaxResultBytes =
+      options?.maxResultBytes ?? DEFAULT_MAX_RESULT_BYTES;
+  }
+
+  /** Update the client-level result-size ceiling at runtime. */
+  setDefaultMaxResultBytes(bytes: number): void {
+    this.defaultMaxResultBytes = bytes;
+  }
 
   /**
    * Register a function that AGO can call.
@@ -21,16 +45,17 @@ export class FunctionRegistry {
   register(
     name: string,
     handler: ClientFunctionHandler,
-    schema: Omit<ClientFunctionSchema, "name">
+    schema: ClientFunctionRegisterOptions
   ): void;
   register(
     nameOrDef: string | ClientFunctionDefinition,
     handler?: ClientFunctionHandler,
-    schema?: Omit<ClientFunctionSchema, "name">
+    schema?: ClientFunctionRegisterOptions
   ): void {
     if (typeof nameOrDef === "object") {
-      const { name, handler: h, description, parameters } = nameOrDef;
-      return this.register(name, h, { description, parameters });
+      const { name, handler: h, description, parameters, maxResultBytes } =
+        nameOrDef;
+      return this.register(name, h, { description, parameters, maxResultBytes });
     }
 
     const name = nameOrDef;
@@ -46,9 +71,13 @@ export class FunctionRegistry {
       logger.warn(`Function "${name}" is being overwritten`);
     }
 
+    // maxResultBytes is an SDK-side setting: keep it out of the schema sent
+    // to the backend.
+    const { maxResultBytes, ...schemaRest } = schema;
     this.functions.set(name, {
-      schema: { ...schema, name },
+      schema: { ...schemaRest, name },
       handler,
+      maxResultBytes,
     });
 
     logger.log(`Registered function: ${name}`);
@@ -107,7 +136,7 @@ export class FunctionRegistry {
     try {
       const result = await registration.handler(args);
       logger.log(`Function ${name} completed:`, result);
-      return result;
+      return this.guardResultSize(name, result, registration.maxResultBytes);
     } catch (error) {
       logger.error(`Function ${name} failed:`, error);
       throw new AgoFunctionError(
@@ -116,6 +145,63 @@ export class FunctionRegistry {
         error instanceof Error ? error : undefined
       );
     }
+  }
+
+  /**
+   * Cap the size of a function result before it goes back to the backend.
+   * Everything a handler returns lands in the LLM context, so an unbounded
+   * payload (a raw API response, a full table) inflates cost and can overflow
+   * the model. Oversized results are replaced with a flagged preview so the
+   * agent knows to request less instead of receiving hundreds of KB verbatim.
+   */
+  private guardResultSize(
+    name: string,
+    result: unknown,
+    maxBytes?: number
+  ): unknown {
+    let json: string | undefined;
+    try {
+      json = JSON.stringify(result);
+    } catch {
+      // Non-serializable results (circular refs…) already fail at submit
+      // time; keep that failure mode instead of masking it here.
+      return result;
+    }
+    if (json === undefined) {
+      return result;
+    }
+
+    const bytes = new TextEncoder().encode(json).length;
+    const limit = maxBytes ?? this.defaultMaxResultBytes;
+
+    if (bytes > limit) {
+      logger.warn(
+        `Function "${name}" result is ${bytes} bytes, over the ${limit}-byte ` +
+          "limit; a truncated preview was sent to the agent instead. Return " +
+          "fewer fields, paginate, or raise maxResultBytes for this function."
+      );
+      return {
+        truncated: true,
+        originalBytes: bytes,
+        maxBytes: limit,
+        preview: json.slice(0, TRUNCATED_PREVIEW_CHARS),
+        hint:
+          `The result of "${name}" exceeded the ${limit}-byte limit and was ` +
+          "truncated. Request less data (use limit or filter parameters if " +
+          "available), or tell the user the result is too large to process.",
+      };
+    }
+
+    if (bytes > WARN_RESULT_BYTES) {
+      logger.warn(
+        `Function "${name}" returned a large result (${Math.round(
+          bytes / 1024
+        )} KB). Large results consume LLM context: return fewer fields, ` +
+          "paginate, or push the data to the UI and return a summary."
+      );
+    }
+
+    return result;
   }
 
   /**

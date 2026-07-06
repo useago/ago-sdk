@@ -37,6 +37,11 @@ logs every function the agent calls. See [`initDevPanel`](../../docs/general/dev
 - "Je suis allergique aux fruits à coque" (the agent opens the allergens page)
 - "D'où vient votre pistache ?" (the agent navigates to the origins page)
 - "C'est bon, je passe commande au nom de Marie"
+- "Raconte-moi l'histoire de la crème glacée" (fetches the full Wikipedia
+  article, 100+ KB of raw HTML, so the SDK's
+  [result size guard](../../docs/general/functions-and-context.md#result-size-limit)
+  truncates it before it reaches the LLM. Watch the console warning and the
+  dev panel.)
 
 ## How it works
 
