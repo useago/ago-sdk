@@ -388,6 +388,8 @@ Prefer callbacks over raw events? See the
 - `getRegisteredFunctions()` → `ClientFunctionSchema[]`
 - `registerNavigationFunction(navigate, routes)` · `unregisterNavigationFunction()` (also publishes a "Current page" context entry)
 - `registerPageStateFunction(controls, opts?)` · `unregisterPageStateFunction(functionName?)`
+- `attachAutoContinueAfterNavigation(client, options?)` → detach fn (standalone
+  export, see [Client functions & context](functions-and-context.md#navigate-then-change-the-page-in-one-go))
 
 ### Context
 

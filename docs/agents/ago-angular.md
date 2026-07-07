@@ -137,6 +137,7 @@ ago.getMessages(conversationId)
 ago.registerFunction(definition)           // or (name, handler, schema)
 ago.unregisterFunction(name)
 ago.registerNavigationFunction(navigate, routes)
+ago.enableAutoContinueAfterNavigation(options?)  // returns a disable fn
 ago.registerPageStateFunction(controls, opts?) / ago.unregisterPageStateFunction(functionName?)
 
 ago.submitToolCallForm(toolCallId, formData)
@@ -180,6 +181,14 @@ const router = inject(Router);
 this.ago.registerNavigationFunction((path) => router.navigateByUrl(path), [
   { name: "dashboard", path: "/dashboard", description: "Main dashboard" },
 ]);
+```
+
+To make "go to page B and change X" work in one user message, enable
+auto-continue once (e.g. in the root component) and disable it on teardown:
+
+```ts
+private stopAutoContinue = this.ago.enableAutoContinueAfterNavigation();
+// ngOnDestroy: this.stopAutoContinue();
 ```
 
 Register page state, the mirror of navigation (change the current page's state

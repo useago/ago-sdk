@@ -2,6 +2,10 @@
 export { AgoClient } from "./client/AgoClient";
 export type { ResumeGate } from "./client/AgoClient";
 
+// Auto-continue after navigation (framework-agnostic; React/Angular wrap this)
+export { attachAutoContinueAfterNavigation } from "./client/autoContinue";
+export type { AgoAutoContinueOptions } from "./client/autoContinue";
+
 // Types
 export type {
   AgoAgent,

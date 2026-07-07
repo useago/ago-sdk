@@ -19,7 +19,7 @@ idiomatic binding (hook / composable / service / component) is also provided.
 | Pre-built helpers (`showToast`, …) | ✅ | ✅ `helpers` prop | ✅ | ✅ |
 | Navigation function | ✅ `registerNavigationFunction` | ✅ `useAgoNavigation` | ✅ `useAgoNavigation` | ✅ `AgoService` |
 | Page state function | ✅ `registerPageStateFunction` | ✅ `useAgoPageState` | ✅ `useAgoPageState` | ✅ `AgoService` |
-| Auto-continue after navigation | ➖ compose manually | ✅ `useAgoAutoContinueAfterNavigation` | ➖ not yet | ➖ not yet |
+| Auto-continue after navigation | ✅ `attachAutoContinueAfterNavigation` | ✅ `useAgoAutoContinueAfterNavigation` | ➖ core API | ✅ `enableAutoContinueAfterNavigation` |
 | Client context | ✅ `setContext` / `addDynamicContext` | ✅ `useAgoContext` | ✅ core API | ✅ core API |
 | Auto page context | ✅ `enableAutoPageContext()` | ✅ `pageContext="auto"` | ✅ core API | ✅ core API |
 | Events (`on`/`off`/`once`/`waitFor`) | ✅ | ✅ (via client) | ✅ `useAgoEvents` | ✅ `messages$` Observables |
