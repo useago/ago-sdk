@@ -320,7 +320,7 @@ export class AgoClient {
     options?: SendMessageOptions
   ): ClientFunctionsMode {
     return (
-      options?.clientFunctionsMode ?? this.config.clientFunctionsMode ?? "placeholder"
+      options?.clientFunctionsMode ?? this.config.clientFunctionsMode ?? "pause"
     );
   }
 

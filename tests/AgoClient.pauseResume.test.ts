@@ -98,12 +98,33 @@ describe("pause/resume: sendMessage opt-in", () => {
     expect(calls[1].body?.client_functions_mode).toBe("pause");
   });
 
-  it("does not send the mode in placeholder mode (default)", async () => {
+  it("defaults to pause mode when no mode is configured", async () => {
     const { fn, calls } = routedFetch([
       { match: (u) => u.endsWith("/messages"), respond: () => sseResponse(RESUMED_STREAM) },
     ]);
     vi.stubGlobal("fetch", fn);
     const client = new AgoClient({ baseUrl: "https://x.example.com" });
+    client.registerFunction({
+      name: "navigateToPage",
+      description: "Navigate",
+      parameters: { type: "object", properties: {} },
+      handler: () => ({ ok: true }),
+    });
+
+    await client.sendMessage("hi");
+    expect(calls[0].body?.client_functions).toBeDefined();
+    expect(calls[0].body?.client_functions_mode).toBe("pause");
+  });
+
+  it("does not send the mode in explicit placeholder mode", async () => {
+    const { fn, calls } = routedFetch([
+      { match: (u) => u.endsWith("/messages"), respond: () => sseResponse(RESUMED_STREAM) },
+    ]);
+    vi.stubGlobal("fetch", fn);
+    const client = new AgoClient({
+      baseUrl: "https://x.example.com",
+      clientFunctionsMode: "placeholder",
+    });
     client.registerFunction({
       name: "navigateToPage",
       description: "Navigate",

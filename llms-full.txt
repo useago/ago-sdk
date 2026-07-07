@@ -1086,6 +1086,7 @@ ago.getMessages(conversationId)
 ago.registerFunction(definition)           // or (name, handler, schema)
 ago.unregisterFunction(name)
 ago.registerNavigationFunction(navigate, routes)
+ago.enableAutoContinueAfterNavigation(options?)  // returns a disable fn
 ago.registerPageStateFunction(controls, opts?) / ago.unregisterPageStateFunction(functionName?)
 
 ago.submitToolCallForm(toolCallId, formData)
@@ -1129,6 +1130,14 @@ const router = inject(Router);
 this.ago.registerNavigationFunction((path) => router.navigateByUrl(path), [
   { name: "dashboard", path: "/dashboard", description: "Main dashboard" },
 ]);
+```
+
+To make "go to page B and change X" work in one user message, enable
+auto-continue once (e.g. in the root component) and disable it on teardown:
+
+```ts
+private stopAutoContinue = this.ago.enableAutoContinueAfterNavigation();
+// ngOnDestroy: this.stopAutoContinue();
 ```
 
 Register page state, the mirror of navigation (change the current page's state
@@ -1387,16 +1396,29 @@ function AppShell() {
 }
 ```
 
+Outside React, the same behavior ships as a framework-agnostic helper. Attach it
+once per client; it returns a detach function:
+
+```ts
+import { attachAutoContinueAfterNavigation } from "@useago/sdk";
+
+const detach = attachAutoContinueAfterNavigation(client);
+```
+
+Angular wraps it as `agoService.enableAutoContinueAfterNavigation(options?)`,
+which also returns the disable function (call it in `ngOnDestroy`).
+
 How the gap is bridged depends on the client-functions mode:
 
-- **Pause mode** (recommended, `clientFunctionsMode: "pause"` in the config —
+- **Pause mode** (the default, `clientFunctionsMode: "pause"` —
   needs a backend with pause/resume support): the backend pauses the turn on the
   navigation call. The SDK submits the function result and resumes the SAME turn
   via `POST /messages/{id}/continue`; the hook only delays that resume until the
   destination's `useAgoPageState` registered. No extra prompt, no second turn,
   and the agent sees the real function results.
 
-- **Placeholder mode** (legacy default): when the navigating turn ends, the hook
+- **Placeholder mode** (legacy, `clientFunctionsMode: "placeholder"`, also what
+  older backends without pause/resume support fall back to): when the navigating turn ends, the hook
   waits for the destination page to register, then sends a continuation message
   with `{ hidden: true }` — kept in the model's context, never displayed
   (`useMessages` and `ChatWidget` filter hidden messages). Without backend
@@ -1720,7 +1742,7 @@ interface AgoConfig {
   userJwt?: string;         // Authorization: Bearer <jwt>, authenticated users
   debug?: boolean;          // enable verbose console logging
   warnOnEmptyReply?: boolean; // default true; see "Empty replies" below
-  clientFunctionsMode?: "placeholder" | "pause"; // default "placeholder"
+  clientFunctionsMode?: "placeholder" | "pause"; // default "pause"
   maxFunctionResultBytes?: number; // default 50000; cap on client function results
 }
 ```
@@ -1735,7 +1757,7 @@ interface AgoConfig {
 | `userJwt` | — | `Authorization: Bearer …` | For authenticated sessions. |
 | `debug` | — | — | Turns on the SDK's logger. |
 | `warnOnEmptyReply` | — | — | Default `true`: warn on the console (once per conversation) when a reply completes empty, usually an unknown `agent` slug. The [`message:empty` event](events-and-streaming.md#events) fires regardless. |
-| `clientFunctionsMode` | — | `client_functions_mode` in the body | `"pause"` makes the agent stop on client function call(s) and resume the SAME turn once the results are submitted (the SDK submits and resumes automatically; see the [`message:waiting-client` event](events-and-streaming.md#events)). Default `"placeholder"`: the turn continues on a placeholder and results are only visible on later turns. Needs a backend with pause/resume support; older backends ignore the flag. Per-message override via `sendMessage(..., { clientFunctionsMode })`. |
+| `clientFunctionsMode` | — | `client_functions_mode` in the body | Default `"pause"`: the agent stops on client function call(s) and resumes the SAME turn once the results are submitted (the SDK submits and resumes automatically; see the [`message:waiting-client` event](events-and-streaming.md#events)). Needs a backend with pause/resume support; older backends ignore the flag and fall back to placeholder behavior. Legacy `"placeholder"`: the turn continues on a placeholder and results are only visible on later turns. Per-message override via `sendMessage(..., { clientFunctionsMode })`. |
 | `maxFunctionResultBytes` | — | — | Default `50000`. Client function results larger than this (serialized) are replaced with a truncated preview before reaching the LLM. Override per function with `maxResultBytes`; see [result size limit](functions-and-context.md#result-size-limit). |
 
 ---

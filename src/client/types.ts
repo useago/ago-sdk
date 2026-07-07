@@ -29,11 +29,11 @@ export interface AgoConfig {
   warnOnEmptyReply?: boolean;
   /**
    * How the agent loop treats client function calls (requires backend support):
-   * - `"placeholder"` (default): the turn continues immediately on a placeholder
-   *   result; the real result is only visible to the agent on later turns.
-   * - `"pause"`: the turn stops on client function call(s) with status
+   * - `"pause"` (default): the turn stops on client function call(s) with status
    *   `WAITING_CLIENT`; once every result is submitted, the SDK resumes the SAME
    *   turn via `POST /messages/{id}/continue`, so the agent sees the real results.
+   * - `"placeholder"` (legacy): the turn continues immediately on a placeholder
+   *   result; the real result is only visible to the agent on later turns.
    * Older backends ignore the flag, so `"pause"` degrades to legacy behavior.
    */
   clientFunctionsMode?: ClientFunctionsMode;
