@@ -444,7 +444,7 @@ function AppShell() {
 }
 ```
 
-With `clientFunctionsMode: "pause"` (recommended, needs backend pause/resume
+With `clientFunctionsMode: "pause"` (the default, needs backend pause/resume
 support) the backend pauses the turn on the navigation call and the SDK resumes
 it once the result is submitted; the hook only delays the resume until the
 destination's `useAgoPageState` registered — same turn, no extra prompt, and

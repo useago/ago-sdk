@@ -20,9 +20,9 @@ It defaults to the AGO playground backend (`https://playground.api.useago.com`, 
 Point `VITE_AGO_BASE_URL` at another domain (e.g. `https://YOUR-DOMAIN.api.useago.com`)
 to use your own agents.
 
-The example runs with `clientFunctionsMode="pause"`: the agent pauses on client
-function calls (navigation, cart actions) and resumes the same turn once their
-results are submitted, instead of continuing on a placeholder. Cross-page
+The example runs with the default `clientFunctionsMode` (`"pause"`): the agent
+pauses on client function calls (navigation, cart actions) and resumes the same
+turn once their results are submitted, instead of continuing on a placeholder. Cross-page
 requests ("va sur la page parfums et montre les parfums sans lactose") need the
 backend's pause/resume support and an agent with `reasoning_iterations >= 2`.
 

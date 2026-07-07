@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `attachAutoContinueAfterNavigation(client, options?)`: the auto-continue
+  behavior ("go to page B and change X" in one user message) is now a
+  framework-agnostic core export, returning a detach function. The React hook
+  keeps its API and delegates to it.
+- Angular: `AgoService.enableAutoContinueAfterNavigation(options?)` enables
+  auto-continue after navigation and returns the disable function (call it in
+  `ngOnDestroy`). `AgoAutoContinueOptions` is exported from
+  `@useago/sdk/angular`.
 - `AgoConfig.warnOnEmptyReply` (default `true`) and a `message:empty` event:
   a reply that completes `DONE` with no content, tool calls, or follow-ups
   (usually an unknown `agent` slug) now warns on the console once per
@@ -25,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `clientFunctionsMode` now defaults to `"pause"`: with client functions
+  registered, the turn stops on the client function call(s) and resumes the
+  SAME turn once the results are submitted, so the agent sees the real
+  results. Backends without pause/resume support ignore the flag and keep the
+  old placeholder behavior. Set `clientFunctionsMode: "placeholder"` (config
+  or per message) to opt back into the legacy mode.
 - `new AgoClient({})` (or missing/empty `baseUrl`) now throws an actionable
   `AgoError` (`config_missing_base_url`) instead of a raw `TypeError`.
   Same-origin `/path` baseUrls remain supported; a baseUrl with no protocol
