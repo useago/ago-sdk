@@ -142,6 +142,7 @@ ago.getMessages(conversationId)                 // Promise<AgoMessage[]>
 ago.registerFunction(definition)                // or (name, handler, schema)
 ago.unregisterFunction(name)
 ago.registerNavigationFunction(navigate, routes)
+ago.enableAutoContinueAfterNavigation(options?)  // returns a disable fn
 
 ago.submitToolCallForm(toolCallId, formData)
 ago.confirmToolCall(toolCallId)
@@ -183,6 +184,27 @@ this.ago.registerNavigationFunction((path) => router.navigateByUrl(path), [
 ]);
 ```
 
+To let a request like "open the invoices page and show only the overdue ones"
+complete in one go, enable auto-continue after navigation once (e.g. in your
+root component). It waits for the destination page to register its page state,
+then lets the agent apply the change. It returns a disable function for
+teardown:
+
+```ts
+export class AppComponent implements OnDestroy {
+  private ago = inject(AgoService);
+  private stopAutoContinue = this.ago.enableAutoContinueAfterNavigation();
+
+  ngOnDestroy() {
+    this.stopAutoContinue();
+  }
+}
+```
+
+Options (`AgoAutoContinueOptions`: custom navigation function names, timeouts,
+prompt override) and the pause vs placeholder mechanics are described in
+[Client functions & context](../general/functions-and-context.md#navigate-then-change-the-page-in-one-go).
+
 Register page state, the mirror of navigation: let the agent change the current
 page's state (filters, sort, view mode…) and read it back. Each control becomes
 one optional property of a single synthesized `setPageState` function, and every
@@ -223,7 +245,8 @@ A runnable Angular example lives in
 
 - `AgoService`, `provideAgo`, `AgoProvideOptions`
 - Types: `AgoConfig`, `AgoMessage`, `Conversation`, `AgoAgent`, `AgoSource`,
-  `ToolCallData`, `AgoClientEvents`, `AgoEventName`
+  `ToolCallData`, `AgoClientEvents`, `AgoEventName`, `AgoStateControl`,
+  `AgoPageStateOptions`, `AgoAutoContinueOptions`
 
 See also: [Client functions & context](../general/functions-and-context.md) ·
 [Testing](../general/testing.md) · [Configuration](../general/configuration.md)

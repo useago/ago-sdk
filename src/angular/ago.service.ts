@@ -1,4 +1,6 @@
 import { AgoClient } from "../client/AgoClient";
+import { attachAutoContinueAfterNavigation } from "../client/autoContinue";
+import type { AgoAutoContinueOptions } from "../client/autoContinue";
 import type {
   AgoConfig,
   AgoMessage,
@@ -158,6 +160,34 @@ export class AgoService {
   /** Unregister navigation (function + current-page context) */
   unregisterNavigationFunction(): void {
     this.client.unregisterNavigationFunction();
+  }
+
+  /**
+   * Auto-continue the agent after it navigates, so a "go to page B and change X"
+   * request completes in one user gesture. Enable once (e.g. in your root
+   * component) and call the returned function on teardown:
+   *
+   * ```ts
+   * export class AppComponent implements OnDestroy {
+   *   private ago = inject(AgoService);
+   *   private router = inject(Router);
+   *   private stopAutoContinue = this.ago.enableAutoContinueAfterNavigation();
+   *
+   *   constructor() {
+   *     this.ago.registerNavigationFunction((path) => this.router.navigateByUrl(path), routes);
+   *   }
+   *
+   *   ngOnDestroy() {
+   *     this.stopAutoContinue();
+   *   }
+   * }
+   * ```
+   *
+   * See {@link attachAutoContinueAfterNavigation} for the pause-mode /
+   * placeholder-mode mechanics and the available options.
+   */
+  enableAutoContinueAfterNavigation(options?: AgoAutoContinueOptions): () => void {
+    return attachAutoContinueAfterNavigation(this.client, options);
   }
 
   /** Register editable page-state controls (filters, sort, view mode…) */

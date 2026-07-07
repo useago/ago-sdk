@@ -209,16 +209,29 @@ function AppShell() {
 }
 ```
 
+Outside React, the same behavior ships as a framework-agnostic helper. Attach it
+once per client; it returns a detach function:
+
+```ts
+import { attachAutoContinueAfterNavigation } from "@useago/sdk";
+
+const detach = attachAutoContinueAfterNavigation(client);
+```
+
+Angular wraps it as `agoService.enableAutoContinueAfterNavigation(options?)`,
+which also returns the disable function (call it in `ngOnDestroy`).
+
 How the gap is bridged depends on the client-functions mode:
 
-- **Pause mode** (recommended, `clientFunctionsMode: "pause"` in the config —
+- **Pause mode** (the default, `clientFunctionsMode: "pause"` —
   needs a backend with pause/resume support): the backend pauses the turn on the
   navigation call. The SDK submits the function result and resumes the SAME turn
   via `POST /messages/{id}/continue`; the hook only delays that resume until the
   destination's `useAgoPageState` registered. No extra prompt, no second turn,
   and the agent sees the real function results.
 
-- **Placeholder mode** (legacy default): when the navigating turn ends, the hook
+- **Placeholder mode** (legacy, `clientFunctionsMode: "placeholder"`, also what
+  older backends without pause/resume support fall back to): when the navigating turn ends, the hook
   waits for the destination page to register, then sends a continuation message
   with `{ hidden: true }` — kept in the model's context, never displayed
   (`useMessages` and `ChatWidget` filter hidden messages). Without backend
