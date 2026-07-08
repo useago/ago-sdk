@@ -253,6 +253,37 @@ client.on("function:result", ({ result, error }) =>
 );
 ```
 
+### Approval gate (ask before running)
+
+In pause mode you can hold a client function call until the user approves it.
+Set `approvalPolicy` on the config to gate calls by name (or anything on the
+invocation), or mark a single function with `requiresApproval: true`. The two OR
+together.
+
+```ts
+const client = new AgoClient({
+  baseUrl: "https://playground.api.useago.com",
+  agent: "your-agent",
+  // Return true for calls the user must approve first.
+  approvalPolicy: (inv) => inv.functionName === "deleteAccount",
+});
+
+client.on("function:awaiting-approval", ({ invocationId, functionName }) => {
+  // Show your UI, then decide:
+  if (userSaidYes) client.approveFunction(invocationId); // runs it, resumes the turn
+  else client.rejectFunction(invocationId); // submits a rejection, agent sees the decline
+});
+```
+
+A gated call stays at `WAITING_CLIENT`: the handler does not run and nothing is
+submitted until `approveFunction(invocationId)`. `rejectFunction(invocationId)`
+submits `{ approved: false, reason: "user_rejected" }` so the agent knows the
+user declined, then lets the turn resume. This is a no-op in placeholder mode
+(there is no paused turn to hold onto), so the call runs normally.
+
+In React, `useAgoActivity` surfaces awaiting items with ready-made `approve` /
+`reject` controls (see the [React guide](../frameworks/react.md)).
+
 ---
 
 ## Pre-built helpers

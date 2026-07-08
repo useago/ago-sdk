@@ -5,6 +5,21 @@ All notable changes to `@useago/sdk` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Approval gate for client functions (pause mode): `AgoConfig.approvalPolicy`
+  and a per-function `requiresApproval: true` flag (on `registerFunction`,
+  `useAgoFunction`, and `useAgoPageState`) hold a call at `WAITING_CLIENT`
+  instead of running it. The SDK emits `function:awaiting-approval`; call
+  `client.approveFunction(invocationId)` to run and resume the turn, or
+  `client.rejectFunction(invocationId)` to submit a rejection the agent sees.
+  Placeholder mode has no paused turn to hold, so the gate is a no-op there.
+- React: `useAgoActivity()` hook, a normalized live feed of the agent's actions
+  (navigations, page-state changes, forms, confirmations, status, progress)
+  with `approve` / `reject` / `submitForm` controls for items awaiting the user.
+
 ## [1.5.0] - 2026-07-07
 
 ### Added
