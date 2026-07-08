@@ -221,6 +221,17 @@ export function useAgoActivity(
   // holds even before React commits the optimistic state update.
   const actedRef = useRef<Set<string>>(new Set());
 
+  // The assistant message the current turn's events belong to. A ref (not an
+  // effect-local `let`) so it survives across renders and any listener
+  // re-subscribe — otherwise an inline `labelFor` (the documented usage) would
+  // reset it mid-turn and strand items with `messageId: undefined`.
+  const currentMessageIdRef = useRef<string | undefined>(undefined);
+
+  // Latest `labelFor` read through a ref so `upsert` (and the listener effect)
+  // stay identity-stable regardless of the caller passing an inline arrow.
+  const labelForRef = useRef(labelFor);
+  labelForRef.current = labelFor;
+
   // Upsert an item by id: patch the existing one (preserving createdAt and
   // re-deriving the label) or append a new one, keeping insertion order.
   const upsert = useCallback(
@@ -239,7 +250,7 @@ export function useAgoActivity(
                 createdAt: new Date(),
               };
         const draft: AgoActivityItem = { ...base, ...patch };
-        draft.label = labelFor?.(draft) ?? defaultLabel(draft);
+        draft.label = labelForRef.current?.(draft) ?? defaultLabel(draft);
         if (index >= 0) {
           return [
             ...prev.slice(0, index),
@@ -250,14 +261,12 @@ export function useAgoActivity(
         return [...prev, draft];
       });
     },
-    [labelFor]
+    []
   );
 
   useEffect(() => {
-    let currentMessageId: string | undefined;
-
     const onStart = (data: { messageId: string }) => {
-      currentMessageId = data.messageId;
+      currentMessageIdRef.current = data.messageId;
     };
 
     const onToolCall = (tc: ToolCallData) => {
@@ -266,7 +275,7 @@ export function useAgoActivity(
       upsert(tc.id, {
         kind,
         status: normalizeToolCallStatus(tc.status, kind),
-        messageId: currentMessageId,
+        messageId: currentMessageIdRef.current,
         toolName: tc.toolName,
         toolDisplayName: tc.toolDisplayName,
         message: tc.message,
@@ -281,7 +290,7 @@ export function useAgoActivity(
       upsert(data.invocationId, {
         kind: data.functionName === "navigateToPage" ? "navigation" : "action",
         status: "running",
-        messageId: currentMessageId,
+        messageId: currentMessageIdRef.current,
         functionName: data.functionName,
         arguments: data.arguments,
       });
@@ -292,7 +301,7 @@ export function useAgoActivity(
       upsert(data.invocationId, {
         kind: data.functionName === "navigateToPage" ? "navigation" : "action",
         status: "awaiting-approval",
-        messageId: currentMessageId,
+        messageId: currentMessageIdRef.current,
         functionName: data.functionName,
         arguments: data.arguments,
         requiresApproval: true,
@@ -331,6 +340,13 @@ export function useAgoActivity(
         for (const tc of message.toolCalls ?? []) {
           const kind = kindForToolCallData(tc);
           if (kind === "reasoning" && !includeReasoning) continue;
+          // Skip calls still awaiting the user (WAITING_INPUT/WAITING_CONFIRMATION):
+          // a cold reload can't re-arm the approval gate (the pending invocation is
+          // gone and the page function may not be registered), so rendering them
+          // would be a dead card or a never-ending spinner. Restore resolved steps
+          // only; the turn is still paused server-side and continues on the next
+          // message (or via the opt-in resumePendingClientFunctions).
+          if (/waiting/i.test(tc.status ?? "")) continue;
           upsert(tc.id, {
             kind,
             status: normalizeToolCallStatus(tc.status, kind),

@@ -288,5 +288,11 @@ describe("approval gate: page-reload resume", () => {
     await client.approveFunction("bag1");
     expect(handler).toHaveBeenCalledWith({ statusFilter: "pending" });
     expect(calls.some((c) => c.url.includes("/tool-calls/bag1/submit"))).toBe(true);
+
+    // …and the turn actually RESUMES: without seeding the waiting-confirmed
+    // resume signal on the reload gate, the approved call would submit but never
+    // continue, stranding the turn at WAITING_CLIENT forever.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(calls.some((c) => c.url.endsWith("/messages/m1/continue"))).toBe(true);
   });
 });

@@ -766,6 +766,12 @@ export class AgoClient {
       // approveFunction / rejectFunction and keep the turn paused.
       if (this.requiresApproval(invocation)) {
         this.pendingApprovals.set(call.id, invocation);
+        // The backend already persisted this turn as WAITING_CLIENT (that's why
+        // it restored paused), so record the "waiting confirmed" resume signal
+        // now. Without it, a later approveFunction/rejectFunction would submit
+        // the result (resultsReady) but never fire the auto-resume, stranding the
+        // turn forever — the live path gets this signal from the stream close.
+        this.markResumeSignal(paused.id, conversation.id, "waitingConfirmed");
         this.eventEmitter.emit("function:awaiting-approval", invocation);
         ready = false;
         continue;

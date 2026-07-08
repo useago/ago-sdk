@@ -171,6 +171,50 @@ describe("useAgoActivity: normalization", () => {
     expect(item.status).toBe("done");
     expect(item.label).toBe("Navigating to Products");
   });
+
+  it("skips still-waiting calls when hydrating (no forever-spinner on reload)", async () => {
+    const client = makeFakeClient();
+    const { ref, emit } = await mountHook(client);
+
+    await emit("conversation:loaded", {
+      id: "c1",
+      title: "Conv",
+      lastMessageDate: new Date(),
+      messages: [
+        {
+          id: "m1",
+          conversationId: "c1",
+          content: "",
+          role: "assistant",
+          status: "WAITING_CLIENT",
+          createdAt: new Date(),
+          toolCalls: [
+            {
+              id: "nav1",
+              type: "client_function",
+              status: "completed",
+              toolName: "client__navigateToPage",
+              functionName: "navigateToPage",
+              arguments: { page: "agents" },
+            },
+            {
+              id: "bag1",
+              type: "client_function",
+              status: "waiting_input",
+              toolName: "client__setPageState",
+              functionName: "setPageState",
+              arguments: { statusFilter: "pending" },
+            },
+          ],
+        },
+      ],
+    });
+
+    // The completed navigation restores; the still-waiting setPageState is
+    // dropped rather than shown as a dead card / permanent spinner.
+    expect(ref.current!.items).toHaveLength(1);
+    expect(ref.current!.items[0].id).toBe("nav1");
+  });
 });
 
 describe("useAgoActivity: approvals", () => {
