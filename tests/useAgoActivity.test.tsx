@@ -129,6 +129,48 @@ describe("useAgoActivity: normalization", () => {
     await emit("message:complete", { id: "m1" });
     expect(ref.current!.items[0].status).toBe("done");
   });
+
+  it("hydrates the feed from a restored conversation (survives refresh)", async () => {
+    const client = makeFakeClient();
+    const { ref, emit } = await mountHook(client);
+
+    await emit("conversation:loaded", {
+      id: "c1",
+      title: "Conv",
+      lastMessageDate: new Date(),
+      messages: [
+        { id: "u1", conversationId: "c1", content: "go", role: "user", status: "DONE", createdAt: new Date() },
+        {
+          id: "m1",
+          conversationId: "c1",
+          content: "Done.",
+          role: "assistant",
+          status: "DONE",
+          createdAt: new Date(),
+          toolCalls: [
+            {
+              id: "bag1",
+              type: "client_function",
+              status: "completed",
+              toolName: "client__navigateToPage",
+              functionName: "navigateToPage",
+              arguments: { page: "products" },
+            },
+            { id: "bag2", type: "reasoning", status: "completed", toolName: "", message: "thinking" },
+          ],
+        },
+      ],
+    });
+
+    // Reasoning is suppressed; the navigation is restored, tagged to its message.
+    expect(ref.current!.items).toHaveLength(1);
+    const item = ref.current!.items[0];
+    expect(item.id).toBe("bag1");
+    expect(item.kind).toBe("navigation");
+    expect(item.messageId).toBe("m1");
+    expect(item.status).toBe("done");
+    expect(item.label).toBe("Navigating to Products");
+  });
 });
 
 describe("useAgoActivity: approvals", () => {
@@ -201,5 +243,81 @@ describe("useAgoActivity: approvals", () => {
     });
     expect(client.submitToolCallForm).toHaveBeenCalledWith("f1", { subject: "hi" });
     expect(ref.current!.items[0].status).toBe("done");
+  });
+
+  it("only marks 'rejected' on the user_rejected marker, not any approved:false result", async () => {
+    const client = makeFakeClient();
+    const { ref, emit } = await mountHook(client);
+
+    // A handler returning approved:false as legit business data → done, not rejected.
+    await emit("function:invoke", {
+      invocationId: "inv1",
+      functionName: "checkEligibility",
+      arguments: {},
+      conversationId: "c1",
+    });
+    await emit("function:result", {
+      invocationId: "inv1",
+      result: { approved: false, reason: "ineligible" },
+    });
+    expect(ref.current!.items[0].status).toBe("done");
+
+    // The rejection marker rejectFunction submits → rejected.
+    await emit("function:invoke", {
+      invocationId: "inv2",
+      functionName: "setPageState",
+      arguments: {},
+      conversationId: "c1",
+    });
+    await emit("function:result", {
+      invocationId: "inv2",
+      result: { approved: false, reason: "user_rejected" },
+    });
+    expect(ref.current!.items[1].status).toBe("rejected");
+  });
+
+  it("does not confirm a form item via approve (forms go through submitForm)", async () => {
+    const client = makeFakeClient();
+    const { ref, emit } = await mountHook(client);
+
+    await emit("toolCall:received", {
+      id: "f1",
+      type: "form",
+      status: "waiting_input",
+      toolName: "ticket",
+      message: "Fill it",
+      formSchema: { type: "object", properties: {} },
+    });
+
+    await act(async () => {
+      await ref.current!.approve("f1");
+    });
+    expect(client.confirmToolCall).not.toHaveBeenCalled();
+    expect(client.submitToolCallForm).not.toHaveBeenCalled();
+  });
+
+  it("ignores a second decision on an already-acted item", async () => {
+    const client = makeFakeClient();
+    const { ref, emit } = await mountHook(client);
+
+    await emit("function:invoke", {
+      invocationId: "inv1",
+      functionName: "setPageState",
+      arguments: {},
+      conversationId: "c1",
+    });
+    await emit("function:awaiting-approval", {
+      invocationId: "inv1",
+      functionName: "setPageState",
+      arguments: {},
+      conversationId: "c1",
+    });
+
+    await act(async () => {
+      await ref.current!.approve("inv1");
+      await ref.current!.reject("inv1");
+    });
+    expect(client.approveFunction).toHaveBeenCalledWith("inv1");
+    expect(client.rejectFunction).not.toHaveBeenCalled();
   });
 });

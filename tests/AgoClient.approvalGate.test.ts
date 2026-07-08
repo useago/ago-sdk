@@ -213,3 +213,80 @@ describe("approval gate: leaves ungated calls alone", () => {
     expect(calls.some((c) => c.url.includes("/tool-calls/bag1/submit"))).toBe(true);
   });
 });
+
+describe("approval gate: page-reload resume", () => {
+  function pausedConversation() {
+    return {
+      id: "c1",
+      title: "Conv",
+      lastMessageDate: new Date(),
+      messages: [
+        {
+          id: "u1",
+          conversationId: "c1",
+          content: "filter to pending",
+          role: "user" as const,
+          status: "DONE",
+          createdAt: new Date(),
+        },
+        {
+          id: "m1",
+          conversationId: "c1",
+          content: "",
+          role: "assistant" as const,
+          status: "WAITING_CLIENT",
+          createdAt: new Date(),
+          toolCalls: [
+            {
+              id: "bag1",
+              type: "client_function" as const,
+              status: "waiting_input",
+              toolName: "client__setPageState",
+              functionName: "setPageState",
+              arguments: { statusFilter: "pending" },
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  it("gates a waiting call on reload instead of running it unattended", async () => {
+    const { fn, calls } = gatedRoutes();
+    vi.stubGlobal("fetch", fn);
+
+    const client = new AgoClient({
+      baseUrl: "https://x.example.com",
+      agent: "a1",
+      clientFunctionsMode: "pause",
+    });
+    const handler = vi.fn(() => ({ applied: {} }));
+    client.registerFunction({
+      name: "setPageState",
+      description: "Set page state",
+      parameters: { type: "object", properties: {} },
+      handler,
+      requiresApproval: true,
+    });
+
+    const awaiting: ClientFunctionInvocation[] = [];
+    client.on("function:awaiting-approval", (e) => awaiting.push(e));
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const resumed = await client.resumePendingClientFunctions(
+      pausedConversation() as any
+    );
+
+    // Held for approval, not re-run: no handler call, no submit, turn not resumed.
+    expect(resumed).toBeNull();
+    expect(handler).not.toHaveBeenCalled();
+    expect(awaiting).toHaveLength(1);
+    expect(awaiting[0].invocationId).toBe("bag1");
+    expect(calls.some((c) => c.url.includes("/tool-calls/bag1/submit"))).toBe(false);
+
+    // Approving the reloaded call runs it and submits, same as the live path.
+    await client.approveFunction("bag1");
+    expect(handler).toHaveBeenCalledWith({ statusFilter: "pending" });
+    expect(calls.some((c) => c.url.includes("/tool-calls/bag1/submit"))).toBe(true);
+  });
+});

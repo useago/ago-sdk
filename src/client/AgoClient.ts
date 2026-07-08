@@ -721,8 +721,10 @@ export class AgoClient {
    *
    * Opt-in on purpose — re-running functions on reload can be surprising (e.g. a
    * navigation function would navigate again), so the app decides. Returns the
-   * resumed turn's final message, or `null` when there was nothing to resume or
-   * some waiting function is not registered on this page.
+   * resumed turn's final message, or `null` when there was nothing to resume,
+   * some waiting function is not registered on this page, or a waiting call is
+   * gated by the approval policy (it is held for `approveFunction` /
+   * `rejectFunction` and the turn stays paused, exactly as on the live stream).
    */
   async resumePendingClientFunctions(
     conversation: Conversation
@@ -753,6 +755,21 @@ export class AgoClient {
 
     let ready = waitingCalls.length === 0;
     for (const call of waitingCalls) {
+      const invocation: ClientFunctionInvocation = {
+        invocationId: call.id,
+        functionName: call.functionName!,
+        arguments: call.arguments ?? {},
+        conversationId: conversation.id,
+      };
+      // Apply the same approval gate as the live stream (see onClientFunction):
+      // a gated call must not run unattended on reload. Hold it for
+      // approveFunction / rejectFunction and keep the turn paused.
+      if (this.requiresApproval(invocation)) {
+        this.pendingApprovals.set(call.id, invocation);
+        this.eventEmitter.emit("function:awaiting-approval", invocation);
+        ready = false;
+        continue;
+      }
       let result: unknown;
       let error: string | undefined;
       try {
