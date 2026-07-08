@@ -35,6 +35,15 @@ export type { AgoStateControl, AgoPageStateOptions } from "../functions/types";
 export { useAgoAutoContinueAfterNavigation } from "./hooks/useAgoAutoContinue";
 export type { AgoAutoContinueOptions } from "./hooks/useAgoAutoContinue";
 
+export { useAgoActivity } from "./hooks/useAgoActivity";
+export type {
+  AgoActivityItem,
+  AgoActivityKind,
+  AgoActivityStatus,
+  UseAgoActivityOptions,
+  UseAgoActivityResult,
+} from "./hooks/useAgoActivity";
+
 export { useAgoContext } from "./hooks/useAgoContext";
 
 export { useAgoStore } from "./hooks/useAgoStore";

@@ -38,6 +38,20 @@ export interface AgoConfig {
    */
   clientFunctionsMode?: ClientFunctionsMode;
   /**
+   * Gate client function calls behind explicit user approval. Return `true` for
+   * an invocation the user must approve/reject before it runs; return `false`
+   * (or omit the policy) to let it run immediately as before.
+   *
+   * Only effective in pause mode (`clientFunctionsMode: "pause"`) — a gated call
+   * holds at `WAITING_CLIENT`, the SDK emits `function:awaiting-approval`, and it
+   * runs (and the turn resumes) only after `approveFunction(invocationId)`; a
+   * `rejectFunction(invocationId)` submits a rejection so the agent sees the
+   * decline. In placeholder mode there is no pause to hold, so the policy is a
+   * no-op and the call runs normally. A per-function `requiresApproval: true`
+   * also gates a call; the policy and the flag OR together.
+   */
+  approvalPolicy?: (invocation: ClientFunctionInvocation) => boolean;
+  /**
    * Max serialized size (bytes) of a client function result before the SDK
    * replaces it with a flagged, truncated preview. Everything a handler
    * returns is sent into the LLM context, so this caps runaway payloads
@@ -365,6 +379,15 @@ export interface AgoClientEvents {
   "toolCall:received": ToolCallData;
   "toolCall:form": ToolCallData;
   "function:invoke": ClientFunctionInvocation;
+  /**
+   * A client function call is held pending the user's approval (pause mode +
+   * an {@link AgoConfig.approvalPolicy}/`requiresApproval` match). The turn stays
+   * at `WAITING_CLIENT`; call `approveFunction(invocationId)` to run it and
+   * resume, or `rejectFunction(invocationId)` to decline. Fires after
+   * `function:invoke` (which still fires for every call) and instead of the
+   * call running immediately.
+   */
+  "function:awaiting-approval": ClientFunctionInvocation;
   "function:result": {
     invocationId: string;
     result: unknown;

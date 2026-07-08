@@ -59,6 +59,11 @@ export interface AgoStateControl<T = unknown> {
 export interface AgoPageStateOptions {
   /** Name of the synthesized client function. Defaults to "setPageState". */
   functionName?: string;
+  /**
+   * Require explicit user approval before this state change runs. See
+   * {@link AgoConfig.approvalPolicy} — pause mode only. Defaults to `false`.
+   */
+  requiresApproval?: boolean;
 }
 
 /**
@@ -76,6 +81,11 @@ export type ClientFunctionRegisterOptions = Omit<
    * disables the guard for this function.
    */
   maxResultBytes?: number;
+  /**
+   * Require explicit user approval before this function runs. See
+   * {@link AgoConfig.approvalPolicy} — pause mode only. ORs with the policy.
+   */
+  requiresApproval?: boolean;
 };
 
 /**
@@ -86,6 +96,8 @@ export interface RegisteredFunction {
   handler: ClientFunctionHandler;
   /** Per-function result-size ceiling; falls back to the registry default. */
   maxResultBytes?: number;
+  /** Require explicit user approval before running (pause mode only). */
+  requiresApproval?: boolean;
 }
 
 /**
@@ -112,4 +124,9 @@ export interface ClientFunctionDefinition {
    * `Infinity` disables the guard for this function.
    */
   maxResultBytes?: number;
+  /**
+   * Require explicit user approval before this function runs. See
+   * {@link AgoConfig.approvalPolicy} — pause mode only. ORs with the policy.
+   */
+  requiresApproval?: boolean;
 }

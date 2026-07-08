@@ -30,6 +30,11 @@ export interface UseAgoFunctionOptions {
    * `Infinity` disables the guard for this function.
    */
   maxResultBytes?: number;
+  /**
+   * Require explicit user approval before this function runs (pause mode only).
+   * See `AgoConfig.approvalPolicy`.
+   */
+  requiresApproval?: boolean;
 }
 
 /**
@@ -66,7 +71,7 @@ export function useAgoFunction(
 ): void {
   const client = useAgoClient();
 
-  const { name, description, parameters, handler, maxResultBytes } =
+  const { name, description, parameters, handler, maxResultBytes, requiresApproval } =
     typeof nameOrDef === "string"
       ? { name: nameOrDef, ...(options as UseAgoFunctionOptions) }
       : nameOrDef;
@@ -82,12 +87,13 @@ export function useAgoFunction(
       description,
       parameters,
       maxResultBytes,
+      requiresApproval,
     });
 
     return () => {
       client.unregisterFunction(name);
     };
-  }, [client, name, description, parameters, maxResultBytes]);
+  }, [client, name, description, parameters, maxResultBytes, requiresApproval]);
 }
 
 export interface AgoRoute {
@@ -154,6 +160,7 @@ export function useAgoPageState(
 ): void {
   const client = useAgoClient();
   const fnName = opts?.functionName ?? "setPageState";
+  const requiresApproval = opts?.requiresApproval;
 
   // Capture the latest controls without re-registering on every render — the
   // get/set closures change each render, but the schema is stable.
@@ -175,10 +182,13 @@ export function useAgoPageState(
       };
     });
 
-    client.registerPageStateFunction(stableControls, { functionName: fnName });
+    client.registerPageStateFunction(stableControls, {
+      functionName: fnName,
+      requiresApproval,
+    });
 
     return () => {
       client.unregisterPageStateFunction(fnName);
     };
-  }, [client, fnName]);
+  }, [client, fnName, requiresApproval]);
 }
