@@ -1304,6 +1304,17 @@ Per framework:
 | Vue | `useAgoFunction(name, options)` (auto-cleanup) |
 | Angular | `agoService.registerFunction(def)` |
 
+### Keep the number of functions low
+
+You can send up to **30** client functions with a message. Above that, the
+request is rejected.
+
+Stay well under the limit whenever you can. The more functions the agent has to
+choose from, the harder it becomes to pick the right one: past **10** functions
+in a single message, expect the agent to call the wrong function or miss the
+right one more often. Register only the functions relevant to the current page
+or state, and unregister the ones that no longer apply.
+
 ### Navigation shortcut
 
 A common case (letting the agent move the user around) has a dedicated helper
