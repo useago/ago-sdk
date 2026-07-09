@@ -15,10 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of running it. The SDK emits `function:awaiting-approval`; call
   `client.approveFunction(invocationId)` to run and resume the turn, or
   `client.rejectFunction(invocationId)` to submit a rejection the agent sees.
-  Placeholder mode has no paused turn to hold, so the gate is a no-op there.
+  Placeholder mode has no paused turn to hold, so the gate is a no-op there. The
+  gate also applies after a page reload: `resumePendingClientFunctions` holds a
+  gated call for approval instead of re-running it unattended.
 - React: `useAgoActivity()` hook, a normalized live feed of the agent's actions
   (navigations, page-state changes, forms, confirmations, status, progress)
   with `approve` / `reject` / `submitForm` controls for items awaiting the user.
+  The feed survives a page refresh, rebuilding the resolved activity from a
+  restored conversation.
 
 ## [1.5.0] - 2026-07-07
 

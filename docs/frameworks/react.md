@@ -574,6 +574,12 @@ the model's chain-of-thought (off by default). Approval controls need the
 client's [approval gate](../general/functions-and-context.md#approval-gate-ask-before-running)
 (pause mode).
 
+The feed survives a page refresh. When you restore a conversation with
+`client.getConversation(...)`, the hook rebuilds the already-resolved activity
+from the stored tool calls (steps still waiting on the user are left out; resume
+those with
+[`resumePendingClientFunctions`](../general/functions-and-context.md)).
+
 ---
 
 ## Full example
