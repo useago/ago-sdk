@@ -53,9 +53,20 @@ export class FunctionRegistry {
     schema?: ClientFunctionRegisterOptions
   ): void {
     if (typeof nameOrDef === "object") {
-      const { name, handler: h, description, parameters, maxResultBytes } =
-        nameOrDef;
-      return this.register(name, h, { description, parameters, maxResultBytes });
+      const {
+        name,
+        handler: h,
+        description,
+        parameters,
+        maxResultBytes,
+        requiresApproval,
+      } = nameOrDef;
+      return this.register(name, h, {
+        description,
+        parameters,
+        maxResultBytes,
+        requiresApproval,
+      });
     }
 
     const name = nameOrDef;
@@ -71,13 +82,14 @@ export class FunctionRegistry {
       logger.warn(`Function "${name}" is being overwritten`);
     }
 
-    // maxResultBytes is an SDK-side setting: keep it out of the schema sent
-    // to the backend.
-    const { maxResultBytes, ...schemaRest } = schema;
+    // maxResultBytes and requiresApproval are SDK-side settings: keep them out
+    // of the schema sent to the backend.
+    const { maxResultBytes, requiresApproval, ...schemaRest } = schema;
     this.functions.set(name, {
       schema: { ...schemaRest, name },
       handler,
       maxResultBytes,
+      requiresApproval,
     });
 
     logger.log(`Registered function: ${name}`);

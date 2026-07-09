@@ -536,6 +536,52 @@ function Notifier() {
 
 ---
 
+## 9. Show what the agent is doing: `useAgoActivity`
+
+A live, normalized feed of the agent's actions (navigations, page-state changes,
+forms, confirmations, status, progress) merged from tool calls and client
+function invocations, plus the controls to approve/reject/submit the items that
+wait on the user.
+
+```tsx
+import { useAgoActivity } from "@useago/sdk/react";
+
+function ActivityFeed() {
+  const { items, latest, approve, reject, submitForm } = useAgoActivity();
+
+  return (
+    <ul>
+      {items.map((it) => (
+        <li key={it.id}>
+          {it.label} ({it.status})
+          {it.status === "awaiting-approval" && (
+            <>
+              <button onClick={() => approve(it.id)}>Approve</button>
+              <button onClick={() => reject(it.id)}>Reject</button>
+            </>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+`latest` is the most recent item (handy for a collapsed "latest action" line) and
+`isAwaitingApproval` is true while anything waits on the user. Pass `labelFor` to
+map function/route names to friendly copy, and `includeReasoning: true` to show
+the model's chain-of-thought (off by default). Approval controls need the
+client's [approval gate](../general/functions-and-context.md#approval-gate-ask-before-running)
+(pause mode).
+
+The feed survives a page refresh. When you restore a conversation with
+`client.getConversation(...)`, the hook rebuilds the already-resolved activity
+from the stored tool calls (steps still waiting on the user are left out; resume
+those with
+[`resumePendingClientFunctions`](../general/functions-and-context.md)).
+
+---
+
 ## Full example
 
 A runnable React example lives in [`examples/simple-react`](../examples/simple-react).
@@ -547,8 +593,8 @@ A runnable React example lives in [`examples/simple-react`](../examples/simple-r
 - **Provider/context:** `AgoProvider`, `useAgoClient`, `useOptionalAgoClient`
 - **Hooks:** `useAgo`, `useChat`, `useMessages`, `useConversation`,
   `useAgoFunction`, `useAgoNavigation`, `useAgoPageState`,
-  `useAgoAutoContinueAfterNavigation`, `useAgoContext`, `useAgoStore`,
-  `useFormCollector`
+  `useAgoAutoContinueAfterNavigation`, `useAgoActivity`, `useAgoContext`,
+  `useAgoStore`, `useFormCollector`
 - **Components:** `ChatWidget`, `Message`, `ChatInput`, `Markdown`
 - **Forms:** `createFormCollector` (+ `CreateFormCollectorOptions`, `SubmitConfig`, …)
 - **Testing:** `createMockClient`

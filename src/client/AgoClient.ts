@@ -31,6 +31,7 @@ import type {
   AgoEventName,
   AgoEventHandler,
   AgoMessage,
+  ClientFunctionInvocation,
   ClientFunctionsMode,
   Conversation,
   SendMessageOptions,
@@ -151,6 +152,13 @@ export class AgoClient {
 
   /** Paused turns awaiting auto-resume, keyed by assistant message id. */
   private pendingResumes = new Map<string, PendingResume>();
+
+  /**
+   * Client function invocations held pending user approval, keyed by
+   * invocationId (the tool-call id). Populated when {@link requiresApproval}
+   * matches; drained by {@link approveFunction} / {@link rejectFunction}.
+   */
+  private pendingApprovals = new Map<string, ClientFunctionInvocation>();
 
   /** App-provided gate deciding WHEN a paused turn resumes (see {@link registerResumeGate}). */
   private resumeGate: ResumeGate | null = null;
@@ -285,6 +293,13 @@ export class AgoClient {
       onClientFunction: async (data) => {
         sawClientFunction = true;
         this.eventEmitter.emit("function:invoke", data);
+        // Gate on approval only when there's a pause to hold onto (invocationId
+        // present == pause mode). Otherwise run immediately, as before.
+        if (data.invocationId && this.requiresApproval(data)) {
+          this.pendingApprovals.set(data.invocationId, data);
+          this.eventEmitter.emit("function:awaiting-approval", data);
+          return;
+        }
         await this.handleClientFunctionInvocation(data);
       },
       onAnswerComplete: (message) => {
@@ -529,6 +544,69 @@ export class AgoClient {
     });
   }
 
+  /**
+   * Whether a client function invocation must wait for explicit user approval.
+   * True when the {@link AgoConfig.approvalPolicy} returns true OR the function
+   * was registered with `requiresApproval: true` — the two OR together.
+   */
+  private requiresApproval(invocation: ClientFunctionInvocation): boolean {
+    const policy = this.config.approvalPolicy;
+    if (policy) {
+      try {
+        if (policy(invocation)) return true;
+      } catch (err) {
+        // A throwing policy must never strand a turn — treat it as "no gate".
+        logger.warn("approvalPolicy threw; not gating this call:", err);
+      }
+    }
+    return this.functionRegistry.get(invocation.functionName)?.requiresApproval === true;
+  }
+
+  /**
+   * Approve a client function call held by the approval gate: run it, submit its
+   * result, and let the paused turn resume. No-op if the invocation is unknown
+   * (already handled, or never gated).
+   */
+  async approveFunction(invocationId: string): Promise<void> {
+    const data = this.pendingApprovals.get(invocationId);
+    if (!data) return;
+    this.pendingApprovals.delete(invocationId);
+    await this.handleClientFunctionInvocation(data);
+  }
+
+  /**
+   * Reject a client function call held by the approval gate: submit a rejection
+   * result so the agent sees the user declined, and let the paused turn resume
+   * (the agent decides what to do next). No-op if the invocation is unknown.
+   */
+  async rejectFunction(invocationId: string): Promise<void> {
+    const data = this.pendingApprovals.get(invocationId);
+    if (!data) return;
+    this.pendingApprovals.delete(invocationId);
+
+    const rejection = { approved: false, reason: "user_rejected" };
+    try {
+      const submitResult = await this.submitToolCallForm(invocationId, {
+        result: rejection,
+        _type: "client_function_result",
+      });
+      if (submitResult?.resume?.ready) {
+        this.markResumeSignal(
+          submitResult.resume.message_id,
+          data.conversationId,
+          "resultsReady"
+        );
+      }
+    } catch (submitError) {
+      logger.error("Failed to submit function rejection:", submitError);
+    }
+
+    this.eventEmitter.emit("function:result", {
+      invocationId,
+      result: rejection,
+    });
+  }
+
   // ─────────────────────────────────────────────────────────────────
   // Conversations
   // ─────────────────────────────────────────────────────────────────
@@ -643,8 +721,10 @@ export class AgoClient {
    *
    * Opt-in on purpose — re-running functions on reload can be surprising (e.g. a
    * navigation function would navigate again), so the app decides. Returns the
-   * resumed turn's final message, or `null` when there was nothing to resume or
-   * some waiting function is not registered on this page.
+   * resumed turn's final message, or `null` when there was nothing to resume,
+   * some waiting function is not registered on this page, or a waiting call is
+   * gated by the approval policy (it is held for `approveFunction` /
+   * `rejectFunction` and the turn stays paused, exactly as on the live stream).
    */
   async resumePendingClientFunctions(
     conversation: Conversation
@@ -675,6 +755,27 @@ export class AgoClient {
 
     let ready = waitingCalls.length === 0;
     for (const call of waitingCalls) {
+      const invocation: ClientFunctionInvocation = {
+        invocationId: call.id,
+        functionName: call.functionName!,
+        arguments: call.arguments ?? {},
+        conversationId: conversation.id,
+      };
+      // Apply the same approval gate as the live stream (see onClientFunction):
+      // a gated call must not run unattended on reload. Hold it for
+      // approveFunction / rejectFunction and keep the turn paused.
+      if (this.requiresApproval(invocation)) {
+        this.pendingApprovals.set(call.id, invocation);
+        // The backend already persisted this turn as WAITING_CLIENT (that's why
+        // it restored paused), so record the "waiting confirmed" resume signal
+        // now. Without it, a later approveFunction/rejectFunction would submit
+        // the result (resultsReady) but never fire the auto-resume, stranding the
+        // turn forever — the live path gets this signal from the stream close.
+        this.markResumeSignal(paused.id, conversation.id, "waitingConfirmed");
+        this.eventEmitter.emit("function:awaiting-approval", invocation);
+        ready = false;
+        continue;
+      }
       let result: unknown;
       let error: string | undefined;
       try {
@@ -1070,6 +1171,7 @@ export class AgoClient {
           ),
           // All optional: the agent sets only what the user asked for.
         },
+        requiresApproval: opts?.requiresApproval,
       }
     );
 
@@ -1296,6 +1398,7 @@ export class AgoClient {
     this.functionRegistry.clear();
     this.contextRegistry.clear();
     this.pendingResumes.clear();
+    this.pendingApprovals.clear();
     this.resumeGate = null;
     logger.log("AgoClient destroyed");
   }
