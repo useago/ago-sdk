@@ -38,8 +38,8 @@ export interface FormFieldLeafCondition {
  * An empty `anyOf` is never required; an empty `allOf` is always required.
  *
  * Stripped from the LLM tool's `parameters` (see {@link toWireParameters}), but the
- * full schema, `requiredWhen` included, still reaches the agent via the dynamic
- * context so it knows when each field becomes required.
+ * condition still reaches the agent via the dynamic context's requiredness rules so
+ * it knows when each field becomes required.
  */
 export type FormFieldCondition =
   | FormFieldLeafCondition
@@ -55,14 +55,14 @@ export interface FormFieldSchema {
   /**
    * Makes the field required only while this condition holds. Drives the dynamic
    * `missing` list; stripped from the LLM tool's `parameters` (still sent to the
-   * agent via dynamic context). See {@link toWireParameters}.
+   * agent via the dynamic context's requiredness rules). See {@link toWireParameters}.
    */
   requiredWhen?: FormFieldCondition;
 }
 
 /**
  * Shape of a form's fields. Mirrors a client function's `parameters` (so the same
- * object feeds the store, the update function, and the dynamic context). Additionally allows the SDK-only per-field `requiredWhen`, which {@link toWireParameters} removes from the LLM tool's `parameters` (the full schema still reaches the agent via dynamic context).
+ * object feeds the store, the update function, and the dynamic context). Additionally allows the SDK-only per-field `requiredWhen`, which {@link toWireParameters} removes from the LLM tool's `parameters` (the `requiredWhen` conditions still reach the agent via the dynamic context's requiredness rules).
  */
 export interface FormCollectorSchema {
   type: "object";
@@ -284,8 +284,8 @@ export function deriveFormStatus(
  * SDK-only `requiredWhen` so the tool schema stays JSON-Schema-legal — and set
  * `required: []` so the agent can fill the form incrementally. The form's real
  * requiredness lives in `schema.required` + `requiredWhen` and reaches the agent
- * through the dynamic context (the full schema plus the `missing` list), not this
- * per-call `required`.
+ * through the dynamic context (the requiredness rules plus the `missing` list), not
+ * this per-call `required`.
  */
 function toWireParameters(
   schema: FormCollectorSchema,
@@ -578,9 +578,24 @@ export function createFormCollector<V = Record<string, unknown>>(
   };
 
   const contextKey = `form:${name}`;
-  // The full schema reaches the agent through context (not just the tool params) so it
-  // knows every field, its type, the real `required` list (vs. the tool's `[]`), and the
-  // `requiredWhen` conditions explaining why a field is/becomes required while collecting.
+  // Every field's name, type, description and allowed values already reach the agent
+  // through the update_<name> tool's `parameters` (see toWireParameters). The only
+  // requiredness information the tool omits is the base `required` list (it sends `[]`
+  // so the form can fill incrementally) and the per-field `requiredWhen` conditions
+  // (stripped to keep the tool schema JSON-Schema-legal). So context carries just those
+  // rules, not a second copy of the whole schema — sending the full schema here doubled
+  // the prompt (a large form's schema is the single biggest chunk of the request).
+  const requiredWhenRules = Object.fromEntries(
+    Object.entries(schema.properties ?? {})
+      .filter(([, prop]) => prop.requiredWhen != null)
+      .map(([key, prop]) => [key, prop.requiredWhen]),
+  );
+  const requirementRules: { required: string[]; requiredWhen?: typeof requiredWhenRules } = {
+    required: schema.required ?? [],
+    ...(Object.keys(requiredWhenRules).length > 0 && {
+      requiredWhen: requiredWhenRules,
+    }),
+  };
   const contextProvider = (): ContextEntry => {
     const { values, submitted } = store.get();
     const { missing, complete } = deriveFormStatus(schema, values);
@@ -596,8 +611,9 @@ export function createFormCollector<V = Record<string, unknown>>(
       name: `Form: ${name}`,
       description:
         `${phase} ${description} ` +
-        `Some fields are conditionally required; the requiredWhen field in the schema tells you when each becomes required. ` +
-        `The form schema is the following: ${JSON.stringify(schema)}. ` +
+        `The form's fields, their types and allowed values are defined by the update_${name} tool. ` +
+        `Some fields are conditionally required; these rules say which fields are required and, via requiredWhen, when each becomes required: ` +
+        `${JSON.stringify(requirementRules)}. ` +
         `Data collected so far: ${JSON.stringify(values)}. ` +
         `Call update_${name} with any fields the user provides; ask only for what is still missing.${submitHint}`,
       data: {

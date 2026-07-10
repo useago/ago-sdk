@@ -89,15 +89,53 @@ describe("createFormCollector", () => {
       submitted: false,
     });
     // The agent is told it is mid-collection, that conditional fields are driven by
-    // `requiredWhen`, and is given the full schema + the values collected so far.
+    // `requiredWhen`, and is given the requiredness rules + the values collected so far.
+    // The field schema itself reaches the agent via the update_<name> tool params, so it
+    // is NOT duplicated here (sending the full schema again doubled the prompt).
     expect(entry.description).toContain("collecting information");
     expect(entry.description).toContain("requiredWhen");
+    expect(entry.description).toContain("update_order");
     expect(entry.description).toContain(
-      `The form schema is the following: ${JSON.stringify(schema)}`
+      JSON.stringify({ required: ["product", "quantity"] })
     );
+    // Regression guard: the full schema must not be re-embedded in the context text.
+    expect(entry.description).not.toContain(JSON.stringify(schema));
     expect(entry.description).toContain(
       `Data collected so far: ${JSON.stringify({ product: "Widget" })}`
     );
+  });
+
+  it("forwards requiredWhen conditions through the context (not the full schema)", () => {
+    const conditionalSchema: FormCollectorSchema = {
+      type: "object",
+      properties: {
+        hasCoEmprunteur: { type: "string", enum: ["1", "2"] },
+        coName: {
+          type: "string",
+          description: "Co-borrower name",
+          requiredWhen: { property: "hasCoEmprunteur", value: "2" },
+        },
+      },
+      required: ["hasCoEmprunteur"],
+    };
+    const c = createFormCollector({
+      name: "loan",
+      description: "A loan request.",
+      schema: conditionalSchema,
+      autoSubmit: false,
+    });
+
+    const { description } = c.contextProvider();
+    // The requiredness rules carry the base required list AND the per-field requiredWhen
+    // condition that the update_loan tool params strip out.
+    expect(description).toContain(
+      JSON.stringify({
+        required: ["hasCoEmprunteur"],
+        requiredWhen: { coName: { property: "hasCoEmprunteur", value: "2" } },
+      })
+    );
+    // The full schema (with field types/enums) is not duplicated; it lives in the tool.
+    expect(description).not.toContain(JSON.stringify(conditionalSchema));
   });
 
   it("client submit blocks until complete, then calls the handler and flips submitted", async () => {
