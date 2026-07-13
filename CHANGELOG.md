@@ -5,6 +5,27 @@ All notable changes to `@useago/sdk` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `ContextEntry.stable`: mark a client-context entry as constant for the whole
+  conversation. The backend pins stable entries right after the system prompt,
+  where LLM providers cache them across turns, instead of re-sending them next
+  to every new user message. Backends without support ignore the flag.
+
+### Changed
+
+- Form collectors register two context entries instead of one: a stable
+  `form:<name>:definition` entry carrying the description and full schema
+  (cached across turns), and the existing `form:<name>` entry carrying only
+  the live state (values, missing, complete, submitted). The agent sees the
+  same information; the schema just stops being re-processed on every message.
+  The duplicated "Data collected so far" copy of the values was dropped from
+  the description (they ride in `data`). `FormCollector` exposes the new
+  `definitionContextKey` / `definitionContextProvider`; `install` registers
+  and removes both entries.
+
 ## [1.5.1] - 2026-07-08
 
 ### Added

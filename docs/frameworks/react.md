@@ -122,9 +122,10 @@ message. Pass `onFollowUpClick` to handle clicks yourself, or
 Pass `forms` to let the agent collect and submit a structured form during the
 chat. Each entry is installed as a form collector (see `createFormCollector` /
 `useFormCollector`): the agent gets `update_<name>` / `submit_<name>` functions
-plus a dynamic context telling it that it is collecting information, carrying the
-full form schema (including the `requiredWhen` conditions for conditional fields),
-the data collected so far, and which required fields are still missing.
+plus two context entries. A stable one carries the full form schema (including
+the `requiredWhen` conditions for conditional fields) once per conversation in
+the cacheable part of the prompt; a small per-message one carries the data
+collected so far and which required fields are still missing.
 
 ```tsx
 <ChatWidget

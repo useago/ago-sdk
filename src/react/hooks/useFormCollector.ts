@@ -172,6 +172,12 @@ export function useFormCollector<V = Record<string, unknown>>(
       functions: [],
       contextKey: `form:${options.name}`,
       contextProvider: () => ({ name: `Form: ${options.name}`, description: "" }),
+      definitionContextKey: `form:${options.name}:definition`,
+      definitionContextProvider: () => ({
+        name: `Form definition: ${options.name}`,
+        description: "",
+        stable: true,
+      }),
       install: () => () => {},
       hydrate: () => {},
       submit: async () => ({ ok: false, error: "Form definition not loaded yet." }),

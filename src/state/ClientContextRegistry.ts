@@ -10,6 +10,19 @@ export interface ContextEntry {
   description?: string;
   /** Arbitrary structured data the AI should know about */
   data?: Record<string, unknown>;
+  /**
+   * Marks the entry as constant for the whole conversation. The backend then
+   * pins it right after the system prompt, where LLM providers cache it across
+   * turns, instead of re-processing it next to every new user message.
+   *
+   * Only set this when the entry's content is byte-identical on every message
+   * of a conversation (a schema, a capability list, static instructions). A
+   * stable entry that changes between messages invalidates the provider's
+   * cache for the entire conversation history, which costs more than leaving
+   * the flag off. Default: `false` (re-sent near the newest user message).
+   * Backends that don't know the flag ignore it.
+   */
+  stable?: boolean;
 }
 
 /**

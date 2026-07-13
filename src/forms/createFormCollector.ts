@@ -148,10 +148,22 @@ export interface FormCollector<V = Record<string, unknown>> {
   store: Store<FormCollectorState<V>>;
   /** Client functions to register: `[update]` or `[update, submit]`. */
   functions: ClientFunctionDefinition[];
-  /** Dynamic-context key under which the form state is exposed. */
+  /** Dynamic-context key under which the live form state is exposed. */
   contextKey: string;
-  /** Dynamic-context provider — re-read on every message. */
+  /**
+   * Dynamic-context provider for the live form state (phase, values, missing)
+   * — re-read on every message. The schema itself rides in the companion
+   * {@link definitionContextProvider} entry.
+   */
   contextProvider: () => ContextEntry;
+  /** Context key of the stable form definition (`<contextKey>:definition`). */
+  definitionContextKey: string;
+  /**
+   * Provider for the form's definition (description + schema): identical on
+   * every message and marked `stable: true`, so the backend can pin it in the
+   * cacheable part of the prompt. Registered/removed by `install` alongside `contextProvider`.
+   */
+  definitionContextProvider: () => ContextEntry;
   /** Register the functions + dynamic context on a client. Returns an uninstall fn. */
   install: (client: AgoClient) => () => void;
   /**
@@ -193,8 +205,9 @@ export interface FormCollectorDefinition<V = Record<string, unknown>> {
  * field here overrides the fetched one — notably a client-only `submit` handler,
  * which can't be stored server-side.
  */
-export interface LoadFormCollectorOptions<V = Record<string, unknown>>
-  extends Partial<Omit<CreateFormCollectorOptions<V>, "name">> {
+export interface LoadFormCollectorOptions<
+  V = Record<string, unknown>,
+> extends Partial<Omit<CreateFormCollectorOptions<V>, "name">> {
   name: string;
 }
 
@@ -578,9 +591,22 @@ export function createFormCollector<V = Record<string, unknown>>(
   };
 
   const contextKey = `form:${name}`;
-  // The full schema reaches the agent through context (not just the tool params) so it
-  // knows every field, its type, the real `required` list (vs. the tool's `[]`), and the
-  // `requiredWhen` conditions explaining why a field is/becomes required while collecting.
+  const definitionContextKey = `${contextKey}:definition`;
+
+  // The context is split so the prompt caches well across turns. The definition
+  // entry carries everything that never changes during a conversation (the
+  // description, the requiredWhen explainer, the full schema) and is marked
+  // `stable`, so the backend can pin it in the provider-cacheable prompt prefix.
+  const definitionContextProvider = (): ContextEntry => ({
+    name: `Form definition: ${name}`,
+    description:
+      `${description} ` +
+      `Some fields are conditionally required; the requiredWhen field in the schema tells you when each becomes required. ` +
+      `The form schema is the following: ${JSON.stringify(schema)}.`,
+    stable: true,
+  });
+
+  // Live state only: the values ride in `data`
   const contextProvider = (): ContextEntry => {
     const { values, submitted } = store.get();
     const { missing, complete } = deriveFormStatus(schema, values);
@@ -595,10 +621,7 @@ export function createFormCollector<V = Record<string, unknown>>(
     return {
       name: `Form: ${name}`,
       description:
-        `${phase} ${description} ` +
-        `Some fields are conditionally required; the requiredWhen field in the schema tells you when each becomes required. ` +
-        `The form schema is the following: ${JSON.stringify(schema)}. ` +
-        `Data collected so far: ${JSON.stringify(values)}. ` +
+        `${phase} The form's schema and field requirements are in the "${definitionContextKey}" client context. ` +
         `Call update_${name} with any fields the user provides; ask only for what is still missing.${submitHint}`,
       data: {
         values,
@@ -621,6 +644,9 @@ export function createFormCollector<V = Record<string, unknown>>(
     for (const fn of functions) {
       client.register(fn);
     }
+    // Definition first so that, on backends without stable-context support,
+    // the single rendered block reads schema-then-state like it always has.
+    client.addDynamicContext(definitionContextKey, definitionContextProvider);
     // Registering the provider emits `context:changed`, so the dev panel shows the
     // form's initial missing fields from the very start of the conversation.
     client.addDynamicContext(contextKey, contextProvider);
@@ -635,6 +661,7 @@ export function createFormCollector<V = Record<string, unknown>>(
         client.unregisterFunction(fn.name);
       }
       client.removeDynamicContext(contextKey);
+      client.removeDynamicContext(definitionContextKey);
       client.off("conversation:loaded", handleConversationLoaded);
       if (boundClient === client) {
         boundClient = null;
@@ -648,6 +675,8 @@ export function createFormCollector<V = Record<string, unknown>>(
     functions,
     contextKey,
     contextProvider,
+    definitionContextKey,
+    definitionContextProvider,
     install,
     hydrate,
     submit: doSubmit,
