@@ -79,6 +79,41 @@ function messageFromResult(result: unknown): string | null {
  * `view-transition-name` (names must be unique across the document). */
 let widgetSeq = 0;
 
+// ── Background scroll lock (fixed-body method) ─────────────────────────
+// `overflow: hidden` on <html>/<body> does not stop touch scrolling on iOS
+// Safari, so a full-screen sheet leaves the page scrollable underneath. The
+// reliable cross-browser fix is to pin the body: capture the scroll offset,
+// `position: fixed` the body shifted up by that offset (so it looks unmoved),
+// then restore the offset on unlock. Ref-counted so multiple widgets can't
+// stomp each other's saved position.
+let scrollLockCount = 0;
+let savedScrollY = 0;
+function lockBackgroundScroll(): void {
+  if (scrollLockCount++ > 0) return;
+  savedScrollY = window.scrollY;
+  const { style } = document.body;
+  style.position = "fixed";
+  style.top = `-${savedScrollY}px`;
+  style.left = "0";
+  style.right = "0";
+  style.width = "100%";
+  // overflow: hidden alone is unreliable on iOS but harmless as a second layer.
+  document.documentElement.style.overflow = "hidden";
+}
+function unlockBackgroundScroll(): void {
+  // Guard against underflow if a teardown unlocks a sheet that never locked.
+  if (scrollLockCount === 0) return;
+  if (--scrollLockCount > 0) return;
+  const { style } = document.body;
+  style.removeProperty("position");
+  style.removeProperty("top");
+  style.removeProperty("left");
+  style.removeProperty("right");
+  style.removeProperty("width");
+  document.documentElement.style.removeProperty("overflow");
+  window.scrollTo(0, savedScrollY);
+}
+
 /** `document` augmented with the View Transitions API (not in all TS DOM libs). */
 type DocumentWithVT = Document & {
   startViewTransition?: (callback: () => void) => { finished: Promise<void> };
@@ -183,6 +218,9 @@ export function mountChatWidget(
   const isSide = placement === "left" || placement === "right";
   const showLauncher = isSide && (options.launcher ?? true);
   let panelOpen = isSide ? defaultOpen : true;
+  // Whether the side panel currently holds the background scroll lock (mobile,
+  // full-screen only). Tracked so applyOpenState can reconcile lock/unlock.
+  let panelScrollLocked = false;
 
   // Mobile full-screen is automatic: on small viewports the panel fills the
   // screen with no opt-in. All viewport/transition APIs below are feature-detected
@@ -309,6 +347,9 @@ export function mountChatWidget(
   const messagesEl = div({
     flex: "1",
     overflow: "auto",
+    // Keep overscroll at the top/bottom of the list from chaining into the page
+    // behind the sheet (rubber-banding) on iOS/touch. Layers atop the scroll lock.
+    overscrollBehavior: "contain",
     padding: "16px",
     backgroundColor: MESSAGES_BACKGROUND,
   });
@@ -885,7 +926,12 @@ export function mountChatWidget(
         document.removeEventListener("keydown", onInlineKeydown);
         removeViewportListeners();
         // Drop the scroll lock if we're torn down while expanded.
-        document.documentElement.style.removeProperty("overflow");
+        if (inlineExpanded) unlockBackgroundScroll();
+      }
+      // Drop the side-panel scroll lock if torn down while open on mobile.
+      if (panelScrollLocked) {
+        panelScrollLocked = false;
+        unlockBackgroundScroll();
       }
       // Only tear down the client if we created it.
       if (!options.client) client.destroy();
@@ -914,6 +960,14 @@ export function mountChatWidget(
     wrapper.style.transform = panelOpen ? "translateX(0)" : hidden;
     wrapper.setAttribute("aria-hidden", panelOpen ? "false" : "true");
     if (launcherBtn) launcherBtn.style.display = panelOpen ? "none" : "flex";
+    // Lock the background only while the panel fills the viewport (open + mobile).
+    // Reconciled here so open/close and breakpoint changes all keep it in sync.
+    const shouldLock = panelOpen && !!mobileMQ?.matches;
+    if (shouldLock !== panelScrollLocked) {
+      panelScrollLocked = shouldLock;
+      if (shouldLock) lockBackgroundScroll();
+      else unlockBackgroundScroll();
+    }
   }
   function openPanel(): void {
     panelOpen = true;
@@ -1152,7 +1206,7 @@ export function mountChatWidget(
       container.setAttribute("role", "dialog");
       container.setAttribute("aria-modal", "true");
       container.setAttribute("aria-label", title);
-      document.documentElement.style.overflow = "hidden";
+      lockBackgroundScroll();
       // The bar is the full-screen header, so hide the in-card header to avoid a
       // duplicate logo/title row right beneath it.
       if (header) header.style.display = "none";
@@ -1179,7 +1233,7 @@ export function mountChatWidget(
       container.removeAttribute("role");
       container.removeAttribute("aria-modal");
       container.removeAttribute("aria-label");
-      document.documentElement.style.removeProperty("overflow");
+      unlockBackgroundScroll();
       // Restore the in-card header hidden on expand (it is always flex).
       if (header) header.style.display = "flex";
       if (mobileBar) mobileBar.style.display = "none";

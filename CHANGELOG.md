@@ -26,6 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `definitionContextKey` / `definitionContextProvider`; `install` registers
   and removes both entries.
 
+### Fixed
+
+- Widget: lock background scroll on mobile full-screen panels so the page behind
+  the sheet no longer scrolls or rubber-bands (notably iOS Safari, where
+  `overflow: hidden` does not stop touch scrolling). The body is pinned with the
+  fixed-body method and its scroll position restored on close; ref-counted so
+  stacked widgets don't clobber each other's saved offset.
+
 ## [1.5.1] - 2026-07-08
 
 ### Added
