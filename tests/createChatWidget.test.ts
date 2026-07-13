@@ -637,6 +637,10 @@ describe("mountChatWidget", () => {
       expect(container.getAttribute("role")).toBe("dialog");
       expect(container.getAttribute("aria-modal")).toBe("true");
       expect(document.documentElement.style.overflow).toBe("hidden");
+      // The fixed-body method is what actually stops iOS touch scrolling: the
+      // body is pinned so the background cannot scroll underneath the sheet.
+      expect(document.body.style.position).toBe("fixed");
+      expect(document.body.style.width).toBe("100%");
       // The slim bar shows and the slot is reserved so the page doesn't jump.
       const bar = document.querySelector<HTMLElement>(
         ".ago-chat-widget-mobile-bar",
@@ -649,6 +653,9 @@ describe("mountChatWidget", () => {
       expect(container.getAttribute("role")).toBeNull();
       expect(container.getAttribute("aria-modal")).toBeNull();
       expect(document.documentElement.style.overflow).toBe("");
+      // The body pin is released so the page scrolls normally again.
+      expect(document.body.style.position).toBe("");
+      expect(document.body.style.width).toBe("");
       expect(bar.style.display).toBe("none");
       expect(root.querySelector(".ago-chat-widget-spacer")).toBeNull();
 
