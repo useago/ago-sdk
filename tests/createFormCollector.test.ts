@@ -77,7 +77,7 @@ describe("createFormCollector", () => {
     expect(res).toMatchObject({ ok: true, missing: [] });
   });
 
-  it("exposes current state through the dynamic-context provider", async () => {
+  it("exposes live state and a stable definition through split context providers", async () => {
     const c = makeCollector();
     await c.functions[0].handler({ product: "Widget" });
 
@@ -88,16 +88,26 @@ describe("createFormCollector", () => {
       complete: false,
       submitted: false,
     });
-    // The agent is told it is mid-collection, that conditional fields are driven by
-    // `requiredWhen`, and is given the full schema + the values collected so far.
+    // The state entry stays small: it tells the agent it is mid-collection and
+    // points at the definition entry. The schema and a duplicate copy of the
+    // values are no longer inlined here (values ride in `data` only).
     expect(entry.description).toContain("collecting information");
-    expect(entry.description).toContain("requiredWhen");
-    expect(entry.description).toContain(
+    expect(entry.description).toContain(c.definitionContextKey);
+    expect(entry.stable).toBeUndefined();
+    expect(entry.description).not.toContain("form schema is the following");
+    expect(entry.description).not.toContain("Data collected so far");
+
+    // The definition entry carries the description + requiredWhen explainer +
+    // full schema, unchanged on every message, and is marked stable so the
+    // backend can pin it in the provider-cacheable prompt prefix.
+    expect(c.definitionContextKey).toBe("form:order:definition");
+    const definition = c.definitionContextProvider();
+    expect(definition.stable).toBe(true);
+    expect(definition.description).toContain("requiredWhen");
+    expect(definition.description).toContain(
       `The form schema is the following: ${JSON.stringify(schema)}`
     );
-    expect(entry.description).toContain(
-      `Data collected so far: ${JSON.stringify({ product: "Widget" })}`
-    );
+    expect(definition.data).toBeUndefined();
   });
 
   it("client submit blocks until complete, then calls the handler and flips submitted", async () => {
@@ -296,7 +306,15 @@ describe("createFormCollector", () => {
       "update_order",
       "submit_order",
     ]);
-    expect(client.getContextSnapshot()?.entries["form:order"]).toBeTruthy();
+    // Both entries are registered, definition first (so backends without
+    // stable-context support render schema-then-state in their single block).
+    expect(Object.keys(client.getContextSnapshot()?.entries ?? {})).toEqual([
+      "form:order:definition",
+      "form:order",
+    ]);
+    expect(
+      client.getContextSnapshot()?.entries["form:order:definition"]?.stable
+    ).toBe(true);
 
     uninstall();
     expect(client.getRegisteredFunctions()).toHaveLength(0);
@@ -310,22 +328,25 @@ describe("createFormCollector", () => {
     const onChange = vi.fn();
     client.on("context:changed", onChange);
 
-    // Install registers the provider → fires once, with the initial missing fields.
+    // Install registers the definition + state providers → one event each; the
+    // final snapshot already carries the initial missing fields.
     const uninstall = c.install(client);
-    expect(onChange).toHaveBeenCalledTimes(1);
-    expect(onChange.mock.calls[0][0]?.entries["form:order"]?.data).toMatchObject({
+    expect(onChange).toHaveBeenCalledTimes(2);
+    const installed = onChange.mock.calls.at(-1)?.[0];
+    expect(installed?.entries["form:order"]?.data).toMatchObject({
       missing: ["product", "quantity"],
     });
+    expect(installed?.entries["form:order:definition"]?.stable).toBe(true);
 
     // A store update (agent fills a field) fires again with the fresh snapshot.
     onChange.mockClear();
     await c.functions[0].handler({ product: "Widget" });
     expect(onChange).toHaveBeenCalledTimes(1);
     const entry = onChange.mock.calls[0][0]?.entries["form:order"];
-    expect(entry?.data).toMatchObject({ missing: ["quantity"] });
-    expect(entry?.description).toContain(
-      `Data collected so far: ${JSON.stringify({ product: "Widget" })}`
-    );
+    expect(entry?.data).toMatchObject({
+      values: { product: "Widget" },
+      missing: ["quantity"],
+    });
 
     // UI-driven setValues also fires.
     onChange.mockClear();
