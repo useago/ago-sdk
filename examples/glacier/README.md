@@ -43,6 +43,33 @@ logs every function the agent calls. See [`initDevPanel`](../../docs/general/dev
   truncates it before it reaches the LLM. Watch the console warning and the
   dev panel.)
 
+## Try the proactive mode
+
+The example configures three proactive triggers (`proactive` in `src/main.tsx`)
+with demo-short thresholds, rendered by the `<AgoNudge>` toast in `App.tsx`:
+
+- **Rage clicks** — click 4+ times in under a second on something inert (a
+  heading, the ice-cream drawing). A nudge appears instantly; accepting it
+  opens a conversation ("Quelque chose ne marche pas, aidez-moi.").
+- **Hesitation on the flavors page** — open `/parfums` and don't touch anything
+  for ~10 s. The nudge's action button applies the lactose-free filter through
+  `setPageState`, no chat involved.
+- **Stuck on the shop** — stay idle on `/` for ~20 s. This one is
+  `intervene: 'agent'`: the SDK calls `POST /proactive/evaluate` and the
+  backend's fast LLM decides whether to intervene and drafts the message. It
+  needs a backend with the proactive endpoints — against an older backend the
+  call fails and the SDK silently stays quiet (by design).
+
+Dismissing a nudge suppresses its trigger for 24 h and the demo caps nudges at
+5 per session; to reset between experiments, clear the `ago_proactive` key from
+localStorage (or use a private window).
+
+Note `enabledOverride: true` in the config: it bypasses the remote kill-switch
+(`GET /config` → `proactive.enabled`) so the demo works against backends that
+don't expose the flag yet. Never set it in a real app — the tenant admin
+controls the feature, and the evaluate endpoint stays gated server-side
+regardless.
+
 ## How it works
 
 - `src/functions.ts` defines the client-side functions the agent calls

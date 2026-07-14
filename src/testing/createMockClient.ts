@@ -83,10 +83,28 @@ export function createMockClient(
     registerFunction: () => undefined,
     unregisterFunction: () => true,
     getRegisteredFunctions: () => [] as ClientFunctionSchema[],
+    executeClientFunction: async () => undefined,
     getContextSnapshot: () => null,
     notifyContextChanged: () => undefined,
+    setContext: () => undefined,
+    removeContext: () => true,
+    addDynamicContext: () => undefined,
+    removeDynamicContext: () => true,
     registerNavigationFunction: () => undefined,
     unregisterNavigationFunction: () => undefined,
+    getConfiguredAgent: () => undefined,
+    // Minimal transport stub: a proactive engine attached to the mock sees an
+    // empty config (→ kill-switch stays off) and swallows POSTs.
+    getHttp: () => ({
+      get: async () => ({}),
+      post: async () => ({}),
+    }),
+    // Forward nudge events into the mock's listener map so __emitEvent-style
+    // flows and a real controller both reach `client.on("nudge:*")` handlers.
+    emitProactiveEvent: (event: string, data: unknown) => {
+      const handlers = listeners.get(event);
+      if (handlers) [...handlers].forEach((h) => h(data));
+    },
     on: (event: string, handler: (...args: unknown[]) => void) => {
       if (!listeners.has(event)) listeners.set(event, new Set());
       listeners.get(event)!.add(handler);
@@ -137,6 +155,9 @@ export function createMockClient(
       return (fn as MockFn)(...args);
     };
   }
+
+  // Plain value properties (not wrapped)
+  mock.proactive = null;
 
   // Test helpers (not recorded)
   mock.__calls = calls;

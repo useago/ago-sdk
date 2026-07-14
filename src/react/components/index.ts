@@ -9,3 +9,6 @@ export type { MarkdownProps } from "./Markdown";
 
 export { ChatInput } from "./ChatInput";
 export type { ChatInputProps } from "./ChatInput";
+
+export { AgoNudge } from "./AgoNudge";
+export type { AgoNudgeProps } from "./AgoNudge";

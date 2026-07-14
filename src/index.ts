@@ -116,6 +116,30 @@ export {
   onToolCall,
 } from "./streaming/helpers";
 
+// Proactive mode (friction signals → declarative triggers → nudges)
+export { createAgoProactive } from "./proactive/createAgoProactive";
+export { matchesRoutePattern, matchesWhen, partialDeepMatch } from "./proactive/matchers";
+export type {
+  NudgeAction,
+  ProactiveController,
+  ProactiveEvaluateResponse,
+  ProactiveNudgeInstance,
+  ProactiveOptions,
+  ProactiveTrackedEvent,
+  ProactiveTrigger,
+  ProactiveTriggerWhen,
+} from "./proactive/types";
+
+// Friction signal collection (used by the proactive mode; usable standalone)
+export { SignalCollector } from "./signals/SignalCollector";
+export type { SignalCollectorOptions } from "./signals/SignalCollector";
+export type {
+  Signal,
+  SignalCollectorTuning,
+  SignalsSnapshot,
+  SignalType,
+} from "./signals/types";
+
 // Auto-config / zero-config
 export { autoDetectConfig, createAgo } from "./auto/createAgo";
 

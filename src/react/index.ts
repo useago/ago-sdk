@@ -15,6 +15,9 @@ export type { MarkdownProps } from "./components/Markdown";
 export { ChatInput } from "./components/ChatInput";
 export type { ChatInputProps } from "./components/ChatInput";
 
+export { AgoNudge } from "./components/AgoNudge";
+export type { AgoNudgeProps } from "./components/AgoNudge";
+
 // React hooks
 export { useAgo } from "./hooks/useAgo";
 export type { UseAgoOptions, UseAgoResult } from "./hooks/useAgo";
@@ -45,6 +48,12 @@ export type {
 } from "./hooks/useAgoActivity";
 
 export { useAgoContext } from "./hooks/useAgoContext";
+
+export { useProactiveNudge } from "./hooks/useProactiveNudge";
+export type {
+  UseProactiveNudgeOptions,
+  UseProactiveNudgeResult,
+} from "./hooks/useProactiveNudge";
 
 export { useAgoStore } from "./hooks/useAgoStore";
 
@@ -80,3 +89,10 @@ export type {
   AgoSource,
   ToolCallData,
 } from "../client/types";
+export type {
+  NudgeAction,
+  ProactiveController,
+  ProactiveNudgeInstance,
+  ProactiveOptions,
+  ProactiveTrigger,
+} from "../proactive/types";

@@ -8,3 +8,9 @@ export { useConversation } from "./useConversation";
 export type { UseConversationOptions, UseConversationResult } from "./useConversation";
 
 export { useAgoContext } from "./useAgoContext";
+
+export { useProactiveNudge } from "./useProactiveNudge";
+export type {
+  UseProactiveNudgeOptions,
+  UseProactiveNudgeResult,
+} from "./useProactiveNudge";

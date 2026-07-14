@@ -90,10 +90,18 @@ export class HttpClient {
   }
 
   /**
-   * Make a POST request with JSON body
+   * Make a POST request with JSON body.
+   *
+   * `keepalive: true` lets the request survive a page unload (used by the
+   * proactive event tracker's flush-on-hide — sendBeacon can't carry the auth
+   * headers, so it's a keepalive fetch instead).
    */
-  async post<T>(path: string, body?: unknown): Promise<T> {
-    return this.request<T>("POST", path, body);
+  async post<T>(
+    path: string,
+    body?: unknown,
+    options?: { keepalive?: boolean }
+  ): Promise<T> {
+    return this.request<T>("POST", path, body, options);
   }
 
   /**
@@ -167,7 +175,8 @@ export class HttpClient {
   private async request<T>(
     method: string,
     path: string,
-    body?: unknown
+    body?: unknown,
+    options?: { keepalive?: boolean }
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     logger.debug(method, url, body);
@@ -180,6 +189,7 @@ export class HttpClient {
           "Content-Type": "application/json",
         },
         body: body ? JSON.stringify(body) : undefined,
+        ...(options?.keepalive ? { keepalive: true } : {}),
       });
 
       if (!response.ok) {
