@@ -8,6 +8,8 @@ export { useAgoFunction, useAgoNavigation, useAgoPageState } from "./composables
 export type { AgoStateControl, AgoPageStateOptions } from "../functions/types";
 export { useAgoEvents } from "./composables/useAgoEvents";
 export { useAgoStore } from "./composables/useAgoStore";
+export { useProactiveNudge } from "./composables/useProactiveNudge";
+export type { UseProactiveNudgeResult } from "./composables/useProactiveNudge";
 export { AGO_CLIENT_KEY } from "./symbols";
 
 // Re-export core types for convenience
@@ -19,3 +21,10 @@ export type {
   AgoSource,
   ToolCallData,
 } from "../client/types";
+export type {
+  NudgeAction,
+  ProactiveController,
+  ProactiveNudgeInstance,
+  ProactiveOptions,
+  ProactiveTrigger,
+} from "../proactive/types";

@@ -46,6 +46,15 @@ export function useAgo(
   }, [config?.baseUrl, config?.widgetId]);
 
   useEffect(() => {
+    if (client && clientRef.current === null) {
+      // A previous cleanup destroyed the memoized client and this effect is
+      // re-running with the SAME instance — React StrictMode's simulated
+      // unmount/remount. Hooks re-register their own functions/listeners/
+      // context in their re-run effects; revive the constructor-owned
+      // attachments (the proactive controller).
+      clientRef.current = client;
+      client.reviveAfterDestroy();
+    }
     setIsReady(true);
 
     return () => {

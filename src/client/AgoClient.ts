@@ -13,6 +13,8 @@ import type {
   ClientFunctionRegisterOptions,
   ClientFunctionSchema,
 } from "../functions/types";
+import { createAgoProactive } from "../proactive/createAgoProactive";
+import type { ProactiveController } from "../proactive/types";
 import { ClientContextRegistry } from "../state/ClientContextRegistry";
 import type {
   ContextEntry,
@@ -163,6 +165,13 @@ export class AgoClient {
   /** App-provided gate deciding WHEN a paused turn resumes (see {@link registerResumeGate}). */
   private resumeGate: ResumeGate | null = null;
 
+  /**
+   * Proactive-mode controller, set when the client was created with
+   * `proactive` options or when `createAgoProactive(client, opts)` was called.
+   * `null` otherwise.
+   */
+  proactive: ProactiveController | null = null;
+
   constructor(config: AgoConfig) {
     validateConfig(config, "AgoClient");
     this.config = config;
@@ -175,6 +184,10 @@ export class AgoClient {
 
     if (config.debug) {
       logger.enable();
+    }
+
+    if (config.proactive) {
+      createAgoProactive(this, config.proactive);
     }
 
     logger.log("AgoClient initialized");
@@ -966,6 +979,20 @@ export class AgoClient {
   }
 
   /**
+   * Execute a registered client function locally, through the same
+   * FunctionRegistry path (result-size guard, error wrapping) as agent-invoked
+   * calls. Used by proactive nudge actions, where the user's explicit click on
+   * the action button constitutes the approval — nothing is submitted to the
+   * backend (there is no tool call to answer).
+   */
+  async executeClientFunction(
+    name: string,
+    args: Record<string, unknown>
+  ): Promise<unknown> {
+    return this.functionRegistry.execute(name, args);
+  }
+
+  /**
    * Register a navigation function that lets AGO navigate users to different pages.
    *
    * Also registers a dynamic context entry (`current-page`) that reports the page
@@ -1285,6 +1312,32 @@ export class AgoClient {
   }
 
   /**
+   * @internal Surface a proactive nudge event on the client event bus. Used by
+   * the proactive engine (see {@link createAgoProactive}) so consumers can
+   * listen via `client.on("nudge:ready" | "nudge:shown" | ...)` without
+   * exposing a generic `emit`.
+   */
+  emitProactiveEvent<
+    K extends "nudge:ready" | "nudge:shown" | "nudge:dismissed" | "nudge:accepted",
+  >(event: K, data: AgoClientEvents[K]): void {
+    this.eventEmitter.emit(event, data);
+  }
+
+  /**
+   * @internal Transport shared with SDK-internal attachments (proactive
+   * engine, event tracker) so their calls carry the same auth headers as
+   * every other SDK request.
+   */
+  getHttp(): HttpClient {
+    return this.httpClient;
+  }
+
+  /** @internal The agent (id or slug) the client is configured to talk to. */
+  getConfiguredAgent(): string | undefined {
+    return this.config.agent || this.config.defaultAgentId;
+  }
+
+  /**
    * Enable automatic capture of the current browser page (URL + title).
    * Injected as a dynamic context entry named `browser-page`.
    */
@@ -1394,6 +1447,8 @@ export class AgoClient {
    * Clean up resources
    */
   destroy(): void {
+    this.proactive?.destroy();
+    this.proactive = null;
     this.eventEmitter.removeAllListeners();
     this.functionRegistry.clear();
     this.contextRegistry.clear();
@@ -1401,5 +1456,20 @@ export class AgoClient {
     this.pendingApprovals.clear();
     this.resumeGate = null;
     logger.log("AgoClient destroyed");
+  }
+
+  /**
+   * @internal Re-attach constructor-owned attachments after a {@link destroy}.
+   *
+   * React StrictMode's simulated unmount runs `useAgo`'s cleanup — which
+   * destroys the memoized client — then remounts with the SAME instance.
+   * Hooks re-register their functions, listeners and context on their own in
+   * their re-run effects; the proactive controller is the only
+   * constructor-owned attachment, so it must be revived explicitly.
+   */
+  reviveAfterDestroy(): void {
+    if (this.config.proactive && !this.proactive) {
+      createAgoProactive(this, this.config.proactive);
+    }
   }
 }

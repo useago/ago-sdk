@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import {
+  AgoNudge,
   ChatWidget,
   useAgoAutoContinueAfterNavigation,
   useAgoClient,
@@ -216,6 +217,12 @@ export default function App() {
           </Routes>
         </section>
       </main>
+
+      {/* Proactive nudge (see the `proactive` config in main.tsx): a small
+          dismissable toast near the stage. Accepting runs the nudge's action
+          and/or pre-seeds the chat — the reply streams into the widget on the
+          left, so there is no separate "open chat" step here. */}
+      <AgoNudge openChatLabel="Me faire aider dans le chat" />
     </div>
   );
 }

@@ -1,4 +1,8 @@
 import type { ContextSnapshot } from "../state/ClientContextRegistry";
+import type {
+  ProactiveNudgeInstance,
+  ProactiveOptions,
+} from "../proactive/types";
 
 /**
  * SDK Configuration
@@ -59,6 +63,16 @@ export interface AgoConfig {
    * with `maxResultBytes` on its definition; `Infinity` disables the guard.
    */
   maxFunctionResultBytes?: number;
+  /**
+   * Enable the proactive mode: declarative triggers evaluated client-side
+   * against friction signals (dwell/idle time, rage clicks, route bounces…)
+   * that can surface a nudge before the user opens the chat. Equivalent to
+   * calling `createAgoProactive(client, proactive)` — the resulting controller
+   * is available as `client.proactive`. Requires the tenant-level kill-switch
+   * (`GET /api/sdk/v1/config` → `proactive.enabled`) to be on; disabled by
+   * default otherwise.
+   */
+  proactive?: ProactiveOptions;
 }
 
 /** See {@link AgoConfig.clientFunctionsMode}. */
@@ -417,6 +431,19 @@ export interface AgoClientEvents {
   "connection:status": {
     connected: boolean;
   };
+  /**
+   * A proactive nudge passed every governor gate and is ready to display.
+   * `useProactiveNudge` / `<AgoNudge>` consume this; custom UIs should call
+   * `client.proactive.shown(nudge)` when they render it (impression tracking
+   * + frequency caps), then `accept(nudge)` / `dismiss(nudge)`.
+   */
+  "nudge:ready": ProactiveNudgeInstance;
+  /** A nudge was displayed to the user (fires once per nudge). */
+  "nudge:shown": { nudge: ProactiveNudgeInstance };
+  /** The user dismissed the nudge (its trigger is suppressed, see governor). */
+  "nudge:dismissed": { nudge: ProactiveNudgeInstance };
+  /** The user accepted the nudge (its action ran / the chat is being seeded). */
+  "nudge:accepted": { nudge: ProactiveNudgeInstance };
 }
 
 export type AgoEventName = keyof AgoClientEvents;
