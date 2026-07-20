@@ -1563,8 +1563,34 @@ interface ContextEntry {
   name?: string;        // human label, e.g. "Order detail"
   description?: string; // what this context represents
   data?: Record<string, unknown>; // structured data for the AI
+  stable?: boolean;     // constant for the whole conversation (see below)
 }
 ```
+
+### Stable context (prompt caching)
+
+By default an entry is re-sent next to every new user message, which is right
+for data that changes as the user acts (a cart, the current page). If an
+entry's content never changes during a conversation (a schema, a capability
+list, static instructions), mark it `stable: true`: the backend pins it right
+after the system prompt, where LLM providers cache it across turns instead of
+re-processing it on every message.
+
+```ts
+client.setContext("catalog", {
+  name: "Product catalog",
+  description: "The products the agent can talk about",
+  data: { products: PRODUCTS },
+  stable: true, // content is identical on every message
+});
+```
+
+Only mark an entry stable when its content is byte-identical on every message.
+A "stable" entry that changes between messages invalidates the provider's
+cache for the whole conversation history, which costs more than leaving the
+flag off. Form collectors do this automatically: the form's schema is
+registered as a stable entry and only the live values/missing state is sent
+per message.
 
 ### Dynamic context
 
