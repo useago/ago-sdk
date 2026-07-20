@@ -18,6 +18,16 @@ orchestration, evaluations, quality monitoring, security controls, human
 fallback, and continuous improvement. Your team ships product-native agents that
 resolve customer needs, without rebuilding the full customer-facing agent platform.
 
+> [!TIP]
+> **Using Claude Code, Codex, or Cursor?** You don't have to read these docs.
+> The full documentation lives in a single file built for coding agents. Paste
+> this into your agent and let it do the integration:
+>
+> ```text
+> Read https://raw.githubusercontent.com/useago/ago-sdk/refs/heads/main/llms-full.txt
+> and integrate the AGO chat SDK into this app.
+> ```
+
 In two minutes you'll have a working chat on your page and an agent that can
 navigate your app. The quickstart below uses **React**; every other stack gets
 the same two steps through its own guide:
