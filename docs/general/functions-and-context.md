@@ -202,6 +202,11 @@ It's fire-and-forget: the handler applies each `set()` locally and returns
 the next message. React/Vue offer `useAgoPageState(controls, opts?)` with
 lifecycle cleanup; Angular exposes `agoService.registerPageStateFunction(...)`.
 
+The SDK also tells the agent **what changed**: on each message it diffs the page
+state against the previous message and adds a `state:delta` entry listing the
+fields that changed. A navigation (a different page) resets the baseline instead
+of reporting a diff, so a page switch never shows up as a spurious change.
+
 ### Navigate then change the page in one go
 
 A request like "open the invoices page and show only the overdue ones" needs two
@@ -429,6 +434,26 @@ client.enableAutoPageContext();
 ```
 
 (In React, set `<AgoProvider pageContext="auto">`.)
+
+### Activity ledger
+
+Tell the agent what the user (or the agent) just did, so it can reason about
+recent actions. Call `recordActivity` for meaningful user actions; the agent's
+own client-function calls (navigation, page-state changes, custom functions) are
+recorded automatically.
+
+```ts
+client.recordActivity({
+  name: "order.shipped",
+  summary: 'User changed order #123 from "Pending" to "Shipped"',
+});
+```
+
+The recent window (last 30, oldest dropped first) rides along as the
+`activity:recent` context entry. `actor` defaults to `"user"`; keep `summary`
+short and high-signal (no raw payloads or secrets). Read or clear the log with
+`client.getRecentActivity()` / `client.clearActivity()`, observe it via
+`client.on("activity:recorded", …)`, or use the React `useAgoActivityLog()` hook.
 
 ### Per framework
 

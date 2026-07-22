@@ -5,6 +5,20 @@ All notable changes to `@useago/sdk` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `AgoClient.recordActivity(entry)`: record a user (or agent) action into an
+  activity ledger so the agent knows what just happened. The recent window (last
+  30) rides along as the `activity:recent` context entry; the agent's own
+  client-function calls are recorded automatically. Read or clear with
+  `getRecentActivity()` / `clearActivity()`, observe via the `activity:recorded`
+  event, or use the React `useAgoActivityLog()` hook.
+- Page-state changes are now reported to the agent: each message includes a
+  `state:delta` entry listing the page-state fields that changed since the last
+  message. A navigation resets the baseline instead of reporting a diff.
+
 ## [1.5.2] - 2026-07-13
 
 ### Added
