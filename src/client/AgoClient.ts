@@ -1,3 +1,5 @@
+import { ActivityLedger } from "../activity/ActivityLedger";
+import type { ActivityEntry, ActivityInput } from "../activity/ActivityLedger";
 import { HttpClient } from "../api/HttpClient";
 import type {
   FormCollectorDefinition,
@@ -139,6 +141,9 @@ function matchRoute(pathname: string, routes: NavRoute[]): NavRoute | undefined 
     .sort((a, b) => b.path.length - a.path.length)[0];
 }
 
+/** Context key under which the recent-activity window rides along with messages. */
+const ACTIVITY_CONTEXT_KEY = "activity:recent";
+
 /**
  * Main SDK client for AGO Chat integration
  */
@@ -147,6 +152,7 @@ export class AgoClient {
   private functionRegistry: FunctionRegistry;
   private contextRegistry: ClientContextRegistry;
   private eventEmitter: EventEmitter<AgoClientEvents>;
+  private activityLedger: ActivityLedger = new ActivityLedger();
   private config: AgoConfig;
 
   /** Conversations already warned about an empty reply (one warning each). */
@@ -181,6 +187,7 @@ export class AgoClient {
     });
     this.contextRegistry = new ClientContextRegistry();
     this.eventEmitter = new EventEmitter();
+    this.registerActivityContext();
 
     if (config.debug) {
       logger.enable();
@@ -306,6 +313,7 @@ export class AgoClient {
       onClientFunction: async (data) => {
         sawClientFunction = true;
         this.eventEmitter.emit("function:invoke", data);
+        this.recordAgentAction(data);
         // Gate on approval only when there's a pause to hold onto (invocationId
         // present == pause mode). Otherwise run immediately, as before.
         if (data.invocationId && this.requiresApproval(data)) {
@@ -1362,6 +1370,73 @@ export class AgoClient {
   }
 
   // ─────────────────────────────────────────────────────────────────
+  // Activity ledger
+  // ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Record something the user just did so the agent is aware of it on the next
+   * message. `actor` defaults to `"user"`. Keep `summary` short and high-signal
+   * (no raw payloads, secrets, or PII).
+   */
+  recordActivity(entry: ActivityInput): void {
+    this.addActivity(entry);
+  }
+
+  /** Recent user + agent actions, oldest first (a copy). */
+  getRecentActivity(): ActivityEntry[] {
+    return this.activityLedger.getRecent();
+  }
+
+  clearActivity(): void {
+    this.activityLedger.clear();
+  }
+
+  private addActivity(entry: ActivityInput): void {
+    const recorded = this.activityLedger.add(entry);
+    this.eventEmitter.emit("activity:recorded", recorded);
+  }
+
+  private recordAgentAction(data: ClientFunctionInvocation): void {
+    const fn = data.functionName;
+    const args = data.arguments;
+    let name: string;
+    let summary: string;
+    if (fn === "navigateToPage") {
+      const page = args?.page;
+      name = "agent.navigate";
+      summary = page ? `Agent navigated to "${String(page)}"` : "Agent navigated";
+    } else if (fn === "setPageState") {
+      name = "agent.page_state";
+      summary = "Agent changed the page state";
+    } else {
+      name = `agent.${fn}`;
+      summary = `Agent ran "${fn}"`;
+    }
+    this.addActivity({
+      actor: "agent",
+      name,
+      summary,
+      ...(args && Object.keys(args).length > 0 ? { data: { arguments: args } } : {}),
+    });
+  }
+
+  // Re-registered from reviveAfterDestroy (destroy clears the context registry,
+  // but the ledger itself survives on the instance).
+  private registerActivityContext(): void {
+    this.contextRegistry.addDynamicProvider(ACTIVITY_CONTEXT_KEY, () => {
+      const events = this.activityLedger.getRecent();
+      if (events.length === 0) return null;
+      return {
+        name: "Recent activity",
+        description:
+          "Recent actions by the user and the agent in the app, oldest first. " +
+          "Use this to understand what just happened before this message.",
+        data: { events },
+      };
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────
   // Events
   // ─────────────────────────────────────────────────────────────────
 
@@ -1468,6 +1543,7 @@ export class AgoClient {
    * constructor-owned attachment, so it must be revived explicitly.
    */
   reviveAfterDestroy(): void {
+    this.registerActivityContext();
     if (this.config.proactive && !this.proactive) {
       createAgoProactive(this, this.config.proactive);
     }

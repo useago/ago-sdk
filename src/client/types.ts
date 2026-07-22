@@ -1,3 +1,4 @@
+import type { ActivityEntry } from "../activity/ActivityLedger";
 import type { ContextSnapshot } from "../state/ClientContextRegistry";
 import type {
   ProactiveNudgeInstance,
@@ -444,6 +445,8 @@ export interface AgoClientEvents {
   "nudge:dismissed": { nudge: ProactiveNudgeInstance };
   /** The user accepted the nudge (its action ran / the chat is being seeded). */
   "nudge:accepted": { nudge: ProactiveNudgeInstance };
+  /** A user- or agent-action was recorded into the activity ledger. */
+  "activity:recorded": ActivityEntry;
 }
 
 export type AgoEventName = keyof AgoClientEvents;

@@ -47,6 +47,13 @@ export type {
   UseAgoActivityResult,
 } from "./hooks/useAgoActivity";
 
+export { useAgoActivityLog } from "./hooks/useAgoActivityLog";
+export type {
+  UseAgoActivityLogOptions,
+  UseAgoActivityLogResult,
+} from "./hooks/useAgoActivityLog";
+export type { ActivityEntry, ActivityInput } from "../activity/ActivityLedger";
+
 export { useAgoContext } from "./hooks/useAgoContext";
 
 export { useProactiveNudge } from "./hooks/useProactiveNudge";
