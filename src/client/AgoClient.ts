@@ -23,6 +23,8 @@ import type {
   ContextSnapshot,
   DynamicContextProvider,
 } from "../state/ClientContextRegistry";
+import { computePageStateDelta } from "../state/pageStateDelta";
+import type { PageStateBaseline } from "../state/pageStateDelta";
 import { SSEHandler } from "../streaming/SSEHandler";
 import { mapAttachment } from "../utils/attachments";
 import { EventEmitter } from "../utils/eventEmitter";
@@ -144,6 +146,9 @@ function matchRoute(pathname: string, routes: NavRoute[]): NavRoute | undefined 
 /** Context key under which the recent-activity window rides along with messages. */
 const ACTIVITY_CONTEXT_KEY = "activity:recent";
 
+/** Context key for the page-state changes since the last message. */
+const STATE_DELTA_CONTEXT_KEY = "state:delta";
+
 /**
  * Main SDK client for AGO Chat integration
  */
@@ -153,6 +158,7 @@ export class AgoClient {
   private contextRegistry: ClientContextRegistry;
   private eventEmitter: EventEmitter<AgoClientEvents>;
   private activityLedger: ActivityLedger = new ActivityLedger();
+  private lastSentPageState: PageStateBaseline | null = null;
   private config: AgoConfig;
 
   /** Conversations already warned about an empty reply (one warning each). */
@@ -213,7 +219,7 @@ export class AgoClient {
   ): Promise<AgoMessage> {
     const clientFunctions = this.functionRegistry.getSchemas();
 
-    const clientContext = this.contextRegistry.getSnapshot();
+    const clientContext = this.buildSendContext();
 
     const configAgent = this.config.agent || this.config.defaultAgentId;
 
@@ -389,7 +395,7 @@ export class AgoClient {
    */
   async continueMessage(messageId: string): Promise<AgoMessage> {
     const clientFunctions = this.functionRegistry.getSchemas();
-    const clientContext = this.contextRegistry.getSnapshot();
+    const clientContext = this.buildSendContext();
 
     const body: Record<string, unknown> = {};
     if (clientFunctions.length > 0) {
@@ -1367,6 +1373,31 @@ export class AgoClient {
    */
   getContextSnapshot(): ContextSnapshot | null {
     return this.contextRegistry.getSnapshot();
+  }
+
+  // Snapshot for an outgoing message: advances the page-state baseline and
+  // appends a `state:delta` entry describing what changed since the last send.
+  private buildSendContext(): ContextSnapshot | null {
+    const snapshot = this.contextRegistry.getSnapshot();
+    const entries = snapshot?.entries ?? {};
+    const { changes, baseline } = computePageStateDelta(
+      this.lastSentPageState,
+      entries
+    );
+    this.lastSentPageState = baseline;
+    if (changes.length === 0) return snapshot;
+    return {
+      entries: {
+        ...entries,
+        [STATE_DELTA_CONTEXT_KEY]: {
+          name: "State changes",
+          description:
+            "Fields in the page state that changed since your last message, " +
+            "as field: <old> -> <new>.",
+          data: { changes },
+        },
+      },
+    };
   }
 
   // ─────────────────────────────────────────────────────────────────
