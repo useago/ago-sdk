@@ -63,6 +63,9 @@ export type {
   DynamicContextProvider,
 } from "./state/ClientContextRegistry";
 
+export { ActivityLedger, DEFAULT_MAX_ACTIVITY_ENTRIES } from "./activity/ActivityLedger";
+export type { ActivityEntry, ActivityInput } from "./activity/ActivityLedger";
+
 // Functions
 export { defineFunction } from "./functions/defineFunction";
 export { FunctionRegistry } from "./functions/FunctionRegistry";
