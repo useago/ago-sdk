@@ -73,6 +73,13 @@ type PendingResume = {
   resultsReady: boolean;
   /** Guards double-continue (e.g. duplicate submit responses). */
   started: boolean;
+  /**
+   * The `waiting_tool_call_ids` of the WAITING_CLIENT close. Lets the client
+   * derive `resultsReady` from its OWN submissions when a submit response could
+   * not report `resume.ready` — a result submitted while a slower server tool
+   * of the same round was still running predates the pause on the backend.
+   */
+  waitingToolCallIds?: string[];
 };
 
 function escapeRegExp(value: string): string {
@@ -166,6 +173,15 @@ export class AgoClient {
 
   /** Paused turns awaiting auto-resume, keyed by assistant message id. */
   private pendingResumes = new Map<string, PendingResume>();
+
+  /**
+   * Tool-call ids whose result this client already submitted. Backstop for the
+   * submit/pause race: a result submitted while a slower server tool of the same
+   * round is still running lands before the backend persists the pause, so its
+   * submit response cannot carry `resume.ready`. When the stream then closes as
+   * WAITING_CLIENT, this set is what proves the waiting results are already in.
+   */
+  private submittedToolCallIds = new Set<string>();
 
   /**
    * Client function invocations held pending user approval, keyed by
@@ -335,7 +351,19 @@ export class AgoClient {
       },
       onWaitingClient: (data) => {
         this.eventEmitter.emit("message:waiting-client", data);
+        // A chained pause waits on NEW calls: drop any stale resultsReady left
+        // by a previous round's submit before confirming this round's pause
+        // (maybeResumeFromSubmissions below re-marks it if it still holds).
+        const stale = this.pendingResumes.get(data.messageId);
+        if (stale) {
+          stale.resultsReady = false;
+        }
         this.markResumeSignal(data.messageId, data.conversationId, "waitingConfirmed");
+        const pending = this.pendingResumes.get(data.messageId);
+        if (pending) {
+          pending.waitingToolCallIds = data.waitingToolCallIds;
+        }
+        this.maybeResumeFromSubmissions();
       },
       onComplete: (message) => {
         this.eventEmitter.emit("message:complete", message);
@@ -438,6 +466,29 @@ export class AgoClient {
     }
     pending.started = true;
     void this.runAutoResume(messageId, pending.conversationId);
+  }
+
+  /**
+   * Derive the `resultsReady` signal from the client's own submissions.
+   *
+   * The backend reports `resume.ready` on a submit response only when the pause
+   * is already persisted. A result submitted while a slower server tool of the
+   * same round (e.g. RAG) was still running predates the pause — its response
+   * carries no resume info, and the later WAITING_CLIENT close either omits the
+   * call from `waiting_tool_call_ids` or still names it. Both shapes resolve
+   * here: once a confirmed pause waits only on calls this client already
+   * submitted (an empty list included), the turn is ready. Called after every
+   * submit and after each WAITING_CLIENT close, whichever lands last.
+   */
+  private maybeResumeFromSubmissions(): void {
+    for (const [messageId, pending] of this.pendingResumes) {
+      if (!pending.waitingConfirmed || pending.started || !pending.waitingToolCallIds) {
+        continue;
+      }
+      if (pending.waitingToolCallIds.every((id) => this.submittedToolCallIds.has(id))) {
+        this.markResumeSignal(messageId, pending.conversationId, "resultsReady");
+      }
+    }
   }
 
   private async runAutoResume(
@@ -550,6 +601,7 @@ export class AgoClient {
           error,
           _type: "client_function_result",
         });
+        this.submittedToolCallIds.add(data.invocationId);
         // Pause mode: the backend flags when EVERY waiting call of the paused
         // turn has its result. Combined with the stream's WAITING_CLIENT close,
         // this triggers the auto-resume (see markResumeSignal).
@@ -559,6 +611,11 @@ export class AgoClient {
             data.conversationId,
             "resultsReady"
           );
+        } else {
+          // No resume info (the submit predated the pause — see
+          // maybeResumeFromSubmissions) or not ready yet: re-evaluate from our
+          // own bookkeeping in case a WAITING_CLIENT close already landed.
+          this.maybeResumeFromSubmissions();
         }
       } catch (submitError) {
         logger.error("Failed to submit function result:", submitError);
@@ -618,12 +675,15 @@ export class AgoClient {
         result: rejection,
         _type: "client_function_result",
       });
+      this.submittedToolCallIds.add(invocationId);
       if (submitResult?.resume?.ready) {
         this.markResumeSignal(
           submitResult.resume.message_id,
           data.conversationId,
           "resultsReady"
         );
+      } else {
+        this.maybeResumeFromSubmissions();
       }
     } catch (submitError) {
       logger.error("Failed to submit function rejection:", submitError);
@@ -820,6 +880,7 @@ export class AgoClient {
         error,
         _type: "client_function_result",
       });
+      this.submittedToolCallIds.add(call.id);
       ready = submitResult?.resume?.ready ?? ready;
     }
 
@@ -1561,6 +1622,7 @@ export class AgoClient {
     this.contextRegistry.clear();
     this.pendingResumes.clear();
     this.pendingApprovals.clear();
+    this.submittedToolCallIds.clear();
     this.resumeGate = null;
     logger.log("AgoClient destroyed");
   }
