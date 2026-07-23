@@ -261,7 +261,47 @@ below) is not re-run on reload either: `resumePendingClientFunctions` holds it
 for `approveFunction` / `rejectFunction` and keeps the turn paused, exactly as on
 the live stream.
 
-### Observe invocations
+### The pause/resume round-trip
+
+One rule drives the whole flow: **the SDK resumes a paused turn once every tool
+call the `WAITING_CLIENT` close listed as waiting has been submitted by this
+client.** The close tells the SDK what the turn *owes*; the SDK's own submission
+ledger tells it what was *paid*. Nothing else is consulted — in particular, the
+submit **response** plays no part in the decision.
+
+```mermaid
+sequenceDiagram
+    participant Page as Page (handlers)
+    participant SDK as AgoClient
+    participant BE as Backend
+
+    SDK->>BE: POST /messages (client_functions_mode: "pause")
+    activate BE
+    BE-->>SDK: SSE · client_function invocation (bag1)
+    Note right of BE: The round may also contain slower<br/>server tools (e.g. RAG) that keep<br/>running after the invocation is sent.
+    SDK->>Page: run handler(arguments)
+    Page-->>SDK: result
+    SDK->>BE: POST /tool-calls/bag1/submit
+    Note left of SDK: ledger: paid += bag1
+    BE-->>SDK: SSE close · WAITING_CLIENT + waiting_tool_call_ids
+    deactivate BE
+    Note left of SDK: owed = waiting_tool_call_ids<br/>Resume once owed ⊆ paid —<br/>submit/close order does not matter.
+    SDK->>SDK: resume gate (optional: wait for the destination page)
+    SDK->>BE: POST /messages/{id}/continue (fresh functions + context)
+    activate BE
+    BE-->>SDK: SSE · continuation … DONE
+    Note right of BE: …or another WAITING_CLIENT (chained pause):<br/>the new close replaces the owed list.
+    deactivate BE
+```
+
+Why the submit response is not the signal: an async client function can be
+executed and submitted while a slower server tool of the same round is still
+running — that submit reaches the backend *before* the pause exists, so its
+response cannot say "ready", and the later close may list the call as already
+settled (or not at all). Deriving the decision from the close + the local ledger
+makes the race disappear: whichever of the submit or the close lands last
+re-runs the same check. The backend stays the safety net — a premature
+`/continue` is rejected with a 409 and the turn remains resumable.
 
 ```ts
 client.on("function:invoke", ({ functionName, arguments: args }) =>

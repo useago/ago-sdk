@@ -245,7 +245,7 @@ describe("pause/resume: full auto flow", () => {
     expect(calls.some((c) => c.url.endsWith("/messages/m1/continue"))).toBe(true);
   });
 
-  it("continues only when the LAST result flips resume.ready (multiple functions)", async () => {
+  it("continues only when the LAST waiting call is submitted (multiple functions)", async () => {
     const twoFunctionStream = [
       'data: {"message_id":"m1","thread":{"id":"c1"},"content":""}\n\n',
       'data: {"tool_call_data":true,"type":"client_function","status":"waiting_input","id":"bag1","function_name":"navigateToPage","arguments":{"path":"/a"},"thread":{"id":"c1"}}\n\n',
@@ -368,11 +368,11 @@ describe("pause/resume: full auto flow", () => {
     expect(calls.filter((c) => c.url.endsWith("/messages/m1/continue"))).toHaveLength(1);
   });
 
-  it("does not resume a chained pause on a stale resultsReady from the previous round", async () => {
-    // Chained pause: round 1's submit reported ready (its resultsReady signal
-    // fired) but the backend continued inline and paused again on a NEW call.
-    // The new waiting-client close must clear the stale signal — the continue
-    // may only fire once the NEW call's result is submitted.
+  it("does not resume a chained pause on submissions from a previous round", async () => {
+    // Chained pause: round 1's calls were submitted (they sit in the ledger)
+    // but the backend paused again on a NEW call. Each WAITING_CLIENT close
+    // replaces the owed list, so the old submissions must not satisfy the new
+    // pause — the continue may only fire once the NEW call's result is in.
     const chainedStream = [
       'data: {"message_id":"m1","thread":{"id":"c1"},"content":""}\n\n',
       'data: {"tool_call_data":true,"type":"client_function","status":"waiting_input","id":"bag2","function_name":"openCart","arguments":{},"thread":{"id":"c1"}}\n\n',
@@ -412,10 +412,10 @@ describe("pause/resume: full auto flow", () => {
       parameters: { type: "object", properties: {} },
       handler: () => ({ opened: true }),
     });
-    // Simulate the stale signal left over from round 1.
+    // Simulate the round-1 leftovers in the submission ledger.
     (client as unknown as {
-      markResumeSignal: (id: string, conv: string, s: string) => void;
-    }).markResumeSignal("m1", "c1", "resultsReady");
+      submittedToolCallIds: Set<string>;
+    }).submittedToolCallIds.add("bag1");
 
     const completed = client.waitFor("message:complete", { timeout: 2000 });
     await client.sendMessage("go");
