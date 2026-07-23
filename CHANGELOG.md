@@ -5,6 +5,18 @@ All notable changes to `@useago/sdk` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Pause mode: a turn no longer strands in `WAITING_CLIENT` when an async client
+  function is executed and submitted while a slower server tool of the same
+  round (e.g. a RAG search) is still running. The auto-resume decision is now
+  derived entirely from the SDK's own submission ledger against the
+  `waiting_tool_call_ids` of the `WAITING_CLIENT` close, so the submit/close
+  arrival order no longer matters. The submit response's `resume.ready` field is
+  now informational only.
+
 ## [1.5.4] - 2026-07-22
 
 ### Added

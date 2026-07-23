@@ -245,7 +245,7 @@ describe("pause/resume: full auto flow", () => {
     expect(calls.some((c) => c.url.endsWith("/messages/m1/continue"))).toBe(true);
   });
 
-  it("continues only when the LAST result flips resume.ready (multiple functions)", async () => {
+  it("continues only when the LAST waiting call is submitted (multiple functions)", async () => {
     const twoFunctionStream = [
       'data: {"message_id":"m1","thread":{"id":"c1"},"content":""}\n\n',
       'data: {"tool_call_data":true,"type":"client_function","status":"waiting_input","id":"bag1","function_name":"navigateToPage","arguments":{"path":"/a"},"thread":{"id":"c1"}}\n\n',
@@ -291,6 +291,143 @@ describe("pause/resume: full auto flow", () => {
 
     const continueCalls = calls.filter((c) => c.url.endsWith("/messages/m1/continue"));
     expect(continueCalls).toHaveLength(1);
+  });
+
+  it("auto-continues when the result was submitted before the pause was persisted (slow server tool race)", async () => {
+    // A slow server tool (e.g. RAG) in the same round delays the pause: the SDK
+    // executes the async function and submits its result while the backend is
+    // still running the tool. That submit predates the pause, so its response
+    // carries NO `resume` field, and the stream later closes WAITING_CLIENT
+    // with an EMPTY waiting list (the bag is already done). The client must
+    // resume from its own submit bookkeeping instead of stranding the turn.
+    const racedStream = [
+      'data: {"message_id":"m1","thread":{"id":"c1"},"content":""}\n\n',
+      'data: {"tool_call_data":true,"type":"client_function","status":"waiting_input","id":"bag1","function_name":"navigateToPage","arguments":{"path":"/billing"},"thread":{"id":"c1"}}\n\n',
+      'data: {"message_id":"m1","thread":{"id":"c1"},"status":"WAITING_CLIENT","waiting_tool_call_ids":[]}\n\n',
+    ];
+    const { fn, calls } = routedFetch([
+      { match: (u) => u.endsWith("/messages"), respond: () => sseResponse(racedStream) },
+      {
+        match: (u) => u.includes("/tool-calls/bag1/submit"),
+        respond: () => jsonResponse({ status: "completed" }),
+      },
+      {
+        match: (u) => u.endsWith("/messages/m1/continue"),
+        respond: () => sseResponse(RESUMED_STREAM),
+      },
+    ]);
+    vi.stubGlobal("fetch", fn);
+
+    const client = makePauseClient();
+    client.registerFunction({
+      name: "navigateToPage",
+      description: "Navigate",
+      parameters: { type: "object", properties: {} },
+      handler: () => ({ navigated: true }),
+    });
+
+    const completed = client.waitFor("message:complete", { timeout: 2000 });
+    await client.sendMessage("go");
+    const final = await completed;
+
+    expect(final.status).toBe("DONE");
+    expect(calls.filter((c) => c.url.endsWith("/messages/m1/continue"))).toHaveLength(1);
+  });
+
+  it("auto-continues when the waiting list only names calls this client already submitted", async () => {
+    // Variant of the race where the pause lands mid-submit: the submit response
+    // still carries no `resume`, but the finalize query ran before the bag
+    // flipped to done, so the waiting list still names it. The submitted-ids
+    // bookkeeping must cover this shape too.
+    const { fn, calls } = routedFetch([
+      { match: (u) => u.endsWith("/messages"), respond: () => sseResponse(PAUSED_STREAM) },
+      {
+        match: (u) => u.includes("/tool-calls/bag1/submit"),
+        respond: () => jsonResponse({ status: "completed" }),
+      },
+      {
+        match: (u) => u.endsWith("/messages/m1/continue"),
+        respond: () => sseResponse(RESUMED_STREAM),
+      },
+    ]);
+    vi.stubGlobal("fetch", fn);
+
+    const client = makePauseClient();
+    client.registerFunction({
+      name: "navigateToPage",
+      description: "Navigate",
+      parameters: { type: "object", properties: {} },
+      handler: () => ({ navigated: true }),
+    });
+
+    const completed = client.waitFor("message:complete", { timeout: 2000 });
+    await client.sendMessage("go");
+    const final = await completed;
+
+    expect(final.status).toBe("DONE");
+    expect(calls.filter((c) => c.url.endsWith("/messages/m1/continue"))).toHaveLength(1);
+  });
+
+  it("does not resume a chained pause on submissions from a previous round", async () => {
+    // Chained pause: round 1's calls were submitted (they sit in the ledger)
+    // but the backend paused again on a NEW call. Each WAITING_CLIENT close
+    // replaces the owed list, so the old submissions must not satisfy the new
+    // pause — the continue may only fire once the NEW call's result is in.
+    const chainedStream = [
+      'data: {"message_id":"m1","thread":{"id":"c1"},"content":""}\n\n',
+      'data: {"tool_call_data":true,"type":"client_function","status":"waiting_input","id":"bag2","function_name":"openCart","arguments":{},"thread":{"id":"c1"}}\n\n',
+      'data: {"message_id":"m1","thread":{"id":"c1"},"status":"WAITING_CLIENT","waiting_tool_call_ids":["bag2"]}\n\n',
+    ];
+    let submitReleased!: () => void;
+    const submitGate = new Promise<void>((resolve) => (submitReleased = resolve));
+    const { fn, calls } = routedFetch([
+      { match: (u) => u.endsWith("/messages"), respond: () => sseResponse(chainedStream) },
+      {
+        match: (u) => u.endsWith("/messages/m1/continue"),
+        respond: () => sseResponse(RESUMED_STREAM),
+      },
+    ]);
+    // bag2's submit resolves only when released, so the waiting-client close is
+    // processed while the new call's result is still outstanding.
+    fn.mockImplementation(async (url: string | URL, init?: RequestInit) => {
+      const u = String(url);
+      calls.push({
+        url: u,
+        body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined,
+      });
+      if (u.endsWith("/messages")) return sseResponse(chainedStream);
+      if (u.includes("/tool-calls/bag2/submit")) {
+        await submitGate;
+        return jsonResponse({ status: "completed", resume: { message_id: "m1", ready: true } });
+      }
+      if (u.endsWith("/messages/m1/continue")) return sseResponse(RESUMED_STREAM);
+      throw new Error(`Unmatched fetch: ${u}`);
+    });
+    vi.stubGlobal("fetch", fn);
+
+    const client = makePauseClient();
+    client.registerFunction({
+      name: "openCart",
+      description: "Open cart",
+      parameters: { type: "object", properties: {} },
+      handler: () => ({ opened: true }),
+    });
+    // Simulate the round-1 leftovers in the submission ledger.
+    (client as unknown as {
+      submittedToolCallIds: Set<string>;
+    }).submittedToolCallIds.add("bag1");
+
+    const completed = client.waitFor("message:complete", { timeout: 2000 });
+    await client.sendMessage("go");
+
+    // The stream closed but bag2's submit is still in flight: no continue yet.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(calls.some((c) => c.url.endsWith("/messages/m1/continue"))).toBe(false);
+
+    submitReleased();
+    const final = await completed;
+    expect(final.status).toBe("DONE");
+    expect(calls.filter((c) => c.url.endsWith("/messages/m1/continue"))).toHaveLength(1);
   });
 });
 

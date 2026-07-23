@@ -169,8 +169,13 @@ export type MessageStatus =
 /**
  * Response of `POST /tool-calls/{id}/submit`. `resume` is only present when the
  * tool call belongs to a turn paused on client functions (pause mode): `ready`
- * flips to `true` once ALL waiting calls of that message are submitted, meaning
- * the turn can be resumed via `continueMessage(resume.message_id)`.
+ * flips to `true` once ALL waiting calls of that message are submitted.
+ *
+ * Informational only: the SDK decides when to resume from its own submission
+ * ledger (what the WAITING_CLIENT close listed as owed vs what this client
+ * submitted), because a result submitted while a slower server tool of the
+ * same round was still running predates the pause — its response cannot carry
+ * resume info at all.
  */
 export interface SubmitToolCallResult {
   status: string;
