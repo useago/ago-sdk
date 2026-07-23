@@ -2,6 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   ActivityLedger,
   DEFAULT_MAX_ACTIVITY_ENTRIES,
+  MAX_ACTIVITY_ARRAY_ITEMS,
+  MAX_ACTIVITY_STRING_LEN,
+  clampActivityData,
 } from "../src/activity/ActivityLedger";
 
 describe("ActivityLedger", () => {
@@ -68,5 +71,72 @@ describe("ActivityLedger", () => {
     ledger.clear();
     expect(ledger.size).toBe(0);
     expect(ledger.getRecent()).toEqual([]);
+  });
+
+  it("defaults the cap to 10", () => {
+    expect(DEFAULT_MAX_ACTIVITY_ENTRIES).toBe(10);
+    const ledger = new ActivityLedger();
+    for (let i = 0; i < 15; i++) ledger.add({ name: `e${i}`, summary: "s", ts: i });
+    expect(ledger.getRecent()).toHaveLength(10);
+  });
+
+  it("clamps oversized data when adding an entry", () => {
+    const ledger = new ActivityLedger();
+    const entry = ledger.add({
+      name: "agent.page_state",
+      summary: "set prompt",
+      data: { prompt: "z".repeat(MAX_ACTIVITY_STRING_LEN + 200) },
+    });
+    expect((entry.data?.prompt as string)).toContain("[truncated 200 chars]");
+  });
+});
+
+describe("clampActivityData", () => {
+  it("truncates long strings with a marker", () => {
+    const long = "x".repeat(MAX_ACTIVITY_STRING_LEN + 500);
+    const out = clampActivityData({ prompt: long });
+    const prompt = out.prompt as string;
+    expect(prompt.length).toBeLessThan(long.length);
+    expect(prompt.startsWith("x".repeat(MAX_ACTIVITY_STRING_LEN))).toBe(true);
+    expect(prompt).toContain("…[truncated 500 chars]");
+  });
+
+  it("leaves short strings and small data untouched", () => {
+    const data = { name: "personal coach", model: "gpt-4.1-mini", n: 3, ok: true };
+    expect(clampActivityData(data)).toEqual(data);
+  });
+
+  it("truncates a deeply nested string but keeps its siblings", () => {
+    const long = "y".repeat(MAX_ACTIVITY_STRING_LEN + 10);
+    const out = clampActivityData({
+      arguments: { promptTitle: "t", prompt: long, model: "gpt-4.1-mini" },
+    });
+    const args = out.arguments as Record<string, unknown>;
+    expect(args.promptTitle).toBe("t");
+    expect(args.model).toBe("gpt-4.1-mini");
+    expect(args.prompt as string).toContain("…[truncated 10 chars]");
+  });
+
+  it("caps long arrays with a remainder marker", () => {
+    const arr = Array.from({ length: MAX_ACTIVITY_ARRAY_ITEMS + 4 }, (_, i) => i);
+    const out = clampActivityData({ items: arr });
+    const items = out.items as unknown[];
+    expect(items).toHaveLength(MAX_ACTIVITY_ARRAY_ITEMS + 1);
+    expect(items[items.length - 1]).toBe("…[+4 more]");
+  });
+
+  it("guards against cycles", () => {
+    const a: Record<string, unknown> = { name: "a" };
+    a.self = a;
+    const out = clampActivityData(a);
+    expect(out.name).toBe("a");
+    expect(out.self).toBe("…[circular]");
+  });
+
+  it("returns a decoupled copy so later input mutation does not leak in", () => {
+    const input: Record<string, unknown> = { nested: { k: "v" } };
+    const out = clampActivityData(input);
+    (input.nested as Record<string, unknown>).k = "changed";
+    expect((out.nested as Record<string, unknown>).k).toBe("v");
   });
 });

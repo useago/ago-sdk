@@ -157,7 +157,7 @@ export class AgoClient {
   private functionRegistry: FunctionRegistry;
   private contextRegistry: ClientContextRegistry;
   private eventEmitter: EventEmitter<AgoClientEvents>;
-  private activityLedger: ActivityLedger = new ActivityLedger();
+  private activityLedger: ActivityLedger;
   private lastSentPageState: PageStateBaseline | null = null;
   private config: AgoConfig;
 
@@ -187,6 +187,7 @@ export class AgoClient {
   constructor(config: AgoConfig) {
     validateConfig(config, "AgoClient");
     this.config = config;
+    this.activityLedger = new ActivityLedger(config.maxActivityEntries);
     this.httpClient = new HttpClient(config);
     this.functionRegistry = new FunctionRegistry({
       maxResultBytes: config.maxFunctionResultBytes,

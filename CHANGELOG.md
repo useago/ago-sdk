@@ -11,10 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `AgoClient.recordActivity(entry)`: record a user (or agent) action into an
   activity ledger so the agent knows what just happened. The recent window (last
-  30) rides along as the `activity:recent` context entry; the agent's own
-  client-function calls are recorded automatically. Read or clear with
+  10 by default) rides along as the `activity:recent` context entry; the agent's
+  own client-function calls are recorded automatically. Read or clear with
   `getRecentActivity()` / `clearActivity()`, observe via the `activity:recorded`
   event, or use the React `useAgoActivityLog()` hook.
+- `AgoConfig.maxActivityEntries`: override how many recent actions the activity
+  ledger keeps (default `10`). Each entry's `data` is size-clamped before storage
+  (long strings truncated, large arrays capped) so a single event can't bloat the
+  context sent on every message.
 - Page-state changes are now reported to the agent: each message includes a
   `state:delta` entry listing the page-state fields that changed since the last
   message. A navigation resets the baseline instead of reporting a diff.
