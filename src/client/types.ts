@@ -65,6 +65,14 @@ export interface AgoConfig {
    */
   maxFunctionResultBytes?: number;
   /**
+   * Max number of recent actions kept in the in-memory activity ledger that
+   * rides along as the `activity:recent` context entry. Older entries drop
+   * first. Default `10`. Larger values give the agent more history at the cost
+   * of tokens on every message. Each entry's `data` is also size-clamped (long
+   * strings truncated, large arrays capped) so one event can't bloat the context.
+   */
+  maxActivityEntries?: number;
+  /**
    * Enable the proactive mode: declarative triggers evaluated client-side
    * against friction signals (dwell/idle time, rage clicks, route bounces…)
    * that can surface a nudge before the user opens the chat. Equivalent to

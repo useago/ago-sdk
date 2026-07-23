@@ -449,9 +449,12 @@ client.recordActivity({
 });
 ```
 
-The recent window (last 30, oldest dropped first) rides along as the
-`activity:recent` context entry. `actor` defaults to `"user"`; keep `summary`
-short and high-signal (no raw payloads or secrets). Read or clear the log with
+The recent window (last 10 by default, oldest dropped first) rides along as the
+`activity:recent` context entry. Change the size with `maxActivityEntries` in the
+config. `actor` defaults to `"user"`; keep `summary` short and high-signal (no raw
+payloads or secrets). Each entry's `data` is size-clamped before it is stored (long
+strings truncated with a `…[truncated N chars]` marker, large arrays capped), so one
+event can't bloat the context. Read or clear the log with
 `client.getRecentActivity()` / `client.clearActivity()`, observe it via
 `client.on("activity:recorded", …)`, or use the React `useAgoActivityLog()` hook.
 

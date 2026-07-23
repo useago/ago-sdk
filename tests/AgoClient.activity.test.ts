@@ -55,4 +55,27 @@ describe("AgoClient activity ledger", () => {
     client.clearActivity();
     expect(client.getRecentActivity()).toEqual([]);
   });
+
+  it("honors maxActivityEntries from config", () => {
+    const capped = new AgoClient({
+      baseUrl: "https://example.test",
+      maxActivityEntries: 2,
+    });
+    capped.recordActivity({ name: "a", summary: "a" });
+    capped.recordActivity({ name: "b", summary: "b" });
+    capped.recordActivity({ name: "c", summary: "c" });
+    expect(capped.getRecentActivity().map((e) => e.name)).toEqual(["b", "c"]);
+    capped.destroy();
+  });
+
+  it("clamps oversized data recorded through the client", () => {
+    client.recordActivity({
+      name: "agent.page_state",
+      summary: "set prompt",
+      data: { prompt: "z".repeat(5000) },
+    });
+    const stored = client.getRecentActivity()[0].data as { prompt: string };
+    expect(stored.prompt.length).toBeLessThan(5000);
+    expect(stored.prompt).toContain("[truncated");
+  });
 });
