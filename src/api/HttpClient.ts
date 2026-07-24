@@ -36,9 +36,11 @@ function generateAnonId(): string {
 export class HttpClient {
   private baseUrl: string;
   private headers: Record<string, string>;
+  private getUserJwt?: () => Promise<string>;
 
   constructor(config: AgoConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, "");
+    this.getUserJwt = config.getUserJwt;
     this.headers = {
       // Header carrying the end-user's anonymous id.
       "X-User-Anon-Id": config.widgetId || generateAnonId(),
@@ -73,12 +75,38 @@ export class HttpClient {
     if (config.userJwt) {
       this.headers["Authorization"] = `Bearer ${config.userJwt}`;
     }
+    if (config.getUserJwt) {
+      this.getUserJwt = config.getUserJwt;
+    }
     if (config.permission !== undefined) {
       if (config.permission) {
         this.headers["X-Widget-Permission"] = config.permission;
       } else {
         delete this.headers["X-Widget-Permission"];
       }
+    }
+  }
+
+  /** Whether an `Authorization: Bearer` header is currently configured. */
+  hasBearerToken(): boolean {
+    return typeof this.headers["Authorization"] === "string";
+  }
+
+  /**
+   * Refresh the bearer token through the configured `getUserJwt` provider.
+   * Returns `false` (without throwing) when no provider is configured or the
+   * provider fails, so callers can decide whether a retry makes sense.
+   */
+  async refreshUserJwt(): Promise<boolean> {
+    if (!this.getUserJwt) return false;
+    try {
+      const jwt = await this.getUserJwt();
+      if (!jwt) return false;
+      this.headers["Authorization"] = `Bearer ${jwt}`;
+      return true;
+    } catch (error) {
+      logger.warn("getUserJwt provider failed:", error);
+      return false;
     }
   }
 
@@ -225,6 +253,19 @@ export class HttpClient {
 
     if (errorData?.error) {
       throw AgoApiError.fromResponse(errorData, response.status);
+    }
+
+    // Some endpoints answer with a bare `{ "reason": "..." }` body instead of
+    // the error envelope (e.g. the voice mint's typed 403 jwt_required).
+    // Surface it as the error code so callers can match on it.
+    const reason = (errorData as { reason?: unknown } | undefined)?.reason;
+    if (typeof reason === "string" && reason !== "") {
+      throw new AgoApiError(
+        `HTTP ${response.status}: ${reason}`,
+        reason,
+        response.status,
+        "api_error"
+      );
     }
 
     // Status-keyed hints for the likeliest first-session failures. Short on

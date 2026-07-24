@@ -1,6 +1,6 @@
 {
   "name": "@useago/sdk",
-  "version": "1.5.4",
+  "version": "1.6.0",
   "description": "Create In-APP AI agents that answers question and performs actions. Works with React, Vue, Angular and vanilla JS/TS.",
   "type": "module",
   "sideEffects": false,
@@ -68,6 +68,16 @@
         "default": "./dist/widget.cjs"
       }
     },
+    "./voice": {
+      "import": {
+        "types": "./dist/voice.d.ts",
+        "default": "./dist/voice.js"
+      },
+      "require": {
+        "types": "./dist/voice.d.cts",
+        "default": "./dist/voice.cjs"
+      }
+    },
     "./devtools": {
       "import": {
         "types": "./dist/devtools.d.ts",
@@ -115,8 +125,9 @@
     "build:llms": "node scripts/build-llms.mjs",
     "build": "npm run clean && vite build && npm run build:cts-types && npm run build:llms",
     "build:cts-types": "for f in $(find dist -name '*.d.ts'); do cp \"$f\" \"${f%.d.ts}.d.cts\"; done",
-    "prepublishOnly": "npm run lint && npm run typecheck && npm test && npm run build && npm run check:package",
+    "prepublishOnly": "npm run lint && npm run typecheck && npm test && npm run build && npm run check:package && npm run check:voice-bundle",
     "check:package": "publint --strict && attw --pack . --profile node16",
+    "check:voice-bundle": "node scripts/check-voice-bundle.mjs",
     "dev": "vite build --watch",
     "test": "vitest run",
     "test:watch": "vitest",

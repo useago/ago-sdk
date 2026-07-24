@@ -148,6 +148,7 @@ describe("error convention conformance", () => {
       "src/react/hooks/useConversation.ts",
       "src/react/hooks/useChat.ts",
       "src/react/hooks/useMessages.ts",
+      "src/react/hooks/useAgoVoice.ts",
     ]);
 
     const srcRoot = join(__dirname, "..", "src");

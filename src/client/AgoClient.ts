@@ -29,6 +29,8 @@ import { SSEHandler } from "../streaming/SSEHandler";
 import { mapAttachment } from "../utils/attachments";
 import { EventEmitter } from "../utils/eventEmitter";
 import { logger } from "../utils/logger";
+import { createVoiceController } from "../voice/controller";
+import type { AgoVoice } from "../voice/controller";
 import { AgoError } from "./errors";
 import { validateConfig } from "./validateConfig";
 import type {
@@ -177,6 +179,9 @@ export class AgoClient {
   /** App-provided gate deciding WHEN a paused turn resumes (see {@link registerResumeGate}). */
   private resumeGate: ResumeGate | null = null;
 
+  /** Lazy singleton voice controller (see {@link voice}). */
+  private voiceController: AgoVoice | null = null;
+
   /**
    * Proactive-mode controller, set when the client was created with
    * `proactive` options or when `createAgoProactive(client, opts)` was called.
@@ -205,6 +210,37 @@ export class AgoClient {
     }
 
     logger.log("AgoClient initialized");
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // Voice
+  // ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Live voice sessions with the agent (mic in, agent audio out, transcripts
+   * landing in the conversation thread).
+   *
+   * A lazy singleton: at most one active session per client, and the session
+   * engine (with its audio worklets) loads through a dynamic import on first
+   * use, so apps that never touch voice bundle none of it. Voice events are
+   * forwarded onto the client emitter as `voice:*`.
+   *
+   * @experimental The controller surface may still move while voice is in its
+   * staff-gated rollout. The status/turn/event/error-code vocabulary is
+   * stable.
+   */
+  get voice(): AgoVoice {
+    if (!this.voiceController) {
+      this.voiceController = createVoiceController({
+        http: this.httpClient,
+        getAgent: () => this.getConfiguredAgent(),
+        getPermission: () => this.config.permission,
+        requireConsent: this.config.voice?.requireConsent,
+        forward: (event, data) =>
+          this.eventEmitter.emit(event, data as AgoClientEvents[typeof event]),
+      });
+    }
+    return this.voiceController;
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -1535,6 +1571,22 @@ export class AgoClient {
     this.config = merged;
     this.httpClient.updateConfig(cleaned);
 
+    const voiceGateChanged = [
+      "agent",
+      "defaultAgentId",
+      "permission",
+      "userJwt",
+      "getUserJwt",
+    ].some((key) => Object.prototype.hasOwnProperty.call(cleaned, key));
+    if (voiceGateChanged && this.voiceController) {
+      // Async auth is common in providers: a first probe may run before the
+      // user JWT arrives. Re-check against the updated bearer/config so the
+      // hook does not cache that anonymous result for the whole page session.
+      void this.voiceController.checkAvailability().catch((error) => {
+        logger.debug("Voice availability refresh failed:", error);
+      });
+    }
+
     if (cleaned.debug !== undefined) {
       if (cleaned.debug) {
         logger.enable();
@@ -1554,6 +1606,10 @@ export class AgoClient {
    * Clean up resources
    */
   destroy(): void {
+    // Stops any live voice session and releases the microphone. The
+    // controller is dropped so a revived client rebuilds a fresh one.
+    this.voiceController?.destroy();
+    this.voiceController = null;
     this.proactive?.destroy();
     this.proactive = null;
     this.eventEmitter.removeAllListeners();

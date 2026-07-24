@@ -100,6 +100,26 @@ export type {
 export { createMockClient } from "./testing";
 export type { MockAgoClient, MockAgoClientOptions } from "./testing";
 
+// Voice (facade types only; the engine lives in @useago/sdk/voice and is
+// dynamic-imported by `client.voice` on first use, never bundled into core)
+export type { AgoVoice } from "./voice/controller";
+export type {
+  AgoVoiceEvents,
+  AgoVoiceOptions,
+  VoiceAvailability,
+  VoiceAvailabilityReport,
+  VoiceBarState,
+  VoiceCaption,
+  VoiceEndedReason,
+  VoicePersistedAck,
+  VoiceSessionState,
+  VoiceStartOptions,
+  VoiceStatus,
+  VoiceStatusEvent,
+  VoiceTurn,
+  VoiceUnavailableReason,
+} from "./voice/types";
+
 // Streaming
 export { isStreamNetworkError, SSEHandler } from "./streaming/SSEHandler";
 

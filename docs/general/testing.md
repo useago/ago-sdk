@@ -81,6 +81,8 @@ and `on` / `off` / `once` / `waitFor` behave like the real client.
 | `mock.__calls` | `Array<{ method, args }>`: every recorded call, in order |
 | `mock.__callsFor(method)` | calls for one method |
 | `mock.__emitEvent(event, data)` | fire an event to subscribers |
+| `mock.voice` | scriptable mock of `client.voice` (no mic/WS/backend); calls recorded as `voice.<method>` |
+| `mockVoiceConversation(mock, { turns })` | script a full voice call that drives the voice hook and components end-to-end; see [Voice](voice.md#testing-voice-uis) |
 
 ---
 

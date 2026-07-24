@@ -18,6 +18,7 @@ export default defineConfig({
         angular: resolve(__dirname, "src/angular/index.ts"),
         helpers: resolve(__dirname, "src/helpers/index.ts"),
         widget: resolve(__dirname, "src/widget/index.ts"),
+        voice: resolve(__dirname, "src/voice/index.ts"),
         devtools: resolve(__dirname, "src/devtools/index.ts"),
         testing: resolve(__dirname, "src/testing/index.ts"),
       },

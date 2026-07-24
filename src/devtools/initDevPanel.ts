@@ -126,6 +126,8 @@ export function initDevPanel(options: DevPanelOptions): void {
   let stateEl: HTMLElement | null = null;
   let logEl: HTMLElement | null = null;
   let eventLogEl: HTMLElement | null = null;
+  let voiceStatusEl: HTMLElement | null = null;
+  let voiceLogEl: HTMLElement | null = null;
 
   // Live JSON pane: the client's context snapshot.
   const getState = () => {
@@ -195,6 +197,9 @@ export function initDevPanel(options: DevPanelOptions): void {
       <pre class="dev-state" id="ago-dev-state"></pre>
       <div class="dev-section-label">Function calls</div>
       <div class="dev-log" id="ago-dev-log"></div>
+      <div class="dev-section-label">Voice</div>
+      <div class="dev-voice-status">idle</div>
+      <div class="dev-log dev-voice-log"></div>
     </div>
   `;
 
@@ -202,6 +207,8 @@ export function initDevPanel(options: DevPanelOptions): void {
   // id query could resolve to the wrong panel. Each class is unique within a panel.
   stateEl = panel.querySelector<HTMLElement>(".dev-state");
   logEl = panel.querySelector<HTMLElement>(".dev-log");
+  voiceStatusEl = panel.querySelector<HTMLElement>(".dev-voice-status");
+  voiceLogEl = panel.querySelector<HTMLElement>(".dev-voice-log");
   wireCollapse(panel, COLLAPSE_KEY + suffix, "dev tools");
 
   // Separate panel for the raw SSE stream: it's high-volume, so keeping it out of
@@ -266,6 +273,44 @@ export function initDevPanel(options: DevPanelOptions): void {
     // Helpers mutate their stores synchronously during replay; repaint to be sure
     // the snapshot reflects the post-hydration state even if no context:changed fired.
     renderState();
+  });
+
+  // Voice protocol status + event log. `voice:level` is deliberately not
+  // logged (it fires per audio frame and would flood the panel); everything
+  // else the session emits shows up here, so "auth sent but no ready" or
+  // "ready but no transcript" patterns are diagnosable at a glance.
+  const clip = (text: string | undefined, max = 80): string => {
+    if (!text) return "";
+    return text.length > max ? `${text.slice(0, max)}…` : text;
+  };
+  client.on("voice:status", (s) => {
+    if (voiceStatusEl) {
+      voiceStatusEl.textContent =
+        `${s.status} · ${s.turn}` +
+        `${s.muted ? " · muted" : ""}` +
+        `${s.degraded ? " · degraded" : ""}` +
+        `${s.consentPending ? " · consent-pending" : ""}`;
+    }
+    appendLine(voiceLogEl, `status ${s.status}/${s.turn}`, "event");
+  });
+  client.on("voice:thread-ready", ({ threadId }) => {
+    appendLine(voiceLogEl, `thread-ready ${threadId}`, "hydrate");
+  });
+  client.on("voice:turn-final", (caption) => {
+    appendLine(
+      voiceLogEl,
+      `${caption.role} final${caption.interrupted ? " (interrupted)" : ""}: ${clip(caption.text)}`,
+      "result",
+    );
+  });
+  client.on("voice:persisted", (ack) => {
+    appendLine(voiceLogEl, `persisted ${ack.role} → ${ack.messageId}`, "result");
+  });
+  client.on("voice:error", (error) => {
+    appendLine(voiceLogEl, `✗ error ${error.code}: ${clip(error.message)}`, "error");
+  });
+  client.on("voice:ended", ({ reason }) => {
+    appendLine(voiceLogEl, `ended (${reason})`, "event");
   });
 
   // Paint the initial context snapshot.
@@ -376,6 +421,8 @@ const PANEL_CSS = `
 }
 /* The SSE log is the events panel's only content, so give it more room. */
 #ago-dev-events .dev-log { max-height: 60vh; }
+.ago-dev-card .dev-voice-status { color: #9ecbff; font-size: 11px; }
+.ago-dev-card .dev-voice-log { max-height: 16vh; }
 .ago-dev-card .dev-log-line { white-space: pre-wrap; word-break: break-word; line-height: 1.4; }
 .ago-dev-card .dev-log-invoke { color: #9ecbff; }
 .ago-dev-card .dev-log-result { color: #86efac; }

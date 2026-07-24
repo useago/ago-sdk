@@ -6,15 +6,35 @@ import type {
   Conversation,
 } from "../client/types";
 import type { ClientFunctionSchema } from "../functions/types";
+import { createMockVoice } from "./mockVoice";
+import type {
+  MockVoiceController,
+  MockVoiceConversationHandle,
+  MockVoiceConversationOptions,
+  MockVoiceOptions,
+} from "./mockVoice";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type MockFn = (...args: any[]) => any;
 
 export interface MockAgoClientOptions {
   overrides?: Partial<Record<string, MockFn>>;
+  /**
+   * Options for the mock voice controller behind `mock.voice` (availability,
+   * consent). The mock voice works with no mic, WebSocket, or backend.
+   */
+  voice?: MockVoiceOptions;
 }
 
 export interface MockAgoClient extends AgoClient {
+  /**
+   * A scriptable mock of `client.voice`. Drive it through the public surface
+   * (`start`, `acceptConsent`, ...), arm a full conversation with
+   * {@link mockVoiceConversation}, or push state/events directly via
+   * `__setVoiceState` / `__emitVoiceEvent`. Calls are recorded in `__calls`
+   * as `voice.<method>`.
+   */
+  voice: MockVoiceController;
   /**
    * Simulate a server-pushed event.
    * ```ts
@@ -159,6 +179,36 @@ export function createMockClient(
   // Plain value properties (not wrapped)
   mock.proactive = null;
 
+  // Mock voice controller: records its calls as `voice.<method>` and is torn
+  // down with the client.
+  const voiceController = createMockVoice(options.voice, (method, args) =>
+    calls.push({ method: `voice.${method}`, args })
+  );
+  mock.voice = voiceController;
+  // Mirror the real client: voice events are forwarded onto the client
+  // emitter, so `client.on("voice:*")` works against the mock too.
+  const voiceEvents = [
+    "voice:status",
+    "voice:transcript",
+    "voice:turn-final",
+    "voice:persisted",
+    "voice:thread-ready",
+    "voice:level",
+    "voice:error",
+    "voice:ended",
+  ] as const;
+  for (const event of voiceEvents) {
+    voiceController.on(event, (data) => {
+      const handlers = listeners.get(event);
+      if (handlers) [...handlers].forEach((h) => h(data));
+    });
+  }
+  const baseDestroy = mock.destroy as MockFn;
+  mock.destroy = (...args: unknown[]) => {
+    voiceController.destroy();
+    return baseDestroy(...args);
+  };
+
   // Test helpers (not recorded)
   mock.__calls = calls;
   mock.__callsFor = (method: string) => calls.filter((c) => c.method === method);
@@ -172,3 +222,37 @@ export function createMockClient(
 
   return mock as unknown as MockAgoClient;
 }
+
+/**
+ * Arm a full scripted voice conversation on a mock client, so the voice hook
+ * and the three voice components animate end-to-end with no microphone,
+ * WebSocket, or backend (jsdom, Storybook, or a plain dev page).
+ *
+ * The script plays when the session starts: press the rendered
+ * `<AgoVoiceButton>` (consent included), or call `handle.play()` to start
+ * programmatically. It walks the whole lifecycle: consent, permission,
+ * connecting, live, per-turn captions with level pulses and persisted acks,
+ * then ended. Timer-driven and deterministic (fake timers step it).
+ *
+ * ```ts
+ * const mock = createMockClient();
+ * const handle = mockVoiceConversation(mock, {
+ *   turns: [{ user: "Where is my order?", assistant: "It ships today." }],
+ * });
+ * await handle.play();
+ * await handle.finished;
+ * ```
+ */
+export function mockVoiceConversation(
+  mock: MockAgoClient,
+  options: MockVoiceConversationOptions
+): MockVoiceConversationHandle {
+  return mock.voice.__arm(options);
+}
+
+export type {
+  MockVoiceController,
+  MockVoiceConversationHandle,
+  MockVoiceConversationOptions,
+  MockVoiceOptions,
+};

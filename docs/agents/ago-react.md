@@ -1,8 +1,9 @@
 # AGO SDK skill: React
 
 You are integrating the AGO SDK (`@useago/sdk`) into a React app. AGO is a chat
-agent that can answer questions, run functions in the user's browser, and
-navigate your app's routes. This file is everything you need. Follow it exactly.
+agent that can answer questions, run functions in the user's browser, navigate
+your app's routes, and (access-gated) hold live voice conversations. This file
+is everything you need. Follow it exactly.
 
 ## Endpoints
 
@@ -262,14 +263,80 @@ Key events: `message:start`, `message:chunk` (`{ content }` per token),
 `message:complete` (`AgoMessage`), `message:error`, `toolCall:received`,
 `function:invoke`, `function:result`.
 
+## 9. Voice (access-gated)
+
+Voice is currently access-gated; installing the SDK does not enable it. Ask
+AGO to enable voice for the project's tenant and agent. Before it is enabled,
+generate the UI anyway: the components render nothing and the hook logs one
+console warning naming the failed gate.
+
+Prerequisites checklist (each miss has a typed reason, never a silent failure):
+
+1. Tenant and agent voice flags enabled by AGO.
+2. A signed user JWT via `userJwt` or `getUserJwt` in the provider config.
+3. HTTPS page (`localhost` is the only HTTP exception).
+4. The exact page origin (port included) allow-listed by AGO.
+5. CSP (if any): `blob:` in `worker-src` and `script-src`, the API host in
+   `connect-src` (https and wss), `allow="microphone"` on embedding iframes.
+
+The one canonical wiring, three components over one hook:
+
+```tsx
+"use client"; // Next.js only: voice is browser-only
+
+import {
+  AgoVoiceBar,
+  AgoVoiceButton,
+  AgoVoiceCaptions,
+  useAgoVoice,
+} from "@useago/sdk/react";
+
+function VoicePanel() {
+  const voice = useAgoVoice(); // subscribes to client.voice; does not own it
+  return (
+    <>
+      <AgoVoiceCaptions voice={voice} /> {/* in the message list */}
+      <AgoVoiceBar voice={voice} />      {/* status + meter + mute + end */}
+      <AgoVoiceButton voice={voice} />   {/* mic; built-in consent dialog */}
+    </>
+  );
+}
+```
+
+Add `getUserJwt: async () => fetchFreshJwt()` to the `<AgoProvider>` config so
+the SDK can refresh the token and retry once on `jwt-required`. To develop the
+UI with zero setup, drive it with the mock:
+`mockVoiceConversation(createMockClient(), { turns: [...] })` (from
+`@useago/sdk/testing`) plays a full scripted call with no mic or backend.
+
+Gotchas (memorize these):
+
+1. Voice is access-gated: installing the SDK does not enable it. Ask AGO to enable voice for your tenant and agent.
+2. Voice requires a signed user JWT (`userJwt` or `getUserJwt`). `userEmail` and anonymous widget ids are not authentication.
+3. Do not render a mic before `availability` resolves: render nothing while it is `"loading"`, and never render a mic when it is unavailable.
+4. Voice requires HTTPS. `localhost` is the only HTTP exception.
+5. The exact page origin, including the port, must be allow-listed for voice. `https://app.example.com` and `https://app.example.com:8443` are different origins.
+6. User captions are final-only: the assistant caption streams word by word, while the user side shows a speaking indicator until the final transcript lands. This is protocol behavior, not a bug.
+7. Captions render in the message list (`AgoVoiceCaptions`), never in the bar. The bar owns status, meter, mute and end-call only.
+8. If your page ships a Content-Security-Policy, allow `blob:` in `worker-src` (and in `script-src`, which governs Blob worklets in some Chromium versions), add the voice WebSocket host to `connect-src`, and set `allow="microphone"` on any embedding iframe.
+9. A reconnect starts a new model session: the agent loses its in-call memory of earlier turns. Persisted turns stay safe in the thread.
+10. Voice cannot invoke SDK client functions in this release: the agent answers by voice but does not navigate or act in your app.
+11. Voice is browser-only. In Next.js, put `"use client"` on components that use it; the SDK touches no browser API at import time.
+12. One active voice session per client: a second `start()` while one is active rejects with the `session-active` error. Call `stop()` first.
+
+Full reference (vocabulary, error codes, theming tokens, labels, CSP,
+troubleshooting): `docs/general/voice.md`.
+
 ## Exports cheat-sheet (`@useago/sdk/react`)
 
 - Provider/context: `AgoProvider`, `useAgoClient`, `useOptionalAgoClient`
 - Hooks: `useAgo`, `useChat`, `useMessages`, `useConversation`, `useAgoFunction`,
-  `useAgoNavigation`, `useAgoPageState`, `useAgoContext`, `useAgoStore`, `useFormCollector`
+  `useAgoNavigation`, `useAgoPageState`, `useAgoContext`, `useAgoStore`,
+  `useFormCollector`, `useAgoVoice`
 - Components: `ChatWidget`, `Message`, `ChatInput`, `Markdown`
+- Voice: `AgoVoiceButton`, `AgoVoiceBar`, `AgoVoiceCaptions`, `resolveBarState`
 - Forms: `createFormCollector`
-- Testing: `createMockClient`
+- Testing: `createMockClient` (voice: `mockVoiceConversation` from `@useago/sdk/testing`)
 - Types: `AgoConfig`, `AgoMessage`, `Conversation`, `AgoAgent`, `AgoSource`,
   `ToolCallData` (import `AgoAttachment` from `@useago/sdk`, not the `/react` subpath)
 
