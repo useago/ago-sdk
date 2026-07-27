@@ -25,11 +25,7 @@ export type AgoActivityKind =
 
 /** Where the item is in its lifecycle. */
 export type AgoActivityStatus =
-  | "running"
-  | "done"
-  | "error"
-  | "awaiting-approval"
-  | "rejected";
+  "running" | "done" | "error" | "awaiting-approval" | "rejected";
 
 /**
  * One normalized entry in the agent's activity feed. Merges a tool call
@@ -90,9 +86,7 @@ export interface UseAgoActivityResult {
   clear: () => void;
 }
 
-const AWAITING_STATUSES = new Set<AgoActivityStatus>([
-  "awaiting-approval",
-]);
+const AWAITING_STATUSES = new Set<AgoActivityStatus>(["awaiting-approval"]);
 
 /** Map a tool-call `type` to an activity kind. */
 function kindForToolCall(type: ToolCallData["type"]): AgoActivityKind {
@@ -129,7 +123,7 @@ function kindForToolCallData(tc: ToolCallData): AgoActivityKind {
  */
 function normalizeToolCallStatus(
   raw: string | undefined,
-  kind: AgoActivityKind
+  kind: AgoActivityKind,
 ): AgoActivityStatus {
   const s = (raw ?? "").toLowerCase();
   if (s.includes("reject")) return "rejected";
@@ -199,7 +193,7 @@ function defaultLabel(item: AgoActivityItem): string {
  * ```
  */
 export function useAgoActivity(
-  options: UseAgoActivityOptions = {}
+  options: UseAgoActivityOptions = {},
 ): UseAgoActivityResult {
   const { includeReasoning = false, labelFor } = options;
   const contextClient = useOptionalAgoClient();
@@ -208,7 +202,7 @@ export function useAgoActivity(
   if (!client) {
     throw new AgoError(
       "useAgoActivity requires an AgoClient. Either pass it as options.client or wrap your app in <AgoProvider>.",
-      "provider_missing_client"
+      "provider_missing_client",
     );
   }
 
@@ -252,16 +246,12 @@ export function useAgoActivity(
         const draft: AgoActivityItem = { ...base, ...patch };
         draft.label = labelForRef.current?.(draft) ?? defaultLabel(draft);
         if (index >= 0) {
-          return [
-            ...prev.slice(0, index),
-            draft,
-            ...prev.slice(index + 1),
-          ];
+          return [...prev.slice(0, index), draft, ...prev.slice(index + 1)];
         }
         return [...prev, draft];
       });
     },
-    []
+    [],
   );
 
   useEffect(() => {
@@ -290,7 +280,7 @@ export function useAgoActivity(
       upsert(data.invocationId, {
         kind: data.functionName === "navigateToPage" ? "navigation" : "action",
         status: "running",
-        messageId: currentMessageIdRef.current,
+        messageId: data.messageId ?? currentMessageIdRef.current,
         functionName: data.functionName,
         arguments: data.arguments,
       });
@@ -301,7 +291,7 @@ export function useAgoActivity(
       upsert(data.invocationId, {
         kind: data.functionName === "navigateToPage" ? "navigation" : "action",
         status: "awaiting-approval",
-        messageId: currentMessageIdRef.current,
+        messageId: data.messageId ?? currentMessageIdRef.current,
         functionName: data.functionName,
         arguments: data.arguments,
         requiresApproval: true,
@@ -370,8 +360,8 @@ export function useAgoActivity(
         prev.map((it) =>
           it.status === "running" || it.status === "awaiting-approval"
             ? { ...it, status }
-            : it
-        )
+            : it,
+        ),
       );
     };
     const onComplete = () => settleRunning("done");
@@ -402,7 +392,11 @@ export function useAgoActivity(
     async (id: string) => {
       const item = items.find((it) => it.id === id);
       // Only act on an item still awaiting the user, and only once per id.
-      if (!item || item.status !== "awaiting-approval" || actedRef.current.has(id))
+      if (
+        !item ||
+        item.status !== "awaiting-approval" ||
+        actedRef.current.has(id)
+      )
         return;
       // A form carries field values that must go through submitForm — the
       // confirm endpoint would submit nothing. Callers approve forms via
@@ -417,13 +411,17 @@ export function useAgoActivity(
         await client.confirmToolCall(id);
       }
     },
-    [client, items, upsert]
+    [client, items, upsert],
   );
 
   const reject = useCallback(
     async (id: string) => {
       const item = items.find((it) => it.id === id);
-      if (!item || item.status !== "awaiting-approval" || actedRef.current.has(id))
+      if (
+        !item ||
+        item.status !== "awaiting-approval" ||
+        actedRef.current.has(id)
+      )
         return;
       actedRef.current.add(id);
       upsert(id, { status: "rejected", requiresApproval: false });
@@ -433,7 +431,7 @@ export function useAgoActivity(
         await client.rejectToolCall(id);
       }
     },
-    [client, items, upsert]
+    [client, items, upsert],
   );
 
   const submitForm = useCallback(
@@ -442,7 +440,7 @@ export function useAgoActivity(
       await client.submitToolCallForm(id, values);
       upsert(id, { status: "done" });
     },
-    [client, upsert]
+    [client, upsert],
   );
 
   const clear = useCallback(() => {

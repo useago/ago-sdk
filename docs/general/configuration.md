@@ -17,10 +17,12 @@ interface AgoConfig {
   permission?: string;      // X-Widget-Permission header
   userEmail?: string;       // X-User-Email header, identify the end user
   userJwt?: string;         // Authorization: Bearer <jwt>, authenticated users
+  getUserJwt?: () => Promise<string>; // async fresh-JWT provider; enables one auth retry
   debug?: boolean;          // enable verbose console logging
   warnOnEmptyReply?: boolean; // default true; see "Empty replies" below
   clientFunctionsMode?: "placeholder" | "pause"; // default "pause"
   maxFunctionResultBytes?: number; // default 50000; cap on client function results
+  voice?: { requireConsent?: boolean }; // voice session options (see voice.md)
 }
 ```
 
@@ -32,6 +34,8 @@ interface AgoConfig {
 | `permission` | — | `X-Widget-Permission` | Mirrors the widget's `window.AGO.permission`. |
 | `userEmail` | — | `X-User-Email` | Identifies the user to AGO. |
 | `userJwt` | — | `Authorization: Bearer …` | For authenticated sessions. |
+| `getUserJwt` | — | `Authorization: Bearer …` | Async provider returning a fresh signed JWT. When configured, the SDK refreshes the bearer and retries once on auth failures a fresh token can fix (e.g. the voice mint's `jwt_required` 403). Without it those failures surface immediately: retrying the same stored token is useless. |
+| `voice` | — | — | Voice session options. `requireConsent` (default `true`) pauses the first `start()` on a consent gate. Voice is access-gated and needs a signed JWT; see [Voice](voice.md). |
 | `debug` | — | — | Turns on the SDK's logger. |
 | `warnOnEmptyReply` | — | — | Default `true`: warn on the console (once per conversation) when a reply completes empty, usually an unknown `agent` slug. The [`message:empty` event](events-and-streaming.md#events) fires regardless. |
 | `clientFunctionsMode` | — | `client_functions_mode` in the body | Default `"pause"`: the agent stops on client function call(s) and resumes the SAME turn once the results are submitted (the SDK submits and resumes automatically; see the [`message:waiting-client` event](events-and-streaming.md#events)). Needs a backend with pause/resume support; older backends ignore the flag and fall back to placeholder behavior. Legacy `"placeholder"`: the turn continues on a placeholder and results are only visible on later turns. Per-message override via `sendMessage(..., { clientFunctionsMode })`. |
@@ -189,6 +193,40 @@ Server-supplied errors (`AgoApiError` with a structured body) keep the
 backend's own `code` and, when provided, link their docs in the message
 (`docUrl`).
 
+### Voice error codes
+
+Voice failures are `AgoVoiceError` (extends `AgoError`) with a stable
+kebab-case `code`, `retryable`, optional `retryAfter`, the raw server reason
+as `serverReason`, and a `docUrl` into the per-code reference in
+[voice.md](voice.md#error-codes). They are emitted as `voice:error` and always
+logged with `console.error`.
+
+| Code | Meaning | Retryable |
+| --- | --- | :---: |
+| `mic-denied` | microphone permission blocked; allow it in the address bar | yes |
+| `no-mic` | no microphone on the device | no |
+| `mic-busy` | another app holds the microphone | yes |
+| `mic-lost` | mic disconnected or revoked mid-call | no |
+| `insecure-context` | page is not HTTPS (localhost is the only exception) | no |
+| `worklet-unsupported` | browser lacks AudioWorklet | no |
+| `csp-blocked` | CSP blocked the `blob:` worklet; detail names the directive | no |
+| `audio-init-failed` | audio setup failed (non-CSP) | no |
+| `jwt-required` | voice needs a signed user JWT (`userJwt`/`getUserJwt`); anonymous ids and `userEmail` do not qualify | no |
+| `mint-failed` | creating the session grant failed | yes |
+| `rate-limited` | too many session requests (429); never auto-retried | no |
+| `connect-failed` | WebSocket never became ready | yes |
+| `connection-lost` | live connection dropped after the reconnect budget | yes |
+| `invalid-token` | session token expired (60s TTL) or reused | yes |
+| `origin-not-allowed` | page origin (scheme+host+port) not allow-listed | no |
+| `kill-switch` | voice disabled by the operator | no |
+| `concurrent-cap` | tenant concurrent session cap reached | no |
+| `daily-minutes-cap` | tenant daily minutes cap reached | no |
+| `backend-unavailable` | voice backend temporarily down | yes |
+| `server-error` | unrecognized server error (raw reason in `serverReason`) | no |
+| `voice-unavailable` | tenant/agent voice gates are off | no |
+| `session-active` | `start()` while a session is active; call `stop()` first | no |
+| `session-destroyed` | voice used after `client.destroy()` | no |
+
 ### Empty replies
 
 The backend currently answers an unknown `agent` slug with an empty 200, which
@@ -206,4 +244,4 @@ unknown agents.
 
 ---
 
-See also: [Core API](core.md) · [Events & streaming](events-and-streaming.md) · [Custom domain (reverse proxy)](custom-domain.md)
+See also: [Core API](core.md) · [Events & streaming](events-and-streaming.md) · [Voice](voice.md) · [Custom domain (reverse proxy)](custom-domain.md)

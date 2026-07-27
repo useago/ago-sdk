@@ -8,7 +8,9 @@ import {
   type UseAgoActivityResult,
 } from "../src/react/hooks/useAgoActivity";
 
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+(
+  globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
 
 // A minimal event-bus fake standing in for AgoClient: useAgoActivity only needs
 // on/off plus the approve/reject/submit methods, and lets the test drive events.
@@ -35,10 +37,16 @@ function makeFakeClient() {
 
 type Fake = ReturnType<typeof makeFakeClient>;
 
-async function mountHook(client: Fake, opts?: Omit<UseAgoActivityOptions, "client">) {
+async function mountHook(
+  client: Fake,
+  opts?: Omit<UseAgoActivityOptions, "client">,
+) {
   const ref: { current: UseAgoActivityResult | null } = { current: null };
   function Harness() {
-    ref.current = useAgoActivity({ client: client as unknown as AgoClient, ...opts });
+    ref.current = useAgoActivity({
+      client: client as unknown as AgoClient,
+      ...opts,
+    });
     return null;
   }
   const container = document.createElement("div");
@@ -75,8 +83,30 @@ describe("useAgoActivity: normalization", () => {
     expect(item.messageId).toBe("m1");
     expect(ref.current!.latest?.id).toBe("inv1");
 
-    await emit("function:result", { invocationId: "inv1", result: { success: true } });
+    await emit("function:result", {
+      invocationId: "inv1",
+      result: { success: true },
+    });
     expect(ref.current!.items[0].status).toBe("done");
+  });
+
+  it("uses the voice invocation's message id instead of a stale typed turn", async () => {
+    const client = makeFakeClient();
+    const { ref, emit } = await mountHook(client);
+    await emit("message:start", {
+      conversationId: "c1",
+      messageId: "typed-old",
+    });
+
+    await emit("function:invoke", {
+      invocationId: "voice-action",
+      functionName: "setPageState",
+      arguments: { tab: "settings" },
+      conversationId: "c1",
+      messageId: "voice-turn",
+    });
+
+    expect(ref.current!.items[0].messageId).toBe("voice-turn");
   });
 
   it("suppresses reasoning by default and includes it when asked", async () => {
@@ -104,7 +134,9 @@ describe("useAgoActivity: normalization", () => {
     const client = makeFakeClient();
     const { ref, emit } = await mountHook(client, {
       labelFor: (i) =>
-        i.kind === "navigation" ? `Go → ${String(i.arguments?.page)}` : undefined,
+        i.kind === "navigation"
+          ? `Go → ${String(i.arguments?.page)}`
+          : undefined,
     });
 
     await emit("function:invoke", {
@@ -139,7 +171,14 @@ describe("useAgoActivity: normalization", () => {
       title: "Conv",
       lastMessageDate: new Date(),
       messages: [
-        { id: "u1", conversationId: "c1", content: "go", role: "user", status: "DONE", createdAt: new Date() },
+        {
+          id: "u1",
+          conversationId: "c1",
+          content: "go",
+          role: "user",
+          status: "DONE",
+          createdAt: new Date(),
+        },
         {
           id: "m1",
           conversationId: "c1",
@@ -156,7 +195,13 @@ describe("useAgoActivity: normalization", () => {
               functionName: "navigateToPage",
               arguments: { page: "products" },
             },
-            { id: "bag2", type: "reasoning", status: "completed", toolName: "", message: "thinking" },
+            {
+              id: "bag2",
+              type: "reasoning",
+              status: "completed",
+              toolName: "",
+              message: "thinking",
+            },
           ],
         },
       ],
@@ -285,7 +330,9 @@ describe("useAgoActivity: approvals", () => {
     await act(async () => {
       await ref.current!.submitForm("f1", { subject: "hi" });
     });
-    expect(client.submitToolCallForm).toHaveBeenCalledWith("f1", { subject: "hi" });
+    expect(client.submitToolCallForm).toHaveBeenCalledWith("f1", {
+      subject: "hi",
+    });
     expect(ref.current!.items[0].status).toBe("done");
   });
 

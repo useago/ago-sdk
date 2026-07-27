@@ -4,6 +4,14 @@ import type {
   ProactiveNudgeInstance,
   ProactiveOptions,
 } from "../proactive/types";
+import type { AgoVoiceError } from "../voice/errors";
+import type {
+  AgoVoiceOptions,
+  VoiceCaption,
+  VoiceEndedReason,
+  VoicePersistedAck,
+  VoiceStatusEvent,
+} from "../voice/types";
 
 /**
  * SDK Configuration
@@ -22,7 +30,14 @@ export interface AgoConfig {
   /** User email for identification */
   userEmail?: string;
   /** JWT token for authenticated users */
-  userJwt?: string;
+  userJwt?: string | null;
+  /**
+   * Async provider for a fresh user JWT. When configured, the SDK refreshes
+   * the bearer token and retries once on auth failures that a fresh token can
+   * fix (e.g. the voice mint's typed `jwt_required` 403). Without it, such
+   * failures surface immediately: retrying the same stored token is useless.
+   */
+  getUserJwt?: (() => Promise<string>) | null;
   /** Enable debug logging */
   debug?: boolean;
   /**
@@ -82,6 +97,12 @@ export interface AgoConfig {
    * default otherwise.
    */
   proactive?: ProactiveOptions;
+  /**
+   * Voice session options (see `client.voice`). Voice is access-gated: the
+   * tenant and agent must be enabled for it, and a signed user JWT is
+   * required (`userJwt`/`getUserJwt`).
+   */
+  voice?: AgoVoiceOptions;
 }
 
 /** See {@link AgoConfig.clientFunctionsMode}. */
@@ -233,7 +254,9 @@ export type ToolCallType =
   | "progress_indicator"
   | "client_function"
   | "reasoning"
-  | "mcp_ui_resource";
+  | "mcp_ui_resource"
+  /** A voice agent delegated the request to its main AGO agent. */
+  | "agent_delegation";
 
 /**
  * Form schema for tool calls requiring user input
@@ -287,6 +310,8 @@ export interface ClientFunctionInvocation {
   functionName: string;
   arguments: Record<string, unknown>;
   conversationId: string;
+  /** Assistant message that requested the action, when available (including voice). */
+  messageId?: string;
 }
 
 /**
@@ -455,6 +480,24 @@ export interface AgoClientEvents {
   "nudge:accepted": { nudge: ProactiveNudgeInstance };
   /** A user- or agent-action was recorded into the activity ledger. */
   "activity:recorded": ActivityEntry;
+  /** Voice session state changed (lifecycle status, turn, or flags). */
+  "voice:status": VoiceStatusEvent;
+  /** A live voice caption, partial or final. */
+  "voice:transcript": VoiceCaption;
+  /** A finalized voice turn (including interrupted assistant turns). */
+  "voice:turn-final": VoiceCaption;
+  /** A voice turn was persisted by the backend. Key on `messageId`, never `turnIndex`. */
+  "voice:persisted": VoicePersistedAck;
+  /** The server confirmed which thread the voice session writes to. */
+  "voice:thread-ready": { threadId: string };
+  /** A non-browser tool/progress/delegation activity from the main agent. */
+  "voice:activity": import("../voice/types").VoiceActivity;
+  /** Normalized mic input level 0..1 (0 while muted or during agent speech). */
+  "voice:level": number;
+  /** A voice error (also `console.error`'d). */
+  "voice:error": AgoVoiceError;
+  /** The voice session ended. */
+  "voice:ended": { reason: VoiceEndedReason };
 }
 
 export type AgoEventName = keyof AgoClientEvents;

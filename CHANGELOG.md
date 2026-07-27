@@ -5,6 +5,64 @@ All notable changes to `@useago/sdk` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-07-24
+
+### Added
+
+- Voice subsystem: live voice conversations with the agent, speaking the
+  existing browser-to-ago-voice protocol. `client.voice` is a lazy singleton
+  controller over at most one active session; the engine (with its audio
+  worklets) loads through a dynamic import on first use, so chat-only bundles
+  carry none of it (enforced by a CI bundle assertion). The full engine also
+  ships on the new `@useago/sdk/voice` subpath. Voice is access-gated: the
+  tenant and agent must be enabled by AGO, and minting requires a signed user
+  JWT. See `docs/general/voice.md`.
+- React: `useAgoVoice()` hook (subscribes to `client.voice`; StrictMode-safe,
+  never owns the session) and three controlled presentation primitives with a
+  single-object handoff: `<AgoVoiceButton voice={voice} />` (mic affordance
+  with a built-in consent disclosure and a `renderConsent` escape hatch),
+  `<AgoVoiceBar />` (status, level meter, mute, end-call, inline error state
+  with Retry; never renders transcript text) and `<AgoVoiceCaptions />`
+  (assistant streaming captions plus a user speaking indicator, for the
+  message list). Themed via `--ago-voice-*` tokens with fallbacks into the
+  widget's `--ago-*` tokens; all copy overridable through a `labels` prop
+  (including per-error copy). The components and tokens are `@experimental`;
+  the hook shape, event names and error codes are stable.
+- `AgoVoiceError`: one closed kebab-case error-code registry (`mic-denied`,
+  `jwt-required`, `csp-blocked`, `origin-not-allowed`, ...) with `retryable`,
+  `retryAfter`, `serverReason` and a `docUrl` into the per-code reference.
+  Voice codes also joined `docs/general/configuration.md`'s error tables.
+- `AgoConfig.getUserJwt`: async fresh-JWT provider. When configured, the SDK
+  refreshes the bearer and retries once on auth failures a fresh token can fix
+  (the voice mint's typed `jwt_required` 403); without it such failures
+  surface immediately.
+- `client.voice.checkAvailability()`: one-read readiness diagnostic (secure
+  context, worklet support, auth kind, tenant gate, agent gate), plus typed
+  `availability`/`unavailableReason` on the hook and a one-time console
+  warning naming the failed gate when a voice UI mounts while unavailable.
+- Testing: `createMockClient()` now carries a scriptable `mock.voice`, and
+  `mockVoiceConversation(mock, { turns })` drives the full call lifecycle
+  (consent, permission, connecting, live turns with captions, level pulses and
+  persisted acks, ended) with no microphone, WebSocket, or backend. Timer
+  driven and deterministic, for jsdom, CI and Storybook sandboxes.
+- Devtools: the `ago-dev-panel` gained a Voice section with the live protocol
+  status and an event log (thread adoption, finalized turns, persisted acks,
+  errors, session end).
+- Docs: `docs/general/voice.md` (mock-first sandbox, integration recipe,
+  vocabulary, error codes, theming tokens, labels, tested CSP policy,
+  devtools troubleshooting map, gotchas), a voice section in the React agent
+  skill, and voice.md joined `llms-full.txt`.
+
+### Changed
+
+- **Source-breaking for exhaustive event consumers:** the `AgoClientEvents`
+  union widened with `voice:status`, `voice:transcript`, `voice:turn-final`,
+  `voice:persisted`, `voice:thread-ready`, `voice:level`, `voice:error` and
+  `voice:ended`. Code that keeps an exhaustive `Record<AgoEventName, ...>`
+  must add the new keys before it compiles again (runtime behavior is
+  unchanged; a type-compatibility fixture covers the pattern in
+  `tests/agoClientEventsWidening.test.ts`).
+
 ## [1.5.4] - 2026-07-22
 
 ### Added

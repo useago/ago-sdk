@@ -72,6 +72,7 @@ export function useAgo(
         permission: config.permission,
         userEmail: config.userEmail,
         userJwt: config.userJwt,
+        getUserJwt: config.getUserJwt,
         debug: config.debug,
         warnOnEmptyReply: config.warnOnEmptyReply,
       });
@@ -83,6 +84,7 @@ export function useAgo(
     config?.permission,
     config?.userEmail,
     config?.userJwt,
+    config?.getUserJwt,
     config?.debug,
     config?.warnOnEmptyReply,
   ]);

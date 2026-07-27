@@ -1,6 +1,9 @@
 // React context
 export { AgoProvider, useAgoClient, useOptionalAgoClient } from "./context";
-export type { AgoProviderProps, AgoDeclarativeConfig } from "./context/AgoContext";
+export type {
+  AgoProviderProps,
+  AgoDeclarativeConfig,
+} from "./context/AgoContext";
 
 // React components
 export { ChatWidget } from "./components/ChatWidget";
@@ -18,20 +21,49 @@ export type { ChatInputProps } from "./components/ChatInput";
 export { AgoNudge } from "./components/AgoNudge";
 export type { AgoNudgeProps } from "./components/AgoNudge";
 
+// Voice components (controlled primitives over useAgoVoice)
+export { AgoVoiceButton } from "./components/AgoVoiceButton";
+export type {
+  AgoVoiceButtonProps,
+  AgoVoiceRenderConsentProps,
+} from "./components/AgoVoiceButton";
+
+export { AgoVoiceBar } from "./components/AgoVoiceBar";
+export type { AgoVoiceBarProps } from "./components/AgoVoiceBar";
+
+export { AgoVoiceCaptions } from "./components/AgoVoiceCaptions";
+export type { AgoVoiceCaptionsProps } from "./components/AgoVoiceCaptions";
+
+export { DEFAULT_VOICE_LABELS } from "./components/voiceShared";
+export type {
+  AgoVoiceLabelKey,
+  AgoVoiceLabels,
+} from "./components/voiceShared";
+
 // React hooks
 export { useAgo } from "./hooks/useAgo";
 export type { UseAgoOptions, UseAgoResult } from "./hooks/useAgo";
 
 export { useMessages } from "./hooks/useMessages";
-export type { UseMessagesOptions, UseMessagesResult } from "./hooks/useMessages";
+export type {
+  UseMessagesOptions,
+  UseMessagesResult,
+} from "./hooks/useMessages";
 
 export { useConversation } from "./hooks/useConversation";
-export type { UseConversationOptions, UseConversationResult } from "./hooks/useConversation";
+export type {
+  UseConversationOptions,
+  UseConversationResult,
+} from "./hooks/useConversation";
 
 export { useChat } from "./hooks/useChat";
 export type { UseChatOptions, UseChatResult } from "./hooks/useChat";
 
-export { useAgoFunction, useAgoNavigation, useAgoPageState } from "./hooks/useAgoFunction";
+export {
+  useAgoFunction,
+  useAgoNavigation,
+  useAgoPageState,
+} from "./hooks/useAgoFunction";
 export type { UseAgoFunctionOptions, AgoRoute } from "./hooks/useAgoFunction";
 export type { AgoStateControl, AgoPageStateOptions } from "../functions/types";
 
@@ -67,8 +99,31 @@ export { useAgoStore } from "./hooks/useAgoStore";
 export { useFormCollector } from "./hooks/useFormCollector";
 export type { UseFormCollectorResult } from "./hooks/useFormCollector";
 
+export { useAgoVoice } from "./hooks/useAgoVoice";
+export type {
+  UseAgoVoiceOptions,
+  UseAgoVoiceResult,
+} from "./hooks/useAgoVoice";
+export { resolveBarState } from "../voice/types";
+export type {
+  VoiceActivity,
+  VoiceAvailability,
+  VoiceBarState,
+  VoiceCaption,
+  VoiceEndedReason,
+  VoiceStartOptions,
+  VoiceStatus,
+  VoiceTurn,
+  VoiceUnavailableReason,
+} from "../voice/types";
+export type { AgoVoiceError, AgoVoiceErrorCode } from "../voice/errors";
+
 // Form collector core (re-exported for typing the ChatWidget `forms` prop)
-export { createFormCollector, deriveFormStatus, loadFormCollector } from "../forms/createFormCollector";
+export {
+  createFormCollector,
+  deriveFormStatus,
+  loadFormCollector,
+} from "../forms/createFormCollector";
 export type {
   CreateFormCollectorOptions,
   FormCollector,

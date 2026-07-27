@@ -33,6 +33,7 @@ const concepts = [
   'docs/general/functions-and-context.md',
   'docs/general/events-and-streaming.md',
   'docs/general/configuration.md',
+  'docs/general/voice.md',
 ];
 
 const header = `# AGO SDK (@useago/sdk) — coding-agent guide
@@ -43,7 +44,7 @@ integrating AGO chat into an app. It has two parts:
 1. SKILLS — one self-contained section per stack. Jump to the one that matches
    the project, follow it exactly. Each is everything you need to wire AGO in.
 2. CONCEPTS — cross-cutting reference (functions/context, events/streaming,
-   configuration) to understand what the skills do.
+   configuration, voice) to understand what the skills do.
 
 Pick your stack:
 - Embeddable <script> widget, no build step -> "AGO SDK skill: Widget"

@@ -129,7 +129,8 @@ client.on("toolCall:received", async (toolCall) => {
 ```
 
 `ToolCallType` is one of: `form`, `confirmation_input`, `status_message`,
-`progress_indicator`, `client_function`, `reasoning`, `mcp_ui_resource`.
+`progress_indicator`, `client_function`, `reasoning`, `mcp_ui_resource`,
+`agent_delegation`.
 
 ---
 

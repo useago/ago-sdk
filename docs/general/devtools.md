@@ -41,10 +41,15 @@ The panel mounts a fixed-position overlay (top-right by default). The JSON pane 
 client's live context snapshot (including every installed form collector's state) and
 re-renders after each function the agent calls; it also appends a log line for each
 `function:invoke` and its result, and a `⟳ hydrated …` line whenever a conversation is
-restored on reload. A second panel (pinned bottom-right) is the "SSE event log": it
-appends one line per raw stream message (a leading tag plus the verbatim JSON) and
-collapses independently of the main panel. Each panel's collapsed/expanded state is
-remembered in `localStorage`.
+restored on reload. A "Voice" section shows the live voice session status
+(status, turn, muted/degraded flags) and logs the protocol events as they happen:
+thread adoption, finalized turns, persisted acks, errors and session end
+(`voice:level` is deliberately not logged; it fires per audio frame). The
+[voice troubleshooting map](voice.md#troubleshooting-with-devtools) reads these
+patterns back to causes. A second panel (pinned bottom-right) is the "SSE event
+log": it appends one line per raw stream message (a leading tag plus the verbatim
+JSON) and collapses independently of the main panel. Each panel's
+collapsed/expanded state is remembered in `localStorage`.
 
 ### Reading the JSON pane
 

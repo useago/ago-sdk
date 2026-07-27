@@ -1,4 +1,8 @@
-import { AgoApiError, AgoNetworkError, ApiErrorResponse } from "../client/errors";
+import {
+  AgoApiError,
+  AgoNetworkError,
+  ApiErrorResponse,
+} from "../client/errors";
 import type { AgoConfig } from "../client/types";
 import { logger } from "../utils/logger";
 
@@ -36,9 +40,11 @@ function generateAnonId(): string {
 export class HttpClient {
   private baseUrl: string;
   private headers: Record<string, string>;
+  private getUserJwt?: () => Promise<string>;
 
   constructor(config: AgoConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, "");
+    this.getUserJwt = config.getUserJwt ?? undefined;
     this.headers = {
       // Header carrying the end-user's anonymous id.
       "X-User-Anon-Id": config.widgetId || generateAnonId(),
@@ -70,8 +76,15 @@ export class HttpClient {
     if (config.userEmail) {
       this.headers["X-User-Email"] = config.userEmail;
     }
-    if (config.userJwt) {
-      this.headers["Authorization"] = `Bearer ${config.userJwt}`;
+    if ("userJwt" in config) {
+      if (config.userJwt) {
+        this.headers["Authorization"] = `Bearer ${config.userJwt}`;
+      } else {
+        delete this.headers["Authorization"];
+      }
+    }
+    if ("getUserJwt" in config) {
+      this.getUserJwt = config.getUserJwt ?? undefined;
     }
     if (config.permission !== undefined) {
       if (config.permission) {
@@ -79,6 +92,39 @@ export class HttpClient {
       } else {
         delete this.headers["X-Widget-Permission"];
       }
+    }
+  }
+
+  /** Whether an `Authorization: Bearer` header is currently configured. */
+  hasBearerToken(): boolean {
+    return typeof this.headers["Authorization"] === "string";
+  }
+
+  /**
+   * Whether this client can authenticate a JWT-only endpoint now or by calling
+   * its configured token provider. This is intentionally broader than
+   * {@link hasBearerToken}: availability checks run before the first request,
+   * when a lazy `getUserJwt` provider may not have minted a bearer yet.
+   */
+  canAuthenticateWithJwt(): boolean {
+    return this.hasBearerToken() || this.getUserJwt !== undefined;
+  }
+
+  /**
+   * Refresh the bearer token through the configured `getUserJwt` provider.
+   * Returns `false` (without throwing) when no provider is configured or the
+   * provider fails, so callers can decide whether a retry makes sense.
+   */
+  async refreshUserJwt(): Promise<boolean> {
+    if (!this.getUserJwt) return false;
+    try {
+      const jwt = await this.getUserJwt();
+      if (!jwt) return false;
+      this.headers["Authorization"] = `Bearer ${jwt}`;
+      return true;
+    } catch (error) {
+      logger.warn("getUserJwt provider failed:", error);
+      return false;
     }
   }
 
@@ -99,7 +145,7 @@ export class HttpClient {
   async post<T>(
     path: string,
     body?: unknown,
-    options?: { keepalive?: boolean }
+    options?: { keepalive?: boolean },
   ): Promise<T> {
     return this.request<T>("POST", path, body, options);
   }
@@ -133,7 +179,7 @@ export class HttpClient {
       throw new AgoNetworkError(
         `Network error: ${error instanceof Error ? error.message : "Unknown error"}. ` +
           "Check that `baseUrl` is reachable and includes the protocol (https://).",
-        error instanceof Error ? error : undefined
+        error instanceof Error ? error : undefined,
       );
     }
   }
@@ -167,7 +213,7 @@ export class HttpClient {
       throw new AgoNetworkError(
         `Network error: ${error instanceof Error ? error.message : "Unknown error"}. ` +
           "Check that `baseUrl` is reachable and includes the protocol (https://).",
-        error instanceof Error ? error : undefined
+        error instanceof Error ? error : undefined,
       );
     }
   }
@@ -176,7 +222,7 @@ export class HttpClient {
     method: string,
     path: string,
     body?: unknown,
-    options?: { keepalive?: boolean }
+    options?: { keepalive?: boolean },
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     logger.debug(method, url, body);
@@ -209,7 +255,7 @@ export class HttpClient {
       throw new AgoNetworkError(
         `Network error: ${error instanceof Error ? error.message : "Unknown error"}. ` +
           "Check that `baseUrl` is reachable and includes the protocol (https://).",
-        error instanceof Error ? error : undefined
+        error instanceof Error ? error : undefined,
       );
     }
   }
@@ -227,6 +273,19 @@ export class HttpClient {
       throw AgoApiError.fromResponse(errorData, response.status);
     }
 
+    // Some endpoints answer with a bare `{ "reason": "..." }` body instead of
+    // the error envelope (e.g. the voice mint's typed 403 jwt_required).
+    // Surface it as the error code so callers can match on it.
+    const reason = (errorData as { reason?: unknown } | undefined)?.reason;
+    if (typeof reason === "string" && reason !== "") {
+      throw new AgoApiError(
+        `HTTP ${response.status}: ${reason}`,
+        reason,
+        response.status,
+        "api_error",
+      );
+    }
+
     // Status-keyed hints for the likeliest first-session failures. Short on
     // purpose: these strings can surface in end-user UIs (the widget renders
     // error messages verbatim).
@@ -241,7 +300,7 @@ export class HttpClient {
       `HTTP ${response.status}: ${response.statusText}.${hint}`,
       "http_error",
       response.status,
-      "api_error"
+      "api_error",
     );
   }
 }
