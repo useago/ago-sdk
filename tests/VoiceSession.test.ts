@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { MockInstance } from "vitest";
 import { AgoApiError } from "../src/client/errors";
+import type { ContextSnapshot } from "../src/state/ClientContextRegistry";
 import { VoiceSession, VOICE_TIMEOUTS } from "../src/voice/VoiceSession";
 import type { AgoVoiceEvents } from "../src/voice/types";
 import {
@@ -23,19 +24,25 @@ function makeSession(
     requireConsent?: boolean;
     agent?: string;
     permission?: string;
-  } = {}
+    getClientContext?: () => ContextSnapshot | null;
+    onClientStateChanged?: (handler: () => void) => () => void;
+    executeClientFunction?: () => Promise<{ result?: unknown; error?: string }>;
+  } = {},
 ): VoiceSession {
   return new VoiceSession({
     http: http.asHttpClient(),
     getAgent: () => overrides.agent ?? "admin-helper",
     getPermission: () => overrides.permission,
+    getClientContext: overrides.getClientContext,
+    onClientStateChanged: overrides.onClientStateChanged,
+    executeClientFunction: overrides.executeClientFunction,
     requireConsent: overrides.requireConsent ?? false,
   });
 }
 
 function events<K extends keyof AgoVoiceEvents>(
   session: VoiceSession,
-  event: K
+  event: K,
 ): AgoVoiceEvents[K][] {
   const seen: AgoVoiceEvents[K][] = [];
   session.on(event, (data) => seen.push(data));
@@ -44,12 +51,17 @@ function events<K extends keyof AgoVoiceEvents>(
 
 async function startToLive(
   session: VoiceSession,
-  threadId = "th-1"
+  threadId = "th-1",
 ): Promise<FakeWebSocket> {
   await session.start();
   const ws = stubs.lastSocket();
   ws.emitOpen();
-  ws.emitFrame({ type: "ready", threadId });
+  ws.emitFrame({
+    type: "ready",
+    threadId,
+    protocolVersion: 2,
+    transcriptMode: "snapshot",
+  });
   return ws;
 }
 
@@ -80,10 +92,15 @@ describe("happy path", () => {
     expect(seen[seen.length - 1]).toBe("live");
     // Mic before mint: the permission prompt must not eat the token TTL.
     expect(stubs.getUserMedia.mock.invocationCallOrder[0]).toBeLessThan(
-      http.post.mock.invocationCallOrder[0]
+      http.post.mock.invocationCallOrder[0],
     );
     // The auth frame carried the minted token.
     expect(ws.sentFrames()[0]).toMatchObject({ type: "auth", token: "tok-1" });
+    const ctx = stubs.lastContext();
+    const captureSink = ctx.createGain.mock.results[0].value;
+    expect(captureSink.gain.value).toBe(0);
+    expect(stubs.captureNode().connect).toHaveBeenCalledWith(captureSink);
+    expect(captureSink.connect).toHaveBeenCalledWith(ctx.destination);
   });
 
   it("adopts the server-bound thread from the ready frame", async () => {
@@ -99,7 +116,7 @@ describe("happy path", () => {
     await session.start({ conversationId: "th-existing" });
     expect(http.post).toHaveBeenCalledWith(
       "/api/sdk/v1/voice/mint-session-token",
-      expect.objectContaining({ conversation_id: "th-existing" })
+      expect.objectContaining({ conversation_id: "th-existing" }),
     );
     expect(session.getState().conversationId).toBe("th-existing");
   });
@@ -130,6 +147,19 @@ describe("happy path", () => {
     expect(transcripts).toHaveLength(3);
   });
 
+  it("appends transcript deltas from a legacy gateway with no mode handshake", async () => {
+    const session = makeSession();
+    await session.start();
+    const ws = stubs.lastSocket();
+    ws.emitOpen();
+    ws.emitFrame({ type: "ready", threadId: "th-legacy" });
+
+    ws.emitFrame({ type: "transcript", role: "assistant", text: "Hel" });
+    ws.emitFrame({ type: "transcript", role: "assistant", text: "lo" });
+
+    expect(session.getState().captions[0]?.text).toBe("Hello");
+  });
+
   it("a final user transcript moves the turn to agent-thinking", async () => {
     const session = makeSession();
     const ws = await startToLive(session);
@@ -143,6 +173,32 @@ describe("happy path", () => {
     ws.emitFrame({ type: "audio", audio: "AAAA" });
     expect(stubs.playbackNode().port.postMessage).toHaveBeenCalledTimes(1);
     expect(session.getState().turn).toBe("agent-speaking");
+  });
+
+  it("stays agent-speaking until final assistant audio has drained", async () => {
+    const session = makeSession();
+    const ws = await startToLive(session);
+    ws.emitFrame({ type: "audio", audio: "AAAA" });
+    expect(session.getState().turn).toBe("agent-speaking");
+
+    ws.emitFrame({
+      type: "transcript",
+      role: "assistant",
+      text: "Done",
+      final: true,
+    });
+
+    expect(stubs.playbackNode().port.postMessage).toHaveBeenCalledWith({
+      type: "end",
+    });
+    expect(session.getState().turn).toBe("agent-speaking");
+    stubs.sendMicFrame(loudFrame());
+    expect(session.getState().turn).toBe("agent-speaking");
+
+    stubs.finishPlayback();
+    expect(session.getState().turn).toBe("listening");
+    stubs.sendMicFrame(loudFrame());
+    expect(session.getState().turn).toBe("user-speaking");
   });
 
   it("flush (barge-in) drops queued audio and finalizes the assistant partial as interrupted", async () => {
@@ -190,6 +246,39 @@ describe("happy path", () => {
     ]);
   });
 
+  it("relays sanitized main-agent activity frames", async () => {
+    const session = makeSession();
+    const activities = events(session, "voice:activity");
+    const ws = await startToLive(session);
+
+    ws.emitFrame({
+      type: "activity",
+      activity: {
+        id: "search-1",
+        type: "status_message",
+        status: "done",
+        toolName: "search",
+        toolDisplayName: "Search knowledge",
+        message: "Found 2 sources",
+      },
+    });
+    ws.emitFrame({
+      type: "activity",
+      activity: { id: 42, type: "status_message" },
+    });
+
+    expect(activities).toEqual([
+      {
+        id: "search-1",
+        type: "status_message",
+        status: "done",
+        toolName: "search",
+        toolDisplayName: "Search knowledge",
+        message: "Found 2 sources",
+      },
+    ]);
+  });
+
   it("a server ended frame tears down and releases the mic", async () => {
     const session = makeSession();
     const ended = events(session, "voice:ended");
@@ -201,13 +290,29 @@ describe("happy path", () => {
     expect(stubs.lastStream().tracks[0].stopped).toBe(true);
   });
 
-  it("stop() sends the end frame and closes the socket", async () => {
+  it("stop() keeps the socket open until the server acknowledges persistence", async () => {
     const session = makeSession();
     const ws = await startToLive(session);
     session.stop();
     expect(ws.sentFrames().at(-1)).toEqual({ type: "end" });
-    expect(ws.closeCalled).toBe(true);
+    expect(ws.closeCalled).toBe(false);
     expect(stubs.lastStream().tracks[0].stopped).toBe(true);
+    expect(session.getState().status).toBe("live");
+
+    ws.emitFrame({ type: "ended", reason: "client_end" });
+    expect(ws.closeCalled).toBe(true);
+    expect(session.getState().status).toBe("ended");
+    expect(session.getState().endedReason).toBe("stopped");
+  });
+
+  it("stop() closes after a bounded wait when the server never acknowledges", async () => {
+    const session = makeSession();
+    const ws = await startToLive(session);
+
+    session.stop();
+    await vi.advanceTimersByTimeAsync(VOICE_TIMEOUTS.endAckMs);
+
+    expect(ws.closeCalled).toBe(true);
     expect(session.getState().status).toBe("ended");
     expect(session.getState().endedReason).toBe("stopped");
   });
@@ -217,7 +322,7 @@ describe("generation cancellation (five stop points)", () => {
   it("stop during the permission dialog releases the late mic stream", async () => {
     let resolveGum!: (stream: unknown) => void;
     stubs.getUserMedia.mockImplementationOnce(
-      () => new Promise((resolve) => (resolveGum = resolve))
+      () => new Promise((resolve) => (resolveGum = resolve)),
     );
     const session = makeSession();
     const startPromise = session.start();
@@ -235,7 +340,7 @@ describe("generation cancellation (five stop points)", () => {
   it("stop between mic and mint never opens a socket", async () => {
     let resolveMint!: (grant: unknown) => void;
     http.post.mockImplementationOnce(
-      () => new Promise((resolve) => (resolveMint = resolve))
+      () => new Promise((resolve) => (resolveMint = resolve)),
     );
     const session = makeSession();
     const startPromise = session.start();
@@ -286,7 +391,7 @@ describe("generation cancellation (five stop points)", () => {
 
   it("stop during the mint retry backoff aborts the retry", async () => {
     http.post.mockRejectedValueOnce(
-      new AgoApiError("HTTP 500", "http_error", 500, "api_error")
+      new AgoApiError("HTTP 500", "http_error", 500, "api_error"),
     );
     const session = makeSession();
     const startPromise = session.start();
@@ -329,6 +434,36 @@ describe("reconnect", () => {
     expect(ws2.sentFrames().some((f) => f.type === "audio")).toBe(true);
     // The mic was NOT re-acquired for the reconnect.
     expect(stubs.getUserMedia).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not send a stale async function result into a replacement socket", async () => {
+    let resolveAction!: (value: { result: unknown }) => void;
+    const action = new Promise<{ result: unknown }>((resolve) => {
+      resolveAction = resolve;
+    });
+    const session = makeSession({ executeClientFunction: vi.fn(() => action) });
+    const ws1 = await startToLive(session, "th-9");
+    ws1.emitFrame({
+      type: "client_function",
+      invocationId: "old-call",
+      functionName: "navigateToPage",
+      arguments: { page: "tools" },
+      conversationId: "th-9",
+    });
+
+    ws1.emitClose();
+    await vi.advanceTimersByTimeAsync(1000);
+    const ws2 = stubs.lastSocket();
+    ws2.emitOpen();
+    ws2.emitFrame({ type: "ready", threadId: "th-9" });
+    const replacementFrameCount = ws2.sent.length;
+
+    resolveAction({ result: { navigated: true } });
+    await action;
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(ws2.sent).toHaveLength(replacementFrameCount);
   });
 
   it("re-mints pinned to the adopted thread", async () => {
@@ -435,7 +570,7 @@ describe("retry budget", () => {
   it("one budgeted mint retry with backoff, then success", async () => {
     http.post
       .mockRejectedValueOnce(
-        new AgoApiError("HTTP 500", "http_error", 500, "api_error")
+        new AgoApiError("HTTP 500", "http_error", 500, "api_error"),
       )
       .mockResolvedValueOnce({ token: "tok-2", wsUrl: "wss://x/v1/voice" });
     const session = makeSession();
@@ -449,7 +584,7 @@ describe("retry budget", () => {
   it("the budget is shared: after a mint retry, a WS drop is terminal", async () => {
     http.post
       .mockRejectedValueOnce(
-        new AgoApiError("HTTP 500", "http_error", 500, "api_error")
+        new AgoApiError("HTTP 500", "http_error", 500, "api_error"),
       )
       .mockResolvedValueOnce({ token: "tok-2", wsUrl: "wss://x/v1/voice" });
     const session = makeSession();
@@ -469,7 +604,7 @@ describe("retry budget", () => {
 
   it("429 is never auto-retried", async () => {
     http.post.mockRejectedValueOnce(
-      new AgoApiError("HTTP 429", "http_error", 429, "api_error")
+      new AgoApiError("HTTP 429", "http_error", 429, "api_error"),
     );
     const session = makeSession();
     const errors = events(session, "voice:error");
@@ -498,7 +633,11 @@ describe("retry budget", () => {
     const session = makeSession();
     const errors = events(session, "voice:error");
     const ws1 = await startToLive(session);
-    ws1.emitFrame({ type: "error", reason: "backend_unavailable", retryAfter: 5 });
+    ws1.emitFrame({
+      type: "error",
+      reason: "backend_unavailable",
+      retryAfter: 5,
+    });
     expect(session.getState().status).toBe("reconnecting");
     await vi.advanceTimersByTimeAsync(1000);
     const ws2 = stubs.lastSocket();
@@ -522,6 +661,54 @@ describe("retry budget", () => {
 });
 
 describe("robustness", () => {
+  it("fails cleanly when startup client state is not JSON-serializable", async () => {
+    const data: Record<string, unknown> = {};
+    data.self = data;
+    const session = makeSession({
+      getClientContext: () => ({
+        entries: { page: { data } },
+      }),
+    });
+    const errors = events(session, "voice:error");
+
+    await session.start();
+    const ws = stubs.lastSocket();
+    ws.emitOpen();
+
+    expect(session.getState().status).toBe("error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0].code).toBe("connect-failed");
+    expect(errors[0].message).toContain(
+      "client state is not JSON-serializable",
+    );
+    expect(ws.sent).toHaveLength(0);
+    expect(ws.closeCalled).toBe(true);
+    expect(stubs.lastStream().tracks[0].stopped).toBe(true);
+    expect(stubs.lastContext().state).toBe("closed");
+  });
+
+  it("ignores an unserializable live client-state update", async () => {
+    let notifyClientStateChanged = (): void => {};
+    let context: ContextSnapshot | null = null;
+    const session = makeSession({
+      getClientContext: () => context,
+      onClientStateChanged: (handler) => {
+        notifyClientStateChanged = handler;
+        return () => {};
+      },
+    });
+    const ws = await startToLive(session);
+    const data: Record<string, unknown> = {};
+    data.self = data;
+    context = { entries: { page: { data } } };
+
+    expect(() => notifyClientStateChanged()).not.toThrow();
+    expect(session.getState().status).toBe("live");
+    expect(
+      ws.sentFrames().filter((frame) => frame.type === "client_state"),
+    ).toHaveLength(0);
+  });
+
   it("ignores unknown server frame types and malformed JSON", async () => {
     const session = makeSession();
     const errors = events(session, "voice:error");
@@ -557,8 +744,67 @@ describe("robustness", () => {
     const ws = await startToLive(session);
     ws.emitFrame({ type: "error", reason: "kill_switch" });
     expect(consoleErrorSpy).toHaveBeenCalledWith(
-      expect.stringContaining("kill-switch")
+      expect.stringContaining("kill-switch"),
     );
+  });
+
+  it("drops an async client-function result when its socket is no longer open", async () => {
+    let finishExecution!: (value: { result: unknown }) => void;
+    const execution = new Promise<{ result: unknown }>((resolve) => {
+      finishExecution = resolve;
+    });
+    const executeClientFunction = vi.fn(() => execution);
+    const session = makeSession({ executeClientFunction });
+    const ws = await startToLive(session);
+
+    ws.emitFrame({
+      type: "client_function",
+      invocationId: "call-closing",
+      functionName: "navigateToPage",
+      arguments: { page: "tools" },
+      conversationId: "th-1",
+    });
+    expect(executeClientFunction).toHaveBeenCalledTimes(1);
+    const frameCountBeforeResult = ws.sent.length;
+    ws.readyState = FakeWebSocket.CLOSING;
+
+    finishExecution({ result: { navigated: true } });
+    await execution;
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(ws.sent).toHaveLength(frameCountBeforeResult);
+  });
+
+  it("returns a serializable error when a client function result is circular", async () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const session = makeSession({
+      executeClientFunction: vi.fn(async () => ({ result: circular })),
+    });
+    const ws = await startToLive(session);
+
+    ws.emitFrame({
+      type: "client_function",
+      invocationId: "call-circular",
+      functionName: "readPageState",
+      arguments: {},
+      conversationId: "th-1",
+    });
+
+    await vi.waitFor(() => {
+      expect(
+        ws
+          .sentFrames()
+          .find(
+            (frame) =>
+              frame.type === "client_function_result" &&
+              frame.invocationId === "call-circular",
+          ),
+      ).toMatchObject({
+        error: "client_function_result_not_serializable",
+      });
+    });
   });
 });
 
@@ -599,6 +845,38 @@ describe("CSP and addModule failure", () => {
     expect(report.availability).toBe("unsupported");
     expect(report.unavailableReason).toBe("csp-blocked");
   });
+
+  it("audio graph construction failure releases the microphone", async () => {
+    FakeAudioContext.nextCreateMediaStreamSourceError = new Error(
+      "audio graph exhausted",
+    );
+    const session = makeSession();
+    const errors = events(session, "voice:error");
+
+    await session.start();
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0].code).toBe("audio-init-failed");
+    expect(session.getState().status).toBe("error");
+    expect(stubs.lastStream().tracks[0].stopped).toBe(true);
+    expect(stubs.lastContext().state).toBe("closed");
+    expect(FakeWebSocket.instances).toHaveLength(0);
+  });
+
+  it("synchronous WebSocket construction failure releases the microphone", async () => {
+    FakeWebSocket.constructorError = new SyntaxError("invalid WebSocket URL");
+    const session = makeSession();
+    const errors = events(session, "voice:error");
+
+    await session.start();
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0].code).toBe("connect-failed");
+    expect(session.getState().status).toBe("error");
+    expect(stubs.lastStream().tracks[0].stopped).toBe(true);
+    expect(stubs.lastContext().state).toBe("closed");
+    expect(FakeWebSocket.instances).toHaveLength(0);
+  });
 });
 
 describe("mute and level", () => {
@@ -636,13 +914,27 @@ describe("mute and level", () => {
 
     stubs.sendMicFrame(loudFrame());
     expect(levels.at(-1)).toBeGreaterThan(0);
-    const framesBefore = ws.sentFrames().filter((f) => f.type === "audio").length;
+    const framesBefore = ws
+      .sentFrames()
+      .filter((f) => f.type === "audio").length;
     expect(framesBefore).toBe(1);
 
     session.toggleMute();
     stubs.sendMicFrame(loudFrame());
     expect(ws.sentFrames().filter((f) => f.type === "audio")).toHaveLength(1);
     expect(levels.at(-1)).toBe(0);
+  });
+
+  it("drops mic packets while the browser socket is backpressured", async () => {
+    const session = makeSession();
+    const ws = await startToLive(session);
+    ws.bufferedAmount = 1_000_001;
+
+    stubs.sendMicFrame(loudFrame());
+
+    expect(
+      ws.sentFrames().filter((frame) => frame.type === "audio"),
+    ).toHaveLength(0);
   });
 
   it("suppresses the level during agent speech", async () => {
@@ -654,12 +946,14 @@ describe("mute and level", () => {
 
     ws.emitFrame({ type: "audio", audio: "AAAA" });
     expect(session.getState().turn).toBe("agent-speaking");
-    const audioFramesBefore = ws.sentFrames().filter((f) => f.type === "audio").length;
+    const audioFramesBefore = ws
+      .sentFrames()
+      .filter((f) => f.type === "audio").length;
     stubs.sendMicFrame(loudFrame());
     expect(levels.at(-1)).toBe(0);
     // Mic frames still flow to the server (barge-in detection is server-side).
     expect(ws.sentFrames().filter((f) => f.type === "audio").length).toBe(
-      audioFramesBefore + 1
+      audioFramesBefore + 1,
     );
   });
 
@@ -739,7 +1033,7 @@ describe("availability", () => {
   });
 
   it("reports jwt-missing for anonymous auth", async () => {
-    http.hasBearerToken.mockReturnValue(false);
+    http.canAuthenticateWithJwt.mockReturnValue(false);
     http.get.mockResolvedValueOnce({
       permissions: [
         {
@@ -753,6 +1047,37 @@ describe("availability", () => {
     expect(report.availability).toBe("policy-unavailable");
     expect(report.unavailableReason).toBe("jwt-missing");
     expect(report.checks.authKind).toBe("anonymous");
+  });
+
+  it("returns a client-function error frame when the host executor rejects", async () => {
+    const session = makeSession({
+      executeClientFunction: vi.fn(async () => {
+        throw new Error("host action failed");
+      }),
+    });
+    const ws = await startToLive(session);
+
+    ws.emitFrame({
+      type: "client_function",
+      invocationId: "call-rejected",
+      functionName: "navigateToPage",
+      arguments: { page: "tools" },
+      conversationId: "th-1",
+    });
+
+    await vi.waitFor(() => {
+      expect(
+        ws
+          .sentFrames()
+          .find(
+            (frame) =>
+              frame.type === "client_function_result" &&
+              frame.invocationId === "call-rejected",
+          ),
+      ).toMatchObject({
+        error: "host action failed",
+      });
+    });
   });
 
   it("reports available when every gate passes", async () => {
@@ -846,6 +1171,7 @@ describe("consent", () => {
     stubs.lastSocket().emitOpen();
     stubs.lastSocket().emitFrame({ type: "ready" });
     session.stop();
+    stubs.lastSocket().emitFrame({ type: "ended", reason: "client_end" });
 
     await session.start();
     expect(session.getState().consentPending).toBe(false);
@@ -865,10 +1191,12 @@ describe("lifecycle invariants", () => {
   it("stop() is idempotent: exactly one terminal event", async () => {
     const session = makeSession();
     const ended = events(session, "voice:ended");
-    await startToLive(session);
+    const ws = await startToLive(session);
     session.stop();
     session.stop();
     session.stop();
+    expect(ended).toHaveLength(0);
+    ws.emitFrame({ type: "ended", reason: "client_end" });
     expect(ended).toHaveLength(1);
   });
 
@@ -882,8 +1210,9 @@ describe("lifecycle invariants", () => {
 
   it("start() after stop begins a fresh generation", async () => {
     const session = makeSession();
-    await startToLive(session);
+    const ws1 = await startToLive(session);
     session.stop();
+    ws1.emitFrame({ type: "ended", reason: "client_end" });
     const ws2 = await startToLive(session, "th-second");
     expect(session.getState().status).toBe("live");
     expect(session.getState().conversationId).toBe("th-second");
@@ -909,5 +1238,19 @@ describe("lifecycle invariants", () => {
     await expect(session.start()).rejects.toMatchObject({
       code: "session-destroyed",
     });
+  });
+
+  it("destroy() on a live session emits exactly one terminal event", async () => {
+    const session = makeSession();
+    await startToLive(session);
+    const ended = events(session, "voice:ended");
+
+    session.destroy();
+
+    // stop() defers its terminal event to wait for the gateway end-ack, but
+    // destroy() cancels that timer, so destroy() must finalize synchronously.
+    expect(ended).toHaveLength(1);
+    expect(ended[0]).toEqual({ reason: "stopped" });
+    expect(session.getState().status).toBe("ended");
   });
 });

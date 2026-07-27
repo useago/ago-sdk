@@ -3,6 +3,7 @@ import type { HttpClient } from "../../src/api/HttpClient";
 
 export class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
+  static constructorError: Error | null = null;
   static CONNECTING = 0;
   static OPEN = 1;
   static CLOSING = 2;
@@ -10,6 +11,7 @@ export class FakeWebSocket {
 
   url: string;
   readyState = 0;
+  bufferedAmount = 0;
   binaryType = "";
   sent: string[] = [];
   closeCalled = false;
@@ -19,6 +21,9 @@ export class FakeWebSocket {
   onerror: ((ev?: unknown) => void) | null = null;
 
   constructor(url: string) {
+    if (FakeWebSocket.constructorError) {
+      throw FakeWebSocket.constructorError;
+    }
     this.url = url;
     FakeWebSocket.instances.push(this);
   }
@@ -73,7 +78,10 @@ export class FakeMediaStream {
   tracks: FakeMediaStreamTrack[];
 
   constructor(trackCount = 1) {
-    this.tracks = Array.from({ length: trackCount }, () => new FakeMediaStreamTrack());
+    this.tracks = Array.from(
+      { length: trackCount },
+      () => new FakeMediaStreamTrack(),
+    );
   }
 
   getTracks(): FakeMediaStreamTrack[] {
@@ -89,7 +97,7 @@ export class FakeAudioWorkletNode {
   static instances: FakeAudioWorkletNode[] = [];
   name: string;
   port: {
-    onmessage: ((ev: { data: ArrayBuffer }) => void) | null;
+    onmessage: ((ev: { data: unknown }) => void) | null;
     postMessage: ReturnType<typeof vi.fn>;
   } = { onmessage: null, postMessage: vi.fn() };
   connect = vi.fn();
@@ -105,11 +113,17 @@ export class FakeAudioContext {
   static instances: FakeAudioContext[] = [];
   /** When set, the next created context uses this addModule implementation. */
   static nextAddModuleImpl: ((url: string) => Promise<void>) | null = null;
+  static nextCreateMediaStreamSourceError: Error | null = null;
   state = "running";
   sampleRate = 48000;
   destination = {};
   audioWorklet = { addModule: vi.fn(async (_url: string) => undefined) };
   createMediaStreamSource = vi.fn(() => ({ connect: vi.fn() }));
+  createGain = vi.fn(() => ({
+    gain: { value: 1 },
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+  }));
   resume = vi.fn(async () => {
     this.state = "running";
   });
@@ -118,6 +132,12 @@ export class FakeAudioContext {
     FakeAudioContext.instances.push(this);
     if (FakeAudioContext.nextAddModuleImpl) {
       this.audioWorklet.addModule = vi.fn(FakeAudioContext.nextAddModuleImpl);
+    }
+    if (FakeAudioContext.nextCreateMediaStreamSourceError) {
+      const error = FakeAudioContext.nextCreateMediaStreamSourceError;
+      this.createMediaStreamSource = vi.fn(() => {
+        throw error;
+      });
     }
   }
 
@@ -136,14 +156,18 @@ export interface VoiceStubs {
   playbackNode: () => FakeAudioWorkletNode;
   /** Push one mic PCM16 buffer through the capture worklet port. */
   sendMicFrame: (samples: Int16Array) => void;
+  /** Signal that every queued assistant PCM frame has been rendered. */
+  finishPlayback: () => void;
   setSecureContext: (secure: boolean) => void;
   restore: () => void;
 }
 
 export function installVoiceStubs(): VoiceStubs {
   FakeWebSocket.instances = [];
+  FakeWebSocket.constructorError = null;
   FakeAudioContext.instances = [];
   FakeAudioContext.nextAddModuleImpl = null;
+  FakeAudioContext.nextCreateMediaStreamSourceError = null;
   FakeAudioWorkletNode.instances = [];
 
   const streams: FakeMediaStream[] = [];
@@ -169,7 +193,7 @@ export function installVoiceStubs(): VoiceStubs {
 
   const originalSecure = Object.getOwnPropertyDescriptor(
     window,
-    "isSecureContext"
+    "isSecureContext",
   );
   const setSecureContext = (secure: boolean) => {
     Object.defineProperty(window, "isSecureContext", {
@@ -182,22 +206,29 @@ export function installVoiceStubs(): VoiceStubs {
   return {
     getUserMedia,
     lastStream: () => streams[streams.length - 1],
-    lastSocket: () => FakeWebSocket.instances[FakeWebSocket.instances.length - 1],
+    lastSocket: () =>
+      FakeWebSocket.instances[FakeWebSocket.instances.length - 1],
     lastContext: () =>
       FakeAudioContext.instances[FakeAudioContext.instances.length - 1],
     captureNode: () =>
       FakeAudioWorkletNode.instances.find((n) =>
-        n.name.includes("capture")
+        n.name.includes("capture"),
       ) as FakeAudioWorkletNode,
     playbackNode: () =>
       FakeAudioWorkletNode.instances.find((n) =>
-        n.name.includes("playback")
+        n.name.includes("playback"),
       ) as FakeAudioWorkletNode,
     sendMicFrame: (samples: Int16Array) => {
       const capture = FakeAudioWorkletNode.instances.find((n) =>
-        n.name.includes("capture")
+        n.name.includes("capture"),
       );
       capture?.port.onmessage?.({ data: samples.buffer as ArrayBuffer });
+    },
+    finishPlayback: () => {
+      const playback = FakeAudioWorkletNode.instances.find((n) =>
+        n.name.includes("playback"),
+      );
+      playback?.port.onmessage?.({ data: { type: "drained" } });
     },
     setSecureContext,
     restore: () => {
@@ -219,15 +250,16 @@ export class FakeHttp {
   post = vi.fn(
     async (
       _path: string,
-      _body?: unknown
+      _body?: unknown,
     ): Promise<Record<string, unknown>> => ({
       token: "tok-1",
       wsUrl: "wss://voice.test/v1/voice",
-    })
+    }),
   );
   get = vi.fn(async (): Promise<Record<string, unknown>> => ({}));
   refreshUserJwt = vi.fn(async () => false);
   hasBearerToken = vi.fn(() => true);
+  canAuthenticateWithJwt = vi.fn(() => true);
 
   asHttpClient(): HttpClient {
     return this as unknown as HttpClient;

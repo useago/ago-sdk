@@ -150,9 +150,9 @@ export class VoiceApi {
     return { tenantEnabled, agentIsVoiceAgent };
   }
 
-  /** Whether the client currently carries a bearer token (JWT auth kind). */
+  /** Whether the client carries a bearer or can lazily obtain one. */
   hasUserJwt(): boolean {
-    return this.http.hasBearerToken();
+    return this.http.canAuthenticateWithJwt();
   }
 
   private normalizeGrant(response: MintResponse): VoiceSessionGrant {

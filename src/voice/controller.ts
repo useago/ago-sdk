@@ -1,5 +1,14 @@
 import type { HttpClient } from "../api/HttpClient";
-import type { AgoVoiceEvents, VoiceAvailabilityReport, VoiceSessionState, VoiceStartOptions } from "./types";
+import type { ClientFunctionSchema } from "../functions/types";
+import type { ContextSnapshot } from "../state/ClientContextRegistry";
+import type {
+  AgoVoiceEvents,
+  VoiceAvailabilityReport,
+  VoiceClientFunctionInvocation,
+  VoiceClientFunctionResult,
+  VoiceSessionState,
+  VoiceStartOptions,
+} from "./types";
 import type { VoiceSession } from "./VoiceSession";
 
 /**
@@ -37,11 +46,11 @@ export interface AgoVoice {
   /** Subscribe to a voice event on the session's own emitter. */
   on<K extends keyof AgoVoiceEvents>(
     event: K,
-    handler: (data: AgoVoiceEvents[K]) => void
+    handler: (data: AgoVoiceEvents[K]) => void,
   ): void;
   off<K extends keyof AgoVoiceEvents>(
     event: K,
-    handler: (data: AgoVoiceEvents[K]) => void
+    handler: (data: AgoVoiceEvents[K]) => void,
   ): void;
   /** The underlying session engine (loads it on first call). */
   getSession(): Promise<VoiceSession>;
@@ -53,10 +62,16 @@ export interface VoiceControllerDeps {
   http: HttpClient;
   getAgent: () => string | undefined;
   getPermission: () => string | undefined;
+  getClientFunctions: () => ClientFunctionSchema[];
+  getClientContext: () => ContextSnapshot | null;
+  executeClientFunction: (
+    invocation: VoiceClientFunctionInvocation,
+  ) => Promise<VoiceClientFunctionResult>;
+  onClientStateChanged: (handler: () => void) => () => void;
   requireConsent?: boolean;
   forward: <K extends keyof AgoVoiceEvents>(
     event: K,
-    data: AgoVoiceEvents[K]
+    data: AgoVoiceEvents[K],
   ) => void;
 }
 
@@ -84,22 +99,31 @@ export function createVoiceController(deps: VoiceControllerDeps): AgoVoice {
 
   function ensureSession(): Promise<VoiceSession> {
     if (!sessionPromise) {
-      sessionPromise = import("./VoiceSession").then((mod) => {
-        const created = new mod.VoiceSession({
-          http: deps.http,
-          getAgent: deps.getAgent,
-          getPermission: deps.getPermission,
-          requireConsent: deps.requireConsent,
-          forward: deps.forward,
+      sessionPromise = import("./VoiceSession")
+        .then((mod) => {
+          const created = new mod.VoiceSession({
+            http: deps.http,
+            getAgent: deps.getAgent,
+            getPermission: deps.getPermission,
+            getClientFunctions: deps.getClientFunctions,
+            getClientContext: deps.getClientContext,
+            executeClientFunction: deps.executeClientFunction,
+            onClientStateChanged: deps.onClientStateChanged,
+            requireConsent: deps.requireConsent,
+            forward: deps.forward,
+          });
+          for (const sub of pendingSubscriptions) {
+            created.on(sub.event, sub.handler);
+          }
+          pendingSubscriptions.length = 0;
+          session = created;
+          if (destroyed) created.destroy();
+          return created;
+        })
+        .catch((error) => {
+          sessionPromise = null;
+          throw error;
         });
-        for (const sub of pendingSubscriptions) {
-          created.on(sub.event, sub.handler);
-        }
-        pendingSubscriptions.length = 0;
-        session = created;
-        if (destroyed) created.destroy();
-        return created;
-      });
     }
     return sessionPromise;
   }
@@ -113,7 +137,10 @@ export function createVoiceController(deps: VoiceControllerDeps): AgoVoice {
       return;
     }
     if (sessionPromise) {
-      void sessionPromise.then(action);
+      void sessionPromise.then(action).catch(() => {
+        // start()/getSession() owns the load error; queued void actions must
+        // never create an unhandled rejection.
+      });
     }
   }
 
@@ -160,7 +187,7 @@ export function createVoiceController(deps: VoiceControllerDeps): AgoVoice {
       const index = pendingSubscriptions.findIndex(
         (sub) =>
           sub.event === event &&
-          sub.handler === (handler as PendingSubscription["handler"])
+          sub.handler === (handler as PendingSubscription["handler"]),
       );
       if (index >= 0) pendingSubscriptions.splice(index, 1);
     },

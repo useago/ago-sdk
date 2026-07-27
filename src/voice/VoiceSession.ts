@@ -1,4 +1,6 @@
 import type { HttpClient } from "../api/HttpClient";
+import type { ClientFunctionSchema } from "../functions/types";
+import type { ContextSnapshot } from "../state/ClientContextRegistry";
 import { EventEmitter } from "../utils/eventEmitter";
 import { logger } from "../utils/logger";
 import { AgoVoiceError } from "./errors";
@@ -19,6 +21,8 @@ import type {
   VoiceAvailability,
   VoiceAvailabilityReport,
   VoiceCaption,
+  VoiceClientFunctionInvocation,
+  VoiceClientFunctionResult,
   VoiceEndedReason,
   VoiceFlags,
   VoiceServerFrame,
@@ -41,20 +45,29 @@ export const VOICE_TIMEOUTS = {
   /** Jittered backoff before a retry: base + random * jitter. */
   backoffBaseMs: 400,
   backoffJitterMs: 400,
+  /** Grace period for the server to persist turns and acknowledge `end`. */
+  endAckMs: 5000,
 } as const;
 
 const WS_OPEN = 1;
+const MAX_BUFFERED_AUDIO_BYTES = 1_000_000;
 
 export interface VoiceSessionDeps {
   http: HttpClient;
   getAgent: () => string | undefined;
   getPermission: () => string | undefined;
+  getClientFunctions?: () => ClientFunctionSchema[];
+  getClientContext?: () => ContextSnapshot | null;
+  executeClientFunction?: (
+    invocation: VoiceClientFunctionInvocation,
+  ) => Promise<VoiceClientFunctionResult>;
+  onClientStateChanged?: (handler: () => void) => () => void;
   /** Default `true`: the first start() pauses on consentPending. */
   requireConsent?: boolean;
   /** Forward every session event onto the client emitter. */
   forward?: <K extends keyof AgoVoiceEvents>(
     event: K,
-    data: AgoVoiceEvents[K]
+    data: AgoVoiceEvents[K],
   ) => void;
 }
 
@@ -72,6 +85,7 @@ function micError(err: unknown): AgoVoiceError {
 interface AudioGraph {
   ctx: AudioContext;
   capture: AudioWorkletNode;
+  captureSink: GainNode;
   playback: AudioWorkletNode;
 }
 
@@ -130,37 +144,43 @@ export class VoiceSession {
   private stream: MediaStream | null = null;
   private audio: AudioGraph | null = null;
   private lastVoiceAt = 0;
+  private assistantAudioPending = false;
+  private transcriptMode: "delta" | "snapshot" = "delta";
 
   private openTimer: ReturnType<typeof setTimeout> | null = null;
   private readyTimer: ReturnType<typeof setTimeout> | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectDeadlineTimer: ReturnType<typeof setTimeout> | null = null;
+  private endAckTimer: ReturnType<typeof setTimeout> | null = null;
   private visibilityHandler: (() => void) | null = null;
+  private detachClientState: (() => void) | null = null;
 
   constructor(private deps: VoiceSessionDeps) {
     this.api = new VoiceApi(deps.http);
     this.requireConsent = deps.requireConsent !== false;
+    this.detachClientState =
+      deps.onClientStateChanged?.(() => this.sendClientState()) ?? null;
   }
 
   // ── Events ─────────────────────────────────────────────────────────────
 
   on<K extends keyof AgoVoiceEvents>(
     event: K,
-    handler: (data: AgoVoiceEvents[K]) => void
+    handler: (data: AgoVoiceEvents[K]) => void,
   ): void {
     this.emitter.on(event, handler);
   }
 
   off<K extends keyof AgoVoiceEvents>(
     event: K,
-    handler: (data: AgoVoiceEvents[K]) => void
+    handler: (data: AgoVoiceEvents[K]) => void,
   ): void {
     this.emitter.off(event, handler);
   }
 
   private emit<K extends keyof AgoVoiceEvents>(
     event: K,
-    data: AgoVoiceEvents[K]
+    data: AgoVoiceEvents[K],
   ): void {
     if (this.destroyed) return;
     this.emitter.emit(event, data);
@@ -284,15 +304,36 @@ export class VoiceSession {
 
   /** Idempotent from every state. Cancels any in-flight start(). */
   stop(): void {
-    if (this.destroyed) return;
+    if (this.destroyed || this.stopping) return;
     this.pendingStartOptions = undefined;
     this.stopping = true;
-    this.generation++;
     this.clearTimers();
-    this.closeSocket(true);
     this.teardownAudio();
     this.setLevel(0);
     if (this.flags.consentPending) this.setFlags({ consentPending: false });
+
+    const gen = this.generation;
+    const ws = this.ws;
+    if (!this.terminalEmitted && ws?.readyState === WS_OPEN) {
+      try {
+        ws.send(JSON.stringify({ type: "end" }));
+      } catch {
+        this.finishGeneration(gen, "stopped");
+        return;
+      }
+      // Keep the transport alive until the gateway confirms its persistence
+      // queue is flushed. Older/unhealthy gateways are bounded by this timer.
+      this.endAckTimer = setTimeout(() => {
+        this.endAckTimer = null;
+        if (this.owns(gen) && this.stopping) {
+          this.finishGeneration(gen, "stopped");
+        }
+      }, VOICE_TIMEOUTS.endAckMs);
+      return;
+    }
+
+    this.generation++;
+    this.closeSocket(false);
     if (!this.terminalEmitted) {
       this.terminalEmitted = true;
       this.endedReason = "stopped";
@@ -306,7 +347,23 @@ export class VoiceSession {
   destroy(): void {
     if (this.destroyed) return;
     this.stop();
+    // stop() defers its terminal event when it waits for the gateway's
+    // end-ack. destroy() is the hard release primitive and cannot leave a
+    // generation without its terminal event, so finalize now if stop()
+    // deferred (this emits voice:ended before removeAllListeners() below).
+    if (!this.terminalEmitted) {
+      this.finishGeneration(this.generation, "stopped");
+    }
+    // destroy() is the hard release primitive. Unlike a user stop, its
+    // contract cannot leave a transport/timer alive waiting for an ack.
+    this.generation++;
+    this.clearTimers();
+    this.closeSocket(false);
+    this.teardownAudio();
     this.destroyed = true;
+    this.stopping = false;
+    this.detachClientState?.();
+    this.detachClientState = null;
     this.emitter.removeAllListeners();
   }
 
@@ -330,9 +387,11 @@ export class VoiceSession {
     const workletSupported =
       typeof AudioWorkletNode !== "undefined" &&
       typeof window !== "undefined" &&
-      typeof (window.AudioContext ??
+      typeof (
+        window.AudioContext ??
         (window as unknown as { webkitAudioContext?: unknown })
-          .webkitAudioContext) !== "undefined";
+          .webkitAudioContext
+      ) !== "undefined";
     const authKind: "jwt" | "anonymous" = this.api.hasUserJwt()
       ? "jwt"
       : "anonymous";
@@ -342,7 +401,7 @@ export class VoiceSession {
     try {
       const gates = await this.api.getVoiceConfig(
         this.deps.getAgent(),
-        this.deps.getPermission()
+        this.deps.getPermission(),
       );
       tenantEnabled = gates.tenantEnabled;
       agentIsVoiceAgent = gates.agentIsVoiceAgent;
@@ -387,7 +446,7 @@ export class VoiceSession {
         `  worklet support: ${workletSupported}\n` +
         `  auth kind:       ${authKind}\n` +
         `  tenant gate:     ${tenantEnabled ?? "unknown"}\n` +
-        `  agent gate:      ${agentIsVoiceAgent ?? "unknown"}`
+        `  agent gate:      ${agentIsVoiceAgent ?? "unknown"}`,
     );
 
     return {
@@ -413,6 +472,7 @@ export class VoiceSession {
     this.endedReason = undefined;
     this.captions = [];
     this.threadId = options?.conversationId ?? null;
+    this.assistantAudioPending = false;
     this.setFlags({ degraded: false });
 
     if (typeof window !== "undefined" && window.isSecureContext === false) {
@@ -485,7 +545,7 @@ export class VoiceSession {
    */
   private async mintWithBudget(
     gen: number,
-    threadId: string | null
+    threadId: string | null,
   ): Promise<VoiceSessionGrant | null> {
     try {
       return await this.mint(threadId);
@@ -508,7 +568,7 @@ export class VoiceSession {
           gen,
           retryErr instanceof AgoVoiceError
             ? retryErr
-            : new AgoVoiceError("mint-failed")
+            : new AgoVoiceError("mint-failed"),
         );
         return null;
       }
@@ -547,15 +607,9 @@ export class VoiceSession {
       return false;
     }
 
-    const ctx = new AudioCtx();
-    // Blob URLs are created here, at session start, never at import time.
-    const captureUrl = URL.createObjectURL(
-      new Blob([captureWorkletSource], { type: "text/javascript" })
-    );
-    const playbackUrl = URL.createObjectURL(
-      new Blob([playbackWorkletSource], { type: "text/javascript" })
-    );
-
+    let ctx: AudioContext | null = null;
+    let captureUrl: string | null = null;
+    let playbackUrl: string | null = null;
     let violatedDirective: string | undefined;
     const onViolation = (event: Event) => {
       const e = event as SecurityPolicyViolationEvent;
@@ -566,10 +620,62 @@ export class VoiceSession {
     }
 
     try {
+      ctx = new AudioCtx();
+      // Blob URLs are created here, at session start, never at import time.
+      captureUrl = URL.createObjectURL(
+        new Blob([captureWorkletSource], { type: "text/javascript" }),
+      );
+      playbackUrl = URL.createObjectURL(
+        new Blob([playbackWorkletSource], { type: "text/javascript" }),
+      );
       await ctx.audioWorklet.addModule(captureUrl);
       await ctx.audioWorklet.addModule(playbackUrl);
+
+      if (!this.owns(gen)) {
+        // Cancelled during worklet load: dispose the late context.
+        void ctx.close();
+        return false;
+      }
+
+      const source = ctx.createMediaStreamSource(stream);
+      const capture = new AudioWorkletNode(ctx, "ago-pcm-capture-processor");
+      const playback = new AudioWorkletNode(ctx, "ago-pcm-playback-processor");
+      source.connect(capture);
+      // AudioWorklets are pull-driven. Keep the capture processor in the
+      // rendered graph through a silent sink so browsers do not prune it,
+      // without monitoring the microphone through the speakers.
+      const captureSink = ctx.createGain();
+      captureSink.gain.value = 0;
+      capture.connect(captureSink);
+      captureSink.connect(ctx.destination);
+      playback.connect(ctx.destination);
+      this.audio = { ctx, capture, captureSink, playback };
+
+      capture.port.onmessage = (e: MessageEvent<ArrayBuffer>) => {
+        this.handleCaptureFrame(gen, e.data);
+      };
+      playback.port.onmessage = (e: MessageEvent<{ type?: string }>) => {
+        if (!this.owns(gen) || e.data?.type !== "drained") return;
+        this.assistantAudioPending = false;
+        if (this.turn === "agent-speaking") this.setTurn("listening");
+      };
+
+      this.visibilityHandler = () => {
+        if (
+          typeof document !== "undefined" &&
+          document.visibilityState === "visible" &&
+          this.audio?.ctx.state === "suspended"
+        ) {
+          void this.audio.ctx.resume();
+        }
+      };
+      if (typeof document !== "undefined") {
+        document.addEventListener("visibilitychange", this.visibilityHandler);
+      }
+
+      return true;
     } catch (err) {
-      void ctx.close();
+      if (ctx && ctx.state !== "closed") void ctx.close();
       if (!this.owns(gen)) return false;
       if (violatedDirective) {
         this.cspBlockedDirective = violatedDirective;
@@ -579,7 +685,7 @@ export class VoiceSession {
           gen,
           new AgoVoiceError("csp-blocked", {
             detail: `blocked directive: ${violatedDirective}`,
-          })
+          }),
         );
       } else {
         logger.debug("Worklet addModule failed:", err);
@@ -590,41 +696,9 @@ export class VoiceSession {
       if (typeof document !== "undefined") {
         document.removeEventListener("securitypolicyviolation", onViolation);
       }
-      URL.revokeObjectURL(captureUrl);
-      URL.revokeObjectURL(playbackUrl);
+      if (captureUrl) URL.revokeObjectURL(captureUrl);
+      if (playbackUrl) URL.revokeObjectURL(playbackUrl);
     }
-
-    if (!this.owns(gen)) {
-      // Cancelled during worklet load: dispose the late context.
-      void ctx.close();
-      return false;
-    }
-
-    const source = ctx.createMediaStreamSource(stream);
-    const capture = new AudioWorkletNode(ctx, "ago-pcm-capture-processor");
-    const playback = new AudioWorkletNode(ctx, "ago-pcm-playback-processor");
-    source.connect(capture);
-    playback.connect(ctx.destination);
-    this.audio = { ctx, capture, playback };
-
-    capture.port.onmessage = (e: MessageEvent<ArrayBuffer>) => {
-      this.handleCaptureFrame(gen, e.data);
-    };
-
-    this.visibilityHandler = () => {
-      if (
-        typeof document !== "undefined" &&
-        document.visibilityState === "visible" &&
-        this.audio?.ctx.state === "suspended"
-      ) {
-        void this.audio.ctx.resume();
-      }
-    };
-    if (typeof document !== "undefined") {
-      document.addEventListener("visibilitychange", this.visibilityHandler);
-    }
-
-    return true;
   }
 
   private handleCaptureFrame(gen: number, buffer: ArrayBuffer): void {
@@ -653,7 +727,10 @@ export class VoiceSession {
     // into the dead one).
     const ws = this.ws;
     if (!ws || ws.readyState !== WS_OPEN) return;
-    ws.send(JSON.stringify({ type: "audio", audio: arrayBufferToBase64(buffer) }));
+    if (ws.bufferedAmount > MAX_BUFFERED_AUDIO_BYTES) return;
+    ws.send(
+      JSON.stringify({ type: "audio", audio: arrayBufferToBase64(buffer) }),
+    );
   }
 
   private teardownAudio(): void {
@@ -663,11 +740,14 @@ export class VoiceSession {
     this.visibilityHandler = null;
     if (this.audio) {
       this.audio.capture.port.onmessage = null;
+      this.audio.playback.port.onmessage = null;
       this.audio.capture.disconnect();
+      this.audio.captureSink.disconnect();
       this.audio.playback.disconnect();
       if (this.audio.ctx.state !== "closed") void this.audio.ctx.close();
       this.audio = null;
     }
+    this.assistantAudioPending = false;
     // Releases the mic (hardware light off).
     this.stream?.getTracks().forEach((t) => t.stop());
     this.stream = null;
@@ -676,7 +756,14 @@ export class VoiceSession {
   // ── Socket ─────────────────────────────────────────────────────────────
 
   private openSocket(grant: VoiceSessionGrant, gen: number): void {
-    const ws = new WebSocket(grant.wsUrl);
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(grant.wsUrl);
+    } catch (err) {
+      logger.debug("WebSocket construction failed:", err);
+      this.failGeneration(gen, new AgoVoiceError("connect-failed"));
+      return;
+    }
     ws.binaryType = "arraybuffer";
     this.ws = ws;
 
@@ -688,14 +775,33 @@ export class VoiceSession {
 
     ws.onopen = () => {
       if (!this.ownsSocket(gen, ws)) return;
-      this.clearTimer("openTimer");
-      ws.send(
-        JSON.stringify({
+      let authFrame: string;
+      try {
+        authFrame = JSON.stringify({
           type: "auth",
           token: grant.token,
           threadId: grant.threadId ?? this.threadId ?? undefined,
-        })
-      );
+          clientFunctions: this.deps.getClientFunctions?.() ?? [],
+          clientContext: this.deps.getClientContext?.() ?? null,
+        });
+      } catch (error) {
+        logger.warn("Voice client state was not serializable:", error);
+        this.failGeneration(
+          gen,
+          new AgoVoiceError("connect-failed", {
+            detail: "client state is not JSON-serializable",
+          }),
+        );
+        return;
+      }
+      this.clearTimer("openTimer");
+      try {
+        ws.send(authFrame);
+      } catch (error) {
+        logger.debug("Voice auth socket send failed:", error);
+        this.failGeneration(gen, new AgoVoiceError("connect-failed"));
+        return;
+      }
       this.readyTimer = setTimeout(() => {
         this.readyTimer = null;
         if (!this.ownsSocket(gen, ws) || this.status === "live") return;
@@ -705,17 +811,24 @@ export class VoiceSession {
 
     ws.onmessage = (event) => {
       if (!this.ownsSocket(gen, ws)) return;
-      let frame: VoiceServerFrame;
+      let value: unknown;
       try {
-        frame = JSON.parse(event.data as string) as VoiceServerFrame;
+        value = JSON.parse(event.data as string);
       } catch {
         return;
       }
+      if (!value || typeof value !== "object" || Array.isArray(value)) return;
+      const frame = value as VoiceServerFrame;
+      if (typeof frame.type !== "string") return;
       this.handleServerFrame(gen, frame);
     };
 
     ws.onclose = () => {
-      if (!this.ownsSocket(gen, ws) || this.stopping) return;
+      if (!this.ownsSocket(gen, ws)) return;
+      if (this.stopping) {
+        this.finishGeneration(gen, "stopped");
+        return;
+      }
       this.clearTimer("openTimer");
       this.clearTimer("readyTimer");
       this.retryConnection(gen, new AgoVoiceError("connection-lost"));
@@ -744,6 +857,91 @@ export class VoiceSession {
       ws.close();
     } catch {
       // ignore
+    }
+  }
+
+  private sendClientState(): void {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WS_OPEN) return;
+    try {
+      ws.send(
+        JSON.stringify({
+          type: "client_state",
+          clientFunctions: this.deps.getClientFunctions?.() ?? [],
+          clientContext: this.deps.getClientContext?.() ?? null,
+        }),
+      );
+    } catch (error) {
+      // A bad dynamic context update must not throw into the host application
+      // or tear down an otherwise healthy call. The last valid state remains
+      // authoritative until a subsequent serializable update arrives.
+      logger.warn("Voice client state update was not serializable:", error);
+    }
+  }
+
+  private async handleClientFunction(
+    gen: number,
+    frame: VoiceServerFrame,
+  ): Promise<void> {
+    const execute = this.deps.executeClientFunction;
+    if (
+      !execute ||
+      !frame.invocationId ||
+      !frame.functionName ||
+      !this.owns(gen)
+    ) {
+      return;
+    }
+
+    const invocation: VoiceClientFunctionInvocation = {
+      invocationId: frame.invocationId,
+      functionName: frame.functionName,
+      arguments: frame.arguments ?? {},
+      conversationId: frame.conversationId ?? this.threadId ?? "",
+      messageId: frame.messageId,
+    };
+    const originWs = this.ws;
+    if (!originWs || originWs.readyState !== WS_OPEN) return;
+    let outcome: VoiceClientFunctionResult;
+    try {
+      outcome = await execute(invocation);
+    } catch (error) {
+      outcome = {
+        error:
+          error instanceof Error ? error.message : "Client function failed",
+      };
+    }
+    const ws = this.ws;
+    if (
+      !ws ||
+      ws !== originWs ||
+      ws.readyState !== WS_OPEN ||
+      !this.ownsSocket(gen, ws)
+    ) {
+      return;
+    }
+    let resultFrame: string;
+    try {
+      resultFrame = JSON.stringify({
+        type: "client_function_result",
+        invocationId: invocation.invocationId,
+        ...outcome,
+        clientFunctions: this.deps.getClientFunctions?.() ?? [],
+        clientContext: this.deps.getClientContext?.() ?? null,
+      });
+    } catch (error) {
+      logger.warn("Voice client function result was not serializable:", error);
+      resultFrame = JSON.stringify({
+        type: "client_function_result",
+        invocationId: invocation.invocationId,
+        error: "client_function_result_not_serializable",
+      });
+    }
+    try {
+      ws.send(resultFrame);
+    } catch (error) {
+      // The socket may close between the readiness check and send().
+      logger.debug("Voice client function result socket send failed:", error);
     }
   }
 
@@ -788,7 +986,7 @@ export class VoiceSession {
             gen,
             err instanceof AgoVoiceError
               ? err
-              : new AgoVoiceError("connect-failed")
+              : new AgoVoiceError("connect-failed"),
           );
           return;
         }
@@ -804,6 +1002,7 @@ export class VoiceSession {
   private handleServerFrame(gen: number, frame: VoiceServerFrame): void {
     switch (frame.type) {
       case "ready": {
+        this.transcriptMode = frame.transcriptMode ?? "delta";
         this.clearTimer("readyTimer");
         this.clearTimer("reconnectDeadlineTimer");
         this.setStatus("live");
@@ -819,8 +1018,12 @@ export class VoiceSession {
       }
       case "audio": {
         if (frame.audio) {
-          this.audio?.playback.port.postMessage(base64ToArrayBuffer(frame.audio));
-          this.setTurn("agent-speaking");
+          const playback = this.audio?.playback;
+          if (playback) {
+            this.assistantAudioPending = true;
+            playback.port.postMessage(base64ToArrayBuffer(frame.audio));
+            this.setTurn("agent-speaking");
+          }
         }
         break;
       }
@@ -828,8 +1031,9 @@ export class VoiceSession {
         // Barge-in: drop queued agent audio and finalize the assistant's
         // partial at the honest boundary (the text generated so far).
         this.audio?.playback.port.postMessage({ type: "flush" });
+        this.assistantAudioPending = false;
         const assistantPartial = this.captions.find(
-          (c) => c.role === "assistant"
+          (c) => c.role === "assistant",
         );
         if (assistantPartial?.text) {
           const finalized: VoiceCaption = {
@@ -849,16 +1053,35 @@ export class VoiceSession {
           (frame.role === "user" || frame.role === "assistant") &&
           typeof frame.text === "string"
         ) {
+          const previous =
+            this.transcriptMode === "delta" && !frame.final
+              ? (this.captions.find((caption) => caption.role === frame.role)
+                  ?.text ?? "")
+              : "";
           const caption: VoiceCaption = {
             role: frame.role,
-            text: frame.text,
+            text: `${previous}${frame.text}`,
             final: !!frame.final,
           };
           this.emit("voice:transcript", caption);
           if (frame.final) {
             this.captions = this.captions.filter((c) => c.role !== frame.role);
             this.emit("voice:turn-final", caption);
-            if (frame.role === "user") this.setTurn("agent-thinking");
+            if (frame.role === "user") {
+              this.setTurn("agent-thinking");
+            } else {
+              // WebSocket ordering guarantees every audio frame for this turn
+              // was delivered before its final transcript. The worklet uses
+              // this marker to distinguish final drainage from a temporary
+              // streaming underrun between audio chunks.
+              this.audio?.playback.port.postMessage({ type: "end" });
+              if (!this.assistantAudioPending) {
+                // Transcript completion commonly precedes the playback worklet
+                // draining its queued PCM. Keep the speaking state until the
+                // worklet confirms that the audible output has finished.
+                this.setTurn("listening");
+              }
+            }
           } else {
             this.captions = [
               ...this.captions.filter((c) => c.role !== frame.role),
@@ -884,7 +1107,26 @@ export class VoiceSession {
         }
         break;
       }
+      case "client_function": {
+        void this.handleClientFunction(gen, frame);
+        break;
+      }
+      case "activity": {
+        const activity = frame.activity;
+        if (
+          activity &&
+          typeof activity.id === "string" &&
+          typeof activity.type === "string"
+        ) {
+          this.emit("voice:activity", activity);
+        }
+        break;
+      }
       case "error": {
+        if (this.stopping) {
+          this.finishGeneration(gen, "stopped");
+          return;
+        }
         const reason = frame.reason ?? "server_error";
         // Token expiry between mint and open, or a transient backend outage:
         // both are worth the single budgeted retry (re-mint + reconnect).
@@ -896,18 +1138,23 @@ export class VoiceSession {
             gen,
             AgoVoiceError.fromServerReason(reason, {
               retryAfter: frame.retryAfter,
-            })
+            }),
           );
           return;
         }
         this.failGeneration(
           gen,
-          AgoVoiceError.fromServerReason(reason, { retryAfter: frame.retryAfter })
+          AgoVoiceError.fromServerReason(reason, {
+            retryAfter: frame.retryAfter,
+          }),
         );
         break;
       }
       case "ended": {
-        this.finishGeneration(gen, frame.reason ?? "ended");
+        this.finishGeneration(
+          gen,
+          this.stopping ? "stopped" : (frame.reason ?? "ended"),
+        );
         break;
       }
       default:
@@ -943,10 +1190,16 @@ export class VoiceSession {
     this.endedReason = reason;
     this.setStatus("ended");
     this.emit("voice:ended", { reason });
+    this.stopping = false;
   }
 
   private clearTimer(
-    name: "openTimer" | "readyTimer" | "retryTimer" | "reconnectDeadlineTimer"
+    name:
+      | "openTimer"
+      | "readyTimer"
+      | "retryTimer"
+      | "reconnectDeadlineTimer"
+      | "endAckTimer",
   ): void {
     const timer = this[name];
     if (timer !== null) {
@@ -960,5 +1213,6 @@ export class VoiceSession {
     this.clearTimer("readyTimer");
     this.clearTimer("retryTimer");
     this.clearTimer("reconnectDeadlineTimer");
+    this.clearTimer("endAckTimer");
   }
 }

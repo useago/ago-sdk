@@ -18,12 +18,20 @@ class AgoPcmPlaybackProcessor extends AudioWorkletProcessor {
     this._ratio = SOURCE_RATE / sampleRate; // read step through 24kHz data per output frame
     this._readPos = 0;
     this._lastSample = 0;
+    this._playing = false;
+    this._endRequested = false;
     this.port.onmessage = (e) => {
-      if (e.data === 'flush' || (e.data && e.data.type === 'flush')) {
+      if (e.data === "flush" || (e.data && e.data.type === "flush")) {
         this._queue = [];
         this._chunk = null;
         this._chunkPos = 0;
         this._readPos = 0;
+        this._playing = false;
+        this._endRequested = false;
+        return;
+      }
+      if (e.data && e.data.type === "end") {
+        this._endRequested = true;
         return;
       }
       // Int16 PCM buffer to Float32 [-1, 1]
@@ -31,13 +39,23 @@ class AgoPcmPlaybackProcessor extends AudioWorkletProcessor {
       const f = new Float32Array(int16.length);
       for (let i = 0; i < int16.length; i++) f[i] = int16[i] / 0x8000;
       this._queue.push(f);
+      this._playing = true;
+      this._endRequested = false;
     };
   }
 
   _nextSample() {
     // Pull the next 24kHz sample, advancing through queued chunks.
     while (this._chunk === null || this._chunkPos >= this._chunk.length) {
-      if (this._queue.length === 0) return null;
+      if (this._queue.length === 0) {
+        if (this._playing && this._endRequested) {
+          this._playing = false;
+          this._endRequested = false;
+          this._lastSample = 0;
+          this.port.postMessage({ type: "drained" });
+        }
+        return null;
+      }
       this._chunk = this._queue.shift();
       this._chunkPos = 0;
     }
@@ -67,4 +85,4 @@ class AgoPcmPlaybackProcessor extends AudioWorkletProcessor {
   }
 }
 
-registerProcessor('ago-pcm-playback-processor', AgoPcmPlaybackProcessor);
+registerProcessor("ago-pcm-playback-processor", AgoPcmPlaybackProcessor);

@@ -1,4 +1,8 @@
-import { AgoApiError, AgoNetworkError, ApiErrorResponse } from "../client/errors";
+import {
+  AgoApiError,
+  AgoNetworkError,
+  ApiErrorResponse,
+} from "../client/errors";
 import type { AgoConfig } from "../client/types";
 import { logger } from "../utils/logger";
 
@@ -40,7 +44,7 @@ export class HttpClient {
 
   constructor(config: AgoConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, "");
-    this.getUserJwt = config.getUserJwt;
+    this.getUserJwt = config.getUserJwt ?? undefined;
     this.headers = {
       // Header carrying the end-user's anonymous id.
       "X-User-Anon-Id": config.widgetId || generateAnonId(),
@@ -72,11 +76,15 @@ export class HttpClient {
     if (config.userEmail) {
       this.headers["X-User-Email"] = config.userEmail;
     }
-    if (config.userJwt) {
-      this.headers["Authorization"] = `Bearer ${config.userJwt}`;
+    if ("userJwt" in config) {
+      if (config.userJwt) {
+        this.headers["Authorization"] = `Bearer ${config.userJwt}`;
+      } else {
+        delete this.headers["Authorization"];
+      }
     }
-    if (config.getUserJwt) {
-      this.getUserJwt = config.getUserJwt;
+    if ("getUserJwt" in config) {
+      this.getUserJwt = config.getUserJwt ?? undefined;
     }
     if (config.permission !== undefined) {
       if (config.permission) {
@@ -90,6 +98,16 @@ export class HttpClient {
   /** Whether an `Authorization: Bearer` header is currently configured. */
   hasBearerToken(): boolean {
     return typeof this.headers["Authorization"] === "string";
+  }
+
+  /**
+   * Whether this client can authenticate a JWT-only endpoint now or by calling
+   * its configured token provider. This is intentionally broader than
+   * {@link hasBearerToken}: availability checks run before the first request,
+   * when a lazy `getUserJwt` provider may not have minted a bearer yet.
+   */
+  canAuthenticateWithJwt(): boolean {
+    return this.hasBearerToken() || this.getUserJwt !== undefined;
   }
 
   /**
@@ -127,7 +145,7 @@ export class HttpClient {
   async post<T>(
     path: string,
     body?: unknown,
-    options?: { keepalive?: boolean }
+    options?: { keepalive?: boolean },
   ): Promise<T> {
     return this.request<T>("POST", path, body, options);
   }
@@ -161,7 +179,7 @@ export class HttpClient {
       throw new AgoNetworkError(
         `Network error: ${error instanceof Error ? error.message : "Unknown error"}. ` +
           "Check that `baseUrl` is reachable and includes the protocol (https://).",
-        error instanceof Error ? error : undefined
+        error instanceof Error ? error : undefined,
       );
     }
   }
@@ -195,7 +213,7 @@ export class HttpClient {
       throw new AgoNetworkError(
         `Network error: ${error instanceof Error ? error.message : "Unknown error"}. ` +
           "Check that `baseUrl` is reachable and includes the protocol (https://).",
-        error instanceof Error ? error : undefined
+        error instanceof Error ? error : undefined,
       );
     }
   }
@@ -204,7 +222,7 @@ export class HttpClient {
     method: string,
     path: string,
     body?: unknown,
-    options?: { keepalive?: boolean }
+    options?: { keepalive?: boolean },
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     logger.debug(method, url, body);
@@ -237,7 +255,7 @@ export class HttpClient {
       throw new AgoNetworkError(
         `Network error: ${error instanceof Error ? error.message : "Unknown error"}. ` +
           "Check that `baseUrl` is reachable and includes the protocol (https://).",
-        error instanceof Error ? error : undefined
+        error instanceof Error ? error : undefined,
       );
     }
   }
@@ -264,7 +282,7 @@ export class HttpClient {
         `HTTP ${response.status}: ${reason}`,
         reason,
         response.status,
-        "api_error"
+        "api_error",
       );
     }
 
@@ -282,7 +300,7 @@ export class HttpClient {
       `HTTP ${response.status}: ${response.statusText}.${hint}`,
       "http_error",
       response.status,
-      "api_error"
+      "api_error",
     );
   }
 }

@@ -155,7 +155,7 @@ function buildConsent(
       style={{
         position: "absolute",
         insetBlockEnd: "calc(100% + 8px)",
-        insetInlineStart: 0,
+        insetInlineEnd: 0,
         boxSizing: "border-box",
         minWidth: "240px",
         maxWidth: "320px",

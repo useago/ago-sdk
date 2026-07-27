@@ -12,7 +12,7 @@ let stubs: VoiceStubs;
 function mintResponse() {
   return new Response(
     JSON.stringify({ token: "tok-1", wsUrl: "wss://voice.test/v1/voice" }),
-    { status: 200, headers: { "Content-Type": "application/json" } }
+    { status: 200, headers: { "Content-Type": "application/json" } },
   );
 }
 
@@ -37,7 +37,7 @@ beforeEach(() => {
   stubs = installVoiceStubs();
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => mintResponse())
+    vi.fn(async () => mintResponse()),
   );
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -82,11 +82,270 @@ describe("client.voice", () => {
     const [url, init] = (fetch as unknown as ReturnType<typeof vi.fn>).mock
       .calls[0] as [string, RequestInit];
     expect(url).toBe(
-      "https://tenant.api.useago.com/api/sdk/v1/voice/mint-session-token"
+      "https://tenant.api.useago.com/api/sdk/v1/voice/mint-session-token",
     );
     expect((init.headers as Record<string, string>).Authorization).toBe(
-      "Bearer jwt-1"
+      "Bearer jwt-1",
     );
+    client.destroy();
+  });
+
+  it("bridges registered client functions and context into a voice session", async () => {
+    const client = makeClient();
+    const navigate = vi.fn();
+    client.registerFunction("navigateToPage", navigate, {
+      description: "Navigate in the host application",
+      parameters: {
+        type: "object",
+        properties: { page: { type: "string" } },
+        required: ["page"],
+      },
+    });
+    client.setContext("current-page", {
+      name: "Current page",
+      data: { page: "dashboard" },
+    });
+
+    const ws = await startToLive(client);
+    expect(ws.sentFrames()[0]).toMatchObject({
+      type: "auth",
+      clientFunctions: [expect.objectContaining({ name: "navigateToPage" })],
+      clientContext: {
+        entries: {
+          "current-page": expect.objectContaining({
+            data: { page: "dashboard" },
+          }),
+        },
+      },
+    });
+
+    client.setContext("current-page", {
+      name: "Current page",
+      data: { page: "agents" },
+    });
+    expect(
+      ws.sentFrames().find((frame) => frame.type === "client_state"),
+    ).toMatchObject({
+      type: "client_state",
+      clientContext: {
+        entries: {
+          "current-page": expect.objectContaining({
+            data: { page: "agents" },
+          }),
+        },
+      },
+    });
+
+    ws.emitFrame({
+      type: "client_function",
+      invocationId: "call-1",
+      functionName: "navigateToPage",
+      arguments: { page: "tools" },
+      conversationId: "th-1",
+      messageId: "msg-1",
+    });
+
+    await vi.waitFor(() => {
+      expect(navigate).toHaveBeenCalledWith({ page: "tools" });
+      expect(
+        ws
+          .sentFrames()
+          .find((frame) => frame.type === "client_function_result"),
+      ).toMatchObject({
+        type: "client_function_result",
+        invocationId: "call-1",
+        clientFunctions: [expect.objectContaining({ name: "navigateToPage" })],
+      });
+    });
+    client.destroy();
+  });
+
+  it("pushes route-scoped function registry changes into a live voice session", async () => {
+    const client = makeClient();
+    const ws = await startToLive(client);
+
+    client.registerFunction("setPageState", vi.fn(), {
+      description: "Update the mounted page",
+      parameters: { type: "object", properties: {} },
+    });
+
+    expect(ws.sentFrames().at(-1)).toMatchObject({
+      type: "client_state",
+      clientFunctions: [expect.objectContaining({ name: "setPageState" })],
+    });
+
+    expect(client.unregisterFunction("setPageState")).toBe(true);
+    expect(ws.sentFrames().at(-1)).toMatchObject({
+      type: "client_state",
+      clientFunctions: [],
+    });
+    client.destroy();
+  });
+
+  it("refuses voice execution for a function that requires approval", async () => {
+    const client = makeClient();
+    const destructiveAction = vi.fn();
+    client.registerFunction({
+      name: "deleteRecord",
+      description: "Delete a record",
+      parameters: {
+        type: "object",
+        properties: { id: { type: "string" } },
+        required: ["id"],
+      },
+      requiresApproval: true,
+      handler: destructiveAction,
+    });
+
+    const ws = await startToLive(client);
+    ws.emitFrame({
+      type: "client_function",
+      invocationId: "call-protected",
+      functionName: "deleteRecord",
+      arguments: { id: "record-1" },
+      conversationId: "th-1",
+    });
+
+    await vi.waitFor(() => {
+      expect(
+        ws
+          .sentFrames()
+          .find(
+            (frame) =>
+              frame.type === "client_function_result" &&
+              frame.invocationId === "call-protected",
+          ),
+      ).toMatchObject({
+        error: "approval_required",
+      });
+    });
+    expect(destructiveAction).not.toHaveBeenCalled();
+    client.destroy();
+  });
+
+  it("returns a successful voice function result over its bound socket", async () => {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    const client = makeClient();
+    client.registerFunction(
+      "navigateToPage",
+      async () => ({ navigated: true }),
+      {
+        description: "Navigate in the host application",
+        parameters: {
+          type: "object",
+          properties: { page: { type: "string" } },
+        },
+      },
+    );
+    const ws = await startToLive(client);
+
+    ws.emitFrame({
+      type: "client_function",
+      invocationId: "call-audit-failed",
+      functionName: "navigateToPage",
+      arguments: { page: "tools" },
+      conversationId: "th-1",
+    });
+
+    await vi.waitFor(() => {
+      expect(
+        ws
+          .sentFrames()
+          .find(
+            (frame) =>
+              frame.type === "client_function_result" &&
+              frame.invocationId === "call-audit-failed",
+          ),
+      ).toMatchObject({
+        result: { navigated: true },
+      });
+    });
+    const resultFrame = ws
+      .sentFrames()
+      .find(
+        (frame) =>
+          frame.type === "client_function_result" &&
+          frame.invocationId === "call-audit-failed",
+      );
+    expect(resultFrame).not.toHaveProperty("error");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    client.destroy();
+  });
+
+  it("returns a voice function result without a second HTTP round trip", async () => {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    const client = makeClient();
+    client.registerFunction("setPageState", async () => ({ applied: true }), {
+      description: "Update the current page",
+      parameters: {
+        type: "object",
+        properties: { tab: { type: "string" } },
+      },
+    });
+    const ws = await startToLive(client);
+
+    ws.emitFrame({
+      type: "client_function",
+      invocationId: "call-audit-pending",
+      functionName: "setPageState",
+      arguments: { tab: "tools" },
+      conversationId: "th-1",
+    });
+
+    await vi.waitFor(() => {
+      expect(
+        ws
+          .sentFrames()
+          .find(
+            (frame) =>
+              frame.type === "client_function_result" &&
+              frame.invocationId === "call-audit-pending",
+          ),
+      ).toMatchObject({
+        result: { applied: true },
+      });
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    client.destroy();
+  });
+
+  it("fails closed when approvalPolicy throws", async () => {
+    const protectedAction = vi.fn();
+    const client = new AgoClient({
+      baseUrl: "https://tenant.api.useago.com",
+      agent: "admin-helper",
+      userJwt: "jwt-1",
+      voice: { requireConsent: false },
+      approvalPolicy: () => {
+        throw new Error("policy unavailable");
+      },
+    });
+    client.registerFunction("deleteRecord", protectedAction, {
+      description: "Delete a record",
+      parameters: { type: "object", properties: {} },
+    });
+    const ws = await startToLive(client);
+
+    ws.emitFrame({
+      type: "client_function",
+      invocationId: "call-policy-error",
+      functionName: "deleteRecord",
+      arguments: {},
+      conversationId: "th-1",
+    });
+
+    await vi.waitFor(() => {
+      expect(
+        ws
+          .sentFrames()
+          .find(
+            (frame) =>
+              frame.type === "client_function_result" &&
+              frame.invocationId === "call-policy-error",
+          ),
+      ).toMatchObject({ error: "approval_required" });
+    });
+    expect(protectedAction).not.toHaveBeenCalled();
     client.destroy();
   });
 
@@ -137,7 +396,7 @@ describe("client.voice", () => {
       // Whatever progress start() made, no socket survives a stop.
       for (const ws of FakeWebSocket.instances) {
         expect(ws.closeCalled || ws.readyState === FakeWebSocket.CLOSED).toBe(
-          true
+          true,
         );
       }
     });
@@ -157,8 +416,8 @@ describe("client.voice", () => {
             },
           ],
         }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      )
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
     );
     const report = await client.voice.checkAvailability();
     expect(report.availability).toBe("available");
@@ -178,10 +437,10 @@ describe("client.voice", () => {
             },
           ],
         }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
+        { status: 200, headers: { "Content-Type": "application/json" } },
       );
-    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () =>
-      configResponse()
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      async () => configResponse(),
     );
     const client = new AgoClient({
       baseUrl: "https://tenant.api.useago.com",
@@ -198,6 +457,35 @@ describe("client.voice", () => {
       expect(client.voice.getState().availability).toBe("available");
     });
     expect(fetch).toHaveBeenCalledTimes(2);
+    client.destroy();
+  });
+
+  it("treats getUserJwt as a valid voice authentication source before the first mint", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          permissions: [
+            {
+              voice_enabled: true,
+              agents: [{ name: "admin-helper", isVoiceAgent: true }],
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const client = new AgoClient({
+      baseUrl: "https://tenant.api.useago.com",
+      agent: "admin-helper",
+      getUserJwt: async () => "jwt-from-provider",
+      voice: { requireConsent: false },
+    });
+
+    const report = await client.voice.checkAvailability();
+
+    expect(report.availability).toBe("available");
+    expect(report.checks.authKind).toBe("jwt");
     client.destroy();
   });
 });

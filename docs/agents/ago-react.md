@@ -320,7 +320,10 @@ Gotchas (memorize these):
 7. Captions render in the message list (`AgoVoiceCaptions`), never in the bar. The bar owns status, meter, mute and end-call only.
 8. If your page ships a Content-Security-Policy, allow `blob:` in `worker-src` (and in `script-src`, which governs Blob worklets in some Chromium versions), add the voice WebSocket host to `connect-src`, and set `allow="microphone"` on any embedding iframe.
 9. A reconnect starts a new model session: the agent loses its in-call memory of earlier turns. Persisted turns stay safe in the thread.
-10. Voice cannot invoke SDK client functions in this release: the agent answers by voice but does not navigate or act in your app.
+10. Voice can invoke registered SDK client functions and receives the current
+    client context. Functions covered by `requiresApproval` or `approvalPolicy`
+    fail closed with `approval_required`; protected actions must be completed
+    through the text approval flow until voice approvals are introduced.
 11. Voice is browser-only. In Next.js, put `"use client"` on components that use it; the SDK touches no browser API at import time.
 12. One active voice session per client: a second `start()` while one is active rejects with the `session-active` error. Call `stop()` first.
 

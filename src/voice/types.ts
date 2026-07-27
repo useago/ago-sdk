@@ -14,6 +14,8 @@
  * The status, turn, event and error-code vocabulary here is STABLE for the
  * 1.x line.
  */
+import type { ClientFunctionSchema } from "../functions/types";
+import type { ContextSnapshot } from "../state/ClientContextRegistry";
 
 /** Connection lifecycle of a voice session. */
 export type VoiceStatus =
@@ -27,10 +29,7 @@ export type VoiceStatus =
 
 /** Turn-taking sub-state while `status === "live"`. */
 export type VoiceTurn =
-  | "listening"
-  | "user-speaking"
-  | "agent-thinking"
-  | "agent-speaking";
+  "listening" | "user-speaking" | "agent-thinking" | "agent-speaking";
 
 /** Boolean flags orthogonal to status and turn. */
 export interface VoiceFlags {
@@ -64,7 +63,7 @@ export type VoiceBarState =
 export function resolveBarState(
   status: VoiceStatus,
   turn: VoiceTurn,
-  flags: Pick<VoiceFlags, "muted" | "degraded">
+  flags: Pick<VoiceFlags, "muted" | "degraded">,
 ): VoiceBarState {
   if (status === "requesting-permission") return "requesting-permission";
   if (status === "connecting") return "connecting";
@@ -88,10 +87,7 @@ export function resolveBarState(
 
 /** Availability of voice for the current tenant, agent, auth and environment. */
 export type VoiceAvailability =
-  | "loading"
-  | "available"
-  | "policy-unavailable"
-  | "unsupported";
+  "loading" | "available" | "policy-unavailable" | "unsupported";
 
 /** Why voice is unavailable (paired with a non-available {@link VoiceAvailability}). */
 export type VoiceUnavailableReason =
@@ -109,7 +105,11 @@ export interface VoiceAvailabilityReport {
   checks: {
     secureContext: boolean;
     workletSupported: boolean;
-    /** "jwt" when a bearer token is configured, "anonymous" otherwise. */
+    /**
+     * "jwt" when the client can authenticate with a bearer token, whether one
+     * is already configured or a `getUserJwt` provider can mint one on demand;
+     * "anonymous" otherwise.
+     */
     authKind: "jwt" | "anonymous";
     /** Tenant voice gate from the SDK config endpoint; undefined when unknown. */
     tenantEnabled?: boolean;
@@ -209,6 +209,17 @@ export interface VoiceStatusEvent {
   consentPending: boolean;
 }
 
+/** Sanitized main-agent tool activity relayed during a voice turn. */
+export interface VoiceActivity {
+  id: string;
+  type: string;
+  status?: string;
+  toolName?: string;
+  toolDisplayName?: string;
+  message?: string;
+  data?: Record<string, unknown>;
+}
+
 /** Events emitted by a voice session (and forwarded onto the client emitter). */
 export interface AgoVoiceEvents {
   "voice:status": VoiceStatusEvent;
@@ -220,17 +231,53 @@ export interface AgoVoiceEvents {
   "voice:persisted": VoicePersistedAck;
   /** The server confirmed which thread the session writes to. */
   "voice:thread-ready": { threadId: string };
+  /** A non-browser tool/progress/delegation activity from the main agent. */
+  "voice:activity": VoiceActivity;
   /** Normalized mic input level 0..1 (0 while muted or during agent speech). */
   "voice:level": number;
   "voice:error": import("./errors").AgoVoiceError;
   "voice:ended": { reason: VoiceEndedReason };
 }
 
+/** One browser-side function invocation relayed by the voice supervisor. */
+export interface VoiceClientFunctionInvocation {
+  invocationId: string;
+  functionName: string;
+  arguments: Record<string, unknown>;
+  conversationId: string;
+  messageId?: string;
+}
+
+/** Result returned after the SDK executes a relayed browser-side function. */
+export interface VoiceClientFunctionResult {
+  result?: unknown;
+  error?: string;
+}
+
 // ── Wire protocol ────────────────────────────────────────────────────────
 
 /** Client to server frames. */
 export type VoiceClientFrame =
-  | { type: "auth"; token: string; threadId?: string }
+  | {
+      type: "auth";
+      token: string;
+      threadId?: string;
+      clientFunctions?: ClientFunctionSchema[];
+      clientContext?: ContextSnapshot | null;
+    }
+  | {
+      type: "client_state";
+      clientFunctions?: ClientFunctionSchema[];
+      clientContext?: ContextSnapshot | null;
+    }
+  | {
+      type: "client_function_result";
+      invocationId: string;
+      result?: unknown;
+      error?: string;
+      clientFunctions?: ClientFunctionSchema[];
+      clientContext?: ContextSnapshot | null;
+    }
   | { type: "audio"; audio: string }
   | { type: "end" };
 
@@ -245,6 +292,8 @@ export interface VoiceServerFrame {
     | "flush"
     | "transcript"
     | "persisted"
+    | "client_function"
+    | "activity"
     | "error"
     | "ended"
     | (string & {});
@@ -255,8 +304,16 @@ export interface VoiceServerFrame {
   reason?: string;
   retryAfter?: number;
   threadId?: string;
+  /** Added in protocol v2. Missing means the legacy gateway sends deltas. */
+  transcriptMode?: "delta" | "snapshot";
+  protocolVersion?: number;
   turnIndex?: number;
   messageId?: string;
+  invocationId?: string;
+  functionName?: string;
+  arguments?: Record<string, unknown>;
+  conversationId?: string;
+  activity?: VoiceActivity;
 }
 
 /** Mic level above which the user counts as speaking (user transcription is

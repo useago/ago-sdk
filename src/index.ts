@@ -63,7 +63,10 @@ export type {
   DynamicContextProvider,
 } from "./state/ClientContextRegistry";
 
-export { ActivityLedger, DEFAULT_MAX_ACTIVITY_ENTRIES } from "./activity/ActivityLedger";
+export {
+  ActivityLedger,
+  DEFAULT_MAX_ACTIVITY_ENTRIES,
+} from "./activity/ActivityLedger";
 export type { ActivityEntry, ActivityInput } from "./activity/ActivityLedger";
 
 // Functions
@@ -80,7 +83,11 @@ export type {
 } from "./functions/types";
 
 // Form collector
-export { createFormCollector, deriveFormStatus, loadFormCollector } from "./forms/createFormCollector";
+export {
+  createFormCollector,
+  deriveFormStatus,
+  loadFormCollector,
+} from "./forms/createFormCollector";
 export type {
   CreateFormCollectorOptions,
   FormCollector,
@@ -106,6 +113,7 @@ export type { AgoVoice } from "./voice/controller";
 export type {
   AgoVoiceEvents,
   AgoVoiceOptions,
+  VoiceActivity,
   VoiceAvailability,
   VoiceAvailabilityReport,
   VoiceBarState,
@@ -141,7 +149,11 @@ export {
 
 // Proactive mode (friction signals → declarative triggers → nudges)
 export { createAgoProactive } from "./proactive/createAgoProactive";
-export { matchesRoutePattern, matchesWhen, partialDeepMatch } from "./proactive/matchers";
+export {
+  matchesRoutePattern,
+  matchesWhen,
+  partialDeepMatch,
+} from "./proactive/matchers";
 export type {
   NudgeAction,
   ProactiveController,

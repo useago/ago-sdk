@@ -15,8 +15,8 @@ describe("bare-reason error bodies", () => {
           new Response(JSON.stringify({ reason: "jwt_required" }), {
             status: 403,
             headers: { "Content-Type": "application/json" },
-          })
-      )
+          }),
+      ),
     );
     const http = new HttpClient({ baseUrl: "https://x.example.com" });
     const err = await http
@@ -30,7 +30,7 @@ describe("bare-reason error bodies", () => {
   it("keeps the http_error code for reason-less non-envelope bodies", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => new Response("nope", { status: 500 }))
+      vi.fn(async () => new Response("nope", { status: 500 })),
     );
     const http = new HttpClient({ baseUrl: "https://x.example.com" });
     const err = await http.post("/x", {}).catch((e) => e as AgoApiError);
@@ -41,19 +41,23 @@ describe("bare-reason error bodies", () => {
 describe("getUserJwt provider", () => {
   it("hasBearerToken reflects the configured auth", () => {
     expect(
-      new HttpClient({ baseUrl: "https://x.example.com" }).hasBearerToken()
+      new HttpClient({ baseUrl: "https://x.example.com" }).hasBearerToken(),
     ).toBe(false);
     expect(
       new HttpClient({
         baseUrl: "https://x.example.com",
         userJwt: "jwt-1",
-      }).hasBearerToken()
+      }).hasBearerToken(),
     ).toBe(true);
   });
 
   it("refreshUserJwt updates the bearer used by later requests", async () => {
     const fetchMock = vi.fn(
-      async () => new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } })
+      async () =>
+        new Response("{}", {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
     );
     vi.stubGlobal("fetch", fetchMock);
     const http = new HttpClient({
@@ -88,5 +92,31 @@ describe("getUserJwt provider", () => {
       getUserJwt: async () => "",
     });
     expect(await empty.refreshUserJwt()).toBe(false);
+  });
+
+  it("clears an existing bearer and lazy provider when explicitly set to null", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response("{}", {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const http = new HttpClient({
+      baseUrl: "https://x.example.com",
+      userJwt: "old-jwt",
+      getUserJwt: async () => "fresh-jwt",
+    });
+
+    http.updateConfig({ userJwt: null, getUserJwt: null });
+    expect(http.hasBearerToken()).toBe(false);
+    expect(http.canAuthenticateWithJwt()).toBe(false);
+    expect(await http.refreshUserJwt()).toBe(false);
+
+    await http.post("/x", {});
+    const headers = (fetchMock.mock.calls[0][1] as RequestInit)
+      .headers as Record<string, string>;
+    expect(headers.Authorization).toBeUndefined();
   });
 });

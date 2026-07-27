@@ -26,6 +26,7 @@ export type {
   AgoVoiceOptions,
   VoiceAvailability,
   VoiceAvailabilityReport,
+  VoiceActivity,
   VoiceBarState,
   VoiceCaption,
   VoiceClientFrame,

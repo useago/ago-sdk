@@ -18,8 +18,14 @@ export function floatToInt16(sample: number): number {
 
 export interface DownsampleResult {
   samples: Int16Array;
-  /** Fractional read position to carry into the next input block. */
+  state: DownsampleState;
+}
+
+export interface DownsampleState {
+  /** Next read position relative to the start of the next input block. */
   carry: number;
+  /** Last sample of the previous block, needed when `carry` is negative. */
+  previousSample?: number;
 }
 
 /**
@@ -31,23 +37,46 @@ export interface DownsampleResult {
 export function downsampleToInt16(
   input: Float32Array,
   ratio: number,
-  carry: number
+  state: DownsampleState = { carry: 0 }
 ): DownsampleResult {
-  const outCount = Math.floor((input.length - carry) / ratio);
-  if (outCount <= 0) {
-    return { samples: new Int16Array(0), carry: carry - input.length };
+  if (input.length === 0) {
+    return { samples: new Int16Array(0), state };
   }
-  const out = new Int16Array(outCount);
-  let pos = carry;
-  for (let i = 0; i < outCount; i++) {
-    const idx = Math.floor(pos);
-    const frac = pos - idx;
-    const s0 = input[idx] ?? 0;
-    const s1 = input[idx + 1] ?? s0;
-    out[i] = floatToInt16(s0 + (s1 - s0) * frac);
+
+  const output: number[] = [];
+  let pos = state.carry;
+  while (true) {
+    let s0: number;
+    let s1: number;
+    let frac: number;
+
+    if (pos < 0) {
+      if (state.previousSample === undefined || pos < -1) break;
+      s0 = state.previousSample;
+      s1 = input[0];
+      frac = pos + 1;
+    } else {
+      if (pos >= input.length) break;
+      const idx = Math.floor(pos);
+      frac = pos - idx;
+      s0 = input[idx];
+      // A fractional read past the final sample must wait for the next block
+      // so interpolation uses real audio rather than an injected zero.
+      if (idx + 1 >= input.length && frac > 0) break;
+      s1 = input[idx + 1] ?? s0;
+    }
+
+    output.push(floatToInt16(s0 + (s1 - s0) * frac));
     pos += ratio;
   }
-  return { samples: out, carry: pos - input.length };
+
+  return {
+    samples: Int16Array.from(output),
+    state: {
+      carry: pos - input.length,
+      previousSample: input[input.length - 1],
+    },
+  };
 }
 
 /**

@@ -31,6 +31,10 @@ import { EventEmitter } from "../utils/eventEmitter";
 import { logger } from "../utils/logger";
 import { createVoiceController } from "../voice/controller";
 import type { AgoVoice } from "../voice/controller";
+import type {
+  VoiceClientFunctionInvocation,
+  VoiceClientFunctionResult,
+} from "../voice/types";
 import { AgoError } from "./errors";
 import { validateConfig } from "./validateConfig";
 import type {
@@ -104,7 +108,7 @@ function routeParamNames(path: string): string[] {
  */
 function fillRouteParams(
   path: string,
-  params: Record<string, unknown>
+  params: Record<string, unknown>,
 ): { path: string; missing: string[] } {
   const missing: string[] = [];
   const filled = path
@@ -123,7 +127,10 @@ function fillRouteParams(
   return { path: filled, missing };
 }
 
-function matchRoute(pathname: string, routes: NavRoute[]): NavRoute | undefined {
+function matchRoute(
+  pathname: string,
+  routes: NavRoute[],
+): NavRoute | undefined {
   const exact = routes.find((r) => r.path === pathname);
   if (exact) return exact;
 
@@ -181,6 +188,8 @@ export class AgoClient {
 
   /** Lazy singleton voice controller (see {@link voice}). */
   private voiceController: AgoVoice | null = null;
+  /** Internal subscribers that need fresh function schemas during a live session. */
+  private readonly clientFunctionStateListeners = new Set<() => void>();
 
   /**
    * Proactive-mode controller, set when the client was created with
@@ -235,6 +244,18 @@ export class AgoClient {
         http: this.httpClient,
         getAgent: () => this.getConfiguredAgent(),
         getPermission: () => this.config.permission,
+        getClientFunctions: () => this.functionRegistry.getSchemas(),
+        getClientContext: () => this.contextRegistry.getSnapshot(),
+        executeClientFunction: (invocation) =>
+          this.handleVoiceClientFunctionInvocation(invocation),
+        onClientStateChanged: (handler) => {
+          this.on("context:changed", handler);
+          this.clientFunctionStateListeners.add(handler);
+          return () => {
+            this.off("context:changed", handler);
+            this.clientFunctionStateListeners.delete(handler);
+          };
+        },
         requireConsent: this.config.voice?.requireConsent,
         forward: (event, data) =>
           this.eventEmitter.emit(event, data as AgoClientEvents[typeof event]),
@@ -252,7 +273,7 @@ export class AgoClient {
    */
   async sendMessage(
     content: string,
-    options?: SendMessageOptions
+    options?: SendMessageOptions,
   ): Promise<AgoMessage> {
     const clientFunctions = this.functionRegistry.getSchemas();
 
@@ -320,7 +341,10 @@ export class AgoClient {
         formData.append("files", file);
       }
 
-      response = await this.httpClient.postFormData("/api/sdk/v1/messages", formData);
+      response = await this.httpClient.postFormData(
+        "/api/sdk/v1/messages",
+        formData,
+      );
     } else {
       response = await this.httpClient.postStream("/api/sdk/v1/messages", body);
     }
@@ -371,7 +395,11 @@ export class AgoClient {
       },
       onWaitingClient: (data) => {
         this.eventEmitter.emit("message:waiting-client", data);
-        this.markResumeSignal(data.messageId, data.conversationId, "waitingConfirmed");
+        this.markResumeSignal(
+          data.messageId,
+          data.conversationId,
+          "waitingConfirmed",
+        );
       },
       onComplete: (message) => {
         this.eventEmitter.emit("message:complete", message);
@@ -396,7 +424,7 @@ export class AgoClient {
   // ─────────────────────────────────────────────────────────────────
 
   private resolveClientFunctionsMode(
-    options?: SendMessageOptions
+    options?: SendMessageOptions,
   ): ClientFunctionsMode {
     return (
       options?.clientFunctionsMode ?? this.config.clientFunctionsMode ?? "pause"
@@ -444,7 +472,7 @@ export class AgoClient {
 
     const response = await this.httpClient.postStream(
       `/api/sdk/v1/messages/${messageId}/continue`,
-      body
+      body,
     );
     return this.processSSEResponse(response);
   }
@@ -456,7 +484,7 @@ export class AgoClient {
   private markResumeSignal(
     messageId: string,
     conversationId: string,
-    signal: "waitingConfirmed" | "resultsReady"
+    signal: "waitingConfirmed" | "resultsReady",
   ): void {
     if (!messageId) return;
     const pending: PendingResume = this.pendingResumes.get(messageId) ?? {
@@ -478,7 +506,7 @@ export class AgoClient {
 
   private async runAutoResume(
     messageId: string,
-    conversationId: string
+    conversationId: string,
   ): Promise<void> {
     try {
       if (this.resumeGate) {
@@ -512,7 +540,10 @@ export class AgoClient {
    * must not race. TEMPORARY heuristic: remove once the backend returns an
    * explicit error for unknown agents (see TODOS.md, backend issue).
    */
-  private maybeFlagEmptyReply(message: AgoMessage, sawClientFunction: boolean): void {
+  private maybeFlagEmptyReply(
+    message: AgoMessage,
+    sawClientFunction: boolean,
+  ): void {
     const isEmpty =
       message.status === "DONE" &&
       (message.content ?? "").trim() === "" &&
@@ -541,10 +572,12 @@ export class AgoClient {
         // envelope), so name both causes when an agent is configured.
         console.warn(
           "[AGO] The stream completed without any message data. Possible causes: " +
-            (agent ? `the agent "${agent}" may not exist for this tenant, or ` : "") +
+            (agent
+              ? `the agent "${agent}" may not exist for this tenant, or `
+              : "") +
             "`baseUrl` does not point at an AGO endpoint that returns server-sent " +
             "events. Listen for the `message:empty` event to handle this in your " +
-            "app; silence this warning with `warnOnEmptyReply: false`."
+            "app; silence this warning with `warnOnEmptyReply: false`.",
         );
       } else {
         console.warn(
@@ -554,7 +587,7 @@ export class AgoClient {
               : "an unknown `agent` slug, ") +
             "or the agent replied with no text. Listen for the `message:empty` " +
             "event to handle this in your app; silence this warning with " +
-            "`warnOnEmptyReply: false`."
+            "`warnOnEmptyReply: false`.",
         );
       }
     }, 0);
@@ -570,7 +603,10 @@ export class AgoClient {
     let error: string | undefined;
 
     try {
-      result = await this.functionRegistry.execute(data.functionName, data.arguments);
+      result = await this.functionRegistry.execute(
+        data.functionName,
+        data.arguments,
+      );
     } catch (err) {
       error = err instanceof Error ? err.message : "Unknown error";
       logger.error("Client function execution failed:", err);
@@ -593,7 +629,7 @@ export class AgoClient {
           this.markResumeSignal(
             submitResult.resume.message_id,
             data.conversationId,
-            "resultsReady"
+            "resultsReady",
           );
         }
       } catch (submitError) {
@@ -609,6 +645,47 @@ export class AgoClient {
   }
 
   /**
+   * Execute a client function relayed by the live-voice supervisor.
+   *
+   * Voice uses the same local registry, activity trace and result-size guard as
+   * text chat. ago-voice submits this outcome through its grant-bound backend
+   * hop, then resumes the same paused supervisor turn before anything is spoken.
+   */
+  private async handleVoiceClientFunctionInvocation(
+    data: VoiceClientFunctionInvocation,
+  ): Promise<VoiceClientFunctionResult> {
+    this.eventEmitter.emit("function:invoke", data);
+    this.recordAgentAction(data);
+
+    let result: unknown;
+    let error: string | undefined;
+    if (this.requiresApproval(data)) {
+      // Voice has no approval UI/continuation contract yet. Fail closed instead
+      // of bypassing the same safety policy enforced by text client functions.
+      // The supervisor receives this typed result and can ask the user to
+      // complete the protected action in text.
+      error = "approval_required";
+    } else {
+      try {
+        result = await this.functionRegistry.execute(
+          data.functionName,
+          data.arguments,
+        );
+      } catch (err) {
+        error = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Voice client function execution failed:", err);
+      }
+    }
+
+    const outcome = { result, error };
+    this.eventEmitter.emit("function:result", {
+      invocationId: data.invocationId,
+      ...outcome,
+    });
+    return outcome;
+  }
+
+  /**
    * Whether a client function invocation must wait for explicit user approval.
    * True when the {@link AgoConfig.approvalPolicy} returns true OR the function
    * was registered with `requiresApproval: true` — the two OR together.
@@ -619,11 +696,16 @@ export class AgoClient {
       try {
         if (policy(invocation)) return true;
       } catch (err) {
-        // A throwing policy must never strand a turn — treat it as "no gate".
-        logger.warn("approvalPolicy threw; not gating this call:", err);
+        // Authorization policy failures must fail closed. Voice returns the
+        // typed approval_required result; text exposes the approval gate.
+        logger.warn("approvalPolicy threw; gating this call:", err);
+        return true;
       }
     }
-    return this.functionRegistry.get(invocation.functionName)?.requiresApproval === true;
+    return (
+      this.functionRegistry.get(invocation.functionName)?.requiresApproval ===
+      true
+    );
   }
 
   /**
@@ -658,7 +740,7 @@ export class AgoClient {
         this.markResumeSignal(
           submitResult.resume.message_id,
           data.conversationId,
-          "resultsReady"
+          "resultsReady",
         );
       }
     } catch (submitError) {
@@ -749,7 +831,7 @@ export class AgoClient {
    * `SSEHandler.parseToolCall` so persisted and streamed tool calls match.
    */
   private static mapPersistedToolCalls(
-    raw?: Array<Record<string, unknown>>
+    raw?: Array<Record<string, unknown>>,
   ): ToolCallData[] | undefined {
     if (!raw || raw.length === 0) return undefined;
     return raw.map((tc) => ({
@@ -791,7 +873,7 @@ export class AgoClient {
    * `rejectFunction` and the turn stays paused, exactly as on the live stream).
    */
   async resumePendingClientFunctions(
-    conversation: Conversation
+    conversation: Conversation,
   ): Promise<AgoMessage | null> {
     const paused = [...(conversation.messages ?? [])]
       .reverse()
@@ -802,17 +884,19 @@ export class AgoClient {
       (tc) =>
         tc.type === "client_function" &&
         tc.status === "waiting_input" &&
-        tc.functionName
+        tc.functionName,
     );
 
     const registered = new Set(
-      this.functionRegistry.getSchemas().map((f) => f.name)
+      this.functionRegistry.getSchemas().map((f) => f.name),
     );
-    const missing = waitingCalls.filter((tc) => !registered.has(tc.functionName!));
+    const missing = waitingCalls.filter(
+      (tc) => !registered.has(tc.functionName!),
+    );
     if (missing.length > 0) {
       logger.warn(
         "Cannot resume paused turn: function(s) not registered on this page:",
-        missing.map((tc) => tc.functionName)
+        missing.map((tc) => tc.functionName),
       );
       return null;
     }
@@ -845,7 +929,7 @@ export class AgoClient {
       try {
         result = await this.functionRegistry.execute(
           call.functionName!,
-          call.arguments ?? {}
+          call.arguments ?? {},
         );
       } catch (err) {
         error = err instanceof Error ? err.message : "Unknown error";
@@ -873,11 +957,11 @@ export class AgoClient {
    */
   async submitToolCallForm(
     toolCallId: string,
-    formData: Record<string, unknown>
+    formData: Record<string, unknown>,
   ): Promise<SubmitToolCallResult> {
     return this.httpClient.post<SubmitToolCallResult>(
       `/api/sdk/v1/tool-calls/${toolCallId}/submit`,
-      { formData }
+      { formData },
     );
   }
 
@@ -932,7 +1016,7 @@ export class AgoClient {
    */
   async submitFormCollector(
     name: string,
-    values: Record<string, unknown>
+    values: Record<string, unknown>,
   ): Promise<unknown> {
     return this.httpClient.post("/api/sdk/v1/forms/submit", {
       name,
@@ -949,7 +1033,7 @@ export class AgoClient {
    */
   async submitFeedback(
     messageId: string,
-    rating: "positive" | "negative"
+    rating: "positive" | "negative",
   ): Promise<void> {
     await this.httpClient.post(`/api/sdk/v1/messages/${messageId}/feedback`, {
       rating,
@@ -981,18 +1065,19 @@ export class AgoClient {
   registerFunction(
     name: string,
     handler: ClientFunctionHandler,
-    schema: ClientFunctionRegisterOptions
+    schema: ClientFunctionRegisterOptions,
   ): void;
   registerFunction(
     nameOrDef: string | ClientFunctionDefinition,
     handler?: ClientFunctionHandler,
-    schema?: ClientFunctionRegisterOptions
+    schema?: ClientFunctionRegisterOptions,
   ): void {
     if (typeof nameOrDef === "object") {
       this.functionRegistry.register(nameOrDef);
     } else {
       this.functionRegistry.register(nameOrDef, handler!, schema!);
     }
+    this.notifyClientFunctionStateChanged();
   }
 
   /**
@@ -1004,7 +1089,7 @@ export class AgoClient {
    * ```
    */
   register(
-    definition: ClientFunctionDefinition | ClientFunctionDefinition[]
+    definition: ClientFunctionDefinition | ClientFunctionDefinition[],
   ): void {
     if (Array.isArray(definition)) {
       for (const def of definition) {
@@ -1013,13 +1098,20 @@ export class AgoClient {
     } else {
       this.functionRegistry.register(definition);
     }
+    this.notifyClientFunctionStateChanged();
   }
 
   /**
    * Unregister a client-side function
    */
   unregisterFunction(name: string): boolean {
-    return this.functionRegistry.unregister(name);
+    const deleted = this.functionRegistry.unregister(name);
+    if (deleted) this.notifyClientFunctionStateChanged();
+    return deleted;
+  }
+
+  private notifyClientFunctionStateChanged(): void {
+    for (const listener of this.clientFunctionStateListeners) listener();
   }
 
   /**
@@ -1038,7 +1130,7 @@ export class AgoClient {
    */
   async executeClientFunction(
     name: string,
-    args: Record<string, unknown>
+    args: Record<string, unknown>,
   ): Promise<unknown> {
     return this.functionRegistry.execute(name, args);
   }
@@ -1062,7 +1154,7 @@ export class AgoClient {
    */
   registerNavigationFunction(
     navigate: (path: string) => void,
-    routes: Array<{ name: string; path: string; description: string }>
+    routes: Array<{ name: string; path: string; description: string }>,
   ): void {
     const routeNames = routes.map((r) => r.name);
     const routeDescriptions = routes
@@ -1095,7 +1187,7 @@ export class AgoClient {
     for (const [param, usedBy] of paramUsage) {
       if (param === "page") {
         logger.error(
-          'registerNavigationFunction: a ":page" placeholder collides with the "page" argument and is ignored. Rename the placeholder.'
+          'registerNavigationFunction: a ":page" placeholder collides with the "page" argument and is ignored. Rename the placeholder.',
         );
         continue;
       }
@@ -1155,7 +1247,7 @@ export class AgoClient {
           properties,
           required: ["page"],
         },
-      }
+      },
     );
 
     // Report the current page (by route name) as dynamic context, re-evaluated
@@ -1164,7 +1256,8 @@ export class AgoClient {
     this.addDynamicContext("current-page", () => {
       if (typeof window === "undefined" || !window.location) return null;
       const url = window.location.href;
-      const title = typeof document !== "undefined" ? document.title : undefined;
+      const title =
+        typeof document !== "undefined" ? document.title : undefined;
       const match = matchRoute(window.location.pathname, routes);
 
       const data: Record<string, unknown> = { url };
@@ -1214,7 +1307,7 @@ export class AgoClient {
    */
   registerPageStateFunction(
     controls: AgoStateControl[],
-    opts?: AgoPageStateOptions
+    opts?: AgoPageStateOptions,
   ): void {
     const fnName = opts?.functionName ?? "setPageState";
     const byName = new Map(controls.map((c) => [c.name, c]));
@@ -1245,12 +1338,12 @@ export class AgoClient {
             controls.map((c) => [
               c.name,
               { ...c.schema, description: c.description },
-            ])
+            ]),
           ),
           // All optional: the agent sets only what the user asked for.
         },
         requiresApproval: opts?.requiresApproval,
-      }
+      },
     );
 
     // Surface the current value of every control that can be read, so the agent
@@ -1346,7 +1439,10 @@ export class AgoClient {
    * call it when their store updates so observers like the dev panel stay live.
    */
   notifyContextChanged(): void {
-    this.eventEmitter.emit("context:changed", this.contextRegistry.getSnapshot());
+    this.eventEmitter.emit(
+      "context:changed",
+      this.contextRegistry.getSnapshot(),
+    );
   }
 
   /**
@@ -1369,7 +1465,8 @@ export class AgoClient {
    * exposing a generic `emit`.
    */
   emitProactiveEvent<
-    K extends "nudge:ready" | "nudge:shown" | "nudge:dismissed" | "nudge:accepted",
+    K extends
+      "nudge:ready" | "nudge:shown" | "nudge:dismissed" | "nudge:accepted",
   >(event: K, data: AgoClientEvents[K]): void {
     this.eventEmitter.emit(event, data);
   }
@@ -1394,8 +1491,10 @@ export class AgoClient {
    */
   enableAutoPageContext(): void {
     this.addDynamicContext("browser-page", () => {
-      const url = typeof window !== "undefined" ? window.location.href : undefined;
-      const title = typeof document !== "undefined" ? document.title : undefined;
+      const url =
+        typeof window !== "undefined" ? window.location.href : undefined;
+      const title =
+        typeof document !== "undefined" ? document.title : undefined;
       if (!url && !title) return null;
       return {
         name: "Browser page",
@@ -1419,7 +1518,7 @@ export class AgoClient {
     const entries = snapshot?.entries ?? {};
     const { changes, baseline } = computePageStateDelta(
       this.lastSentPageState,
-      entries
+      entries,
     );
     this.lastSentPageState = baseline;
     if (changes.length === 0) return snapshot;
@@ -1472,7 +1571,9 @@ export class AgoClient {
     if (fn === "navigateToPage") {
       const page = args?.page;
       name = "agent.navigate";
-      summary = page ? `Agent navigated to "${String(page)}"` : "Agent navigated";
+      summary = page
+        ? `Agent navigated to "${String(page)}"`
+        : "Agent navigated";
     } else if (fn === "setPageState") {
       name = "agent.page_state";
       summary = "Agent changed the page state";
@@ -1484,7 +1585,9 @@ export class AgoClient {
       actor: "agent",
       name,
       summary,
-      ...(args && Object.keys(args).length > 0 ? { data: { arguments: args } } : {}),
+      ...(args && Object.keys(args).length > 0
+        ? { data: { arguments: args } }
+        : {}),
     });
   }
 
@@ -1538,7 +1641,7 @@ export class AgoClient {
    */
   waitFor<K extends AgoEventName>(
     event: K,
-    options?: { timeout?: number }
+    options?: { timeout?: number },
   ): Promise<AgoClientEvents[K]> {
     return this.eventEmitter.waitFor(event, options);
   }
@@ -1597,7 +1700,7 @@ export class AgoClient {
 
     if (cleaned.maxFunctionResultBytes !== undefined) {
       this.functionRegistry.setDefaultMaxResultBytes(
-        cleaned.maxFunctionResultBytes
+        cleaned.maxFunctionResultBytes,
       );
     }
   }

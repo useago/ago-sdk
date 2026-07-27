@@ -30,14 +30,14 @@ export interface AgoConfig {
   /** User email for identification */
   userEmail?: string;
   /** JWT token for authenticated users */
-  userJwt?: string;
+  userJwt?: string | null;
   /**
    * Async provider for a fresh user JWT. When configured, the SDK refreshes
    * the bearer token and retries once on auth failures that a fresh token can
    * fix (e.g. the voice mint's typed `jwt_required` 403). Without it, such
    * failures surface immediately: retrying the same stored token is useless.
    */
-  getUserJwt?: () => Promise<string>;
+  getUserJwt?: (() => Promise<string>) | null;
   /** Enable debug logging */
   debug?: boolean;
   /**
@@ -254,7 +254,9 @@ export type ToolCallType =
   | "progress_indicator"
   | "client_function"
   | "reasoning"
-  | "mcp_ui_resource";
+  | "mcp_ui_resource"
+  /** A voice agent delegated the request to its main AGO agent. */
+  | "agent_delegation";
 
 /**
  * Form schema for tool calls requiring user input
@@ -308,6 +310,8 @@ export interface ClientFunctionInvocation {
   functionName: string;
   arguments: Record<string, unknown>;
   conversationId: string;
+  /** Assistant message that requested the action, when available (including voice). */
+  messageId?: string;
 }
 
 /**
@@ -486,6 +490,8 @@ export interface AgoClientEvents {
   "voice:persisted": VoicePersistedAck;
   /** The server confirmed which thread the voice session writes to. */
   "voice:thread-ready": { threadId: string };
+  /** A non-browser tool/progress/delegation activity from the main agent. */
+  "voice:activity": import("../voice/types").VoiceActivity;
   /** Normalized mic input level 0..1 (0 while muted or during agent speech). */
   "voice:level": number;
   /** A voice error (also `console.error`'d). */

@@ -5,6 +5,7 @@ import {
   arrayBufferToBase64,
   base64ToArrayBuffer,
   downsampleToInt16,
+  type DownsampleState,
   floatToInt16,
   PlaybackQueue,
   rmsLevel,
@@ -29,21 +30,26 @@ describe("floatToInt16", () => {
 describe("downsampleToInt16 (48k to 24k linear interpolation)", () => {
   it("takes every other sample at ratio 2 with zero fraction", () => {
     const input = new Float32Array([0, 0.25, 0.5, 0.75, 1, 0.75]);
-    const { samples, carry } = downsampleToInt16(input, 2, 0);
+    const { samples, state } = downsampleToInt16(input, 2);
     expect(Array.from(samples)).toEqual([
       floatToInt16(0),
       floatToInt16(0.5),
       floatToInt16(1),
     ]);
-    expect(carry).toBe(0);
+    expect(state.carry).toBe(0);
   });
 
   it("interpolates linearly at fractional positions", () => {
     const input = new Float32Array([0, 1, 0, 1]);
-    const { samples, carry } = downsampleToInt16(input, 1.5, 0);
-    // Read positions 0 and 1.5: values 0 and (1+0)/2.
-    expect(Array.from(samples)).toEqual([floatToInt16(0), floatToInt16(0.5)]);
-    expect(carry).toBe(-1);
+    const { samples, state } = downsampleToInt16(input, 1.5);
+    // Read positions 0, 1.5 and 3. The final exact sample is safe without
+    // looking into the next render quantum.
+    expect(Array.from(samples)).toEqual([
+      floatToInt16(0),
+      floatToInt16(0.5),
+      floatToInt16(1),
+    ]);
+    expect(state.carry).toBe(0.5);
   });
 
   it("stays continuous across 128-sample render quanta at ratio 2", () => {
@@ -54,31 +60,46 @@ describe("downsampleToInt16 (48k to 24k linear interpolation)", () => {
     const block1 = whole.slice(0, 128);
     const block2 = whole.slice(128);
 
-    const first = downsampleToInt16(block1, 2, 0);
+    const first = downsampleToInt16(block1, 2);
     expect(first.samples.length).toBe(64);
-    expect(first.carry).toBe(0);
-    const second = downsampleToInt16(block2, 2, first.carry);
+    expect(first.state.carry).toBe(0);
+    const second = downsampleToInt16(block2, 2, first.state);
 
-    const reference = downsampleToInt16(whole, 2, 0);
+    const reference = downsampleToInt16(whole, 2);
     expect([...first.samples, ...second.samples]).toEqual([
       ...reference.samples,
     ]);
   });
 
-  it("reports the leftover fractional position as carry", () => {
-    const { samples, carry } = downsampleToInt16(
-      new Float32Array([0, 0.2, 0.4]),
-      2,
-      0
-    );
-    expect(samples.length).toBe(1);
-    expect(carry).toBe(-1);
+  it("returns no samples and retains the boundary sample when a block is too short", () => {
+    const { samples, state } = downsampleToInt16(new Float32Array([0.5]), 4, {
+      carry: 1,
+    });
+    expect(samples.length).toBe(0);
+    expect(state).toEqual({ carry: 0, previousSample: 0.5 });
   });
 
-  it("returns no samples and rolls the carry when the block is too short", () => {
-    const { samples, carry } = downsampleToInt16(new Float32Array([0.5]), 4, 1);
-    expect(samples.length).toBe(0);
-    expect(carry).toBe(0);
+  it("matches whole-buffer resampling across 44.1kHz render quanta without zero injection", () => {
+    const ratio = 44100 / 24000;
+    const whole = new Float32Array(128 * 20).map(
+      (_, i) => 0.45 + 0.35 * Math.sin(i / 17),
+    );
+    const reference = downsampleToInt16(whole, ratio);
+    let state: DownsampleState | undefined;
+    const streamed: number[] = [];
+
+    for (let offset = 0; offset < whole.length; offset += 128) {
+      const next = downsampleToInt16(
+        whole.slice(offset, offset + 128),
+        ratio,
+        state,
+      );
+      streamed.push(...next.samples);
+      state = next.state;
+    }
+
+    expect(streamed).toEqual([...reference.samples]);
+    expect(streamed).not.toContain(0);
   });
 });
 
@@ -168,11 +189,18 @@ describe("PlaybackQueue", () => {
 describe("worklet sources stay in sync with the tested DSP", () => {
   const dir = join(__dirname, "..", "src", "voice", "worklets");
   const capture = readFileSync(join(dir, "ago-pcm-capture.worklet.js"), "utf8");
-  const playback = readFileSync(join(dir, "ago-pcm-playback.worklet.js"), "utf8");
+  const playback = readFileSync(
+    join(dir, "ago-pcm-playback.worklet.js"),
+    "utf8",
+  );
 
   it("register the ago-prefixed processor names", () => {
-    expect(capture).toContain("registerProcessor('ago-pcm-capture-processor'");
-    expect(playback).toContain("registerProcessor('ago-pcm-playback-processor'");
+    expect(capture).toMatch(
+      /registerProcessor\(["']ago-pcm-capture-processor["']/,
+    );
+    expect(playback).toMatch(
+      /registerProcessor\(["']ago-pcm-playback-processor["']/,
+    );
   });
 
   it("use the 24kHz wire rate and the same core formulas", () => {
@@ -180,6 +208,7 @@ describe("worklet sources stay in sync with the tested DSP", () => {
     expect(playback).toContain("24000");
     // Linear interpolation and PCM16 scaling in the capture path.
     expect(capture).toContain("s0 + (s1 - s0) * frac");
+    expect(capture).toContain("_previousSample");
     expect(capture).toContain("0x7fff");
     // Underrun decay and flush handling in the playback path.
     expect(playback).toContain("0.98");

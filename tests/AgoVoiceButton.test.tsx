@@ -104,6 +104,20 @@ describe("AgoVoiceButton — consent flow (default true)", () => {
     expect(document.activeElement).toBe(accept);
   });
 
+  it("anchors the built-in disclosure to the inline end of the mic", async () => {
+    const client = createMockClient();
+    const { container } = await mountButton(client);
+
+    await act(async () => {
+      click(container.querySelector("[data-ago-voice-button]"));
+    });
+
+    const dialog = container.querySelector<HTMLElement>('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    expect(dialog!.style.insetInlineEnd).toBe("0");
+    expect(dialog!.style.insetInlineStart).toBe("");
+  });
+
   it("accept starts the session; the disclosure closes", async () => {
     const client = createMockClient();
     const { container } = await mountButton(client);

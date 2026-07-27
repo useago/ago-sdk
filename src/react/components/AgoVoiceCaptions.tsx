@@ -7,8 +7,7 @@ import {
   type AgoVoiceLabels,
 } from "./voiceShared";
 
-export interface AgoVoiceCaptionsProps
-  extends React.HTMLAttributes<HTMLDivElement> {
+export interface AgoVoiceCaptionsProps extends React.HTMLAttributes<HTMLDivElement> {
   /** The single-object handoff from `useAgoVoice()`. */
   voice: UseAgoVoiceResult;
   /** Copy overrides. */
@@ -36,7 +35,7 @@ export const AgoVoiceCaptions = React.forwardRef<
   AgoVoiceCaptionsProps
 >(function AgoVoiceCaptions(
   { voice, labels, className = "", style, ...rest },
-  ref
+  ref,
 ) {
   useEffect(() => {
     ensureVoiceStyles();
@@ -44,9 +43,10 @@ export const AgoVoiceCaptions = React.forwardRef<
 
   const live = voice.status === "live" || voice.status === "reconnecting";
   const assistant = voice.captions.find(
-    (caption) => caption.role === "assistant" && !caption.final
+    (caption) => caption.role === "assistant" && !caption.final,
   );
-  const userSpeaking = voice.status === "live" && voice.turn === "user-speaking";
+  const userSpeaking =
+    voice.status === "live" && voice.turn === "user-speaking";
 
   if (!live || (!assistant && !userSpeaking)) return null;
 
@@ -61,8 +61,8 @@ export const AgoVoiceCaptions = React.forwardRef<
         flexDirection: "column",
         gap: "6px",
         fontFamily: "inherit",
-        fontSize: "14px",
-        lineHeight: 1.5,
+        fontSize: "inherit",
+        lineHeight: "inherit",
         color: VOICE_TOKENS.text,
         textAlign: "start",
         ...style,
