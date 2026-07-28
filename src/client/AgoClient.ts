@@ -331,6 +331,9 @@ export class AgoClient {
         }
         await this.handleClientFunctionInvocation(data);
       },
+      onTitle: (data) => {
+        this.eventEmitter.emit("conversation:title", data);
+      },
       onAnswerComplete: (message) => {
         this.eventEmitter.emit("message:answer-complete", message);
       },
