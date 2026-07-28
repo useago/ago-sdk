@@ -28,7 +28,7 @@ export function useConversation(options: UseConversationOptions = {}) {
     isLoading.value = true;
     error.value = null;
     try {
-      conversations.value = await client.getConversations();
+      conversations.value = (await client.getConversations()).data;
     } catch (err) {
       error.value = err instanceof Error ? err : new Error("Failed to load conversations");
     } finally {

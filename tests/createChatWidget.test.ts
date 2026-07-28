@@ -1234,12 +1234,11 @@ describe("mountChatWidget", () => {
       vi.spyOn(client, "sendMessage").mockResolvedValue(
         makeAssistantMessage({ conversationId: "conv-1" }),
       );
-      const listSpy = vi
-        .spyOn(client, "getConversations")
-        .mockResolvedValue([
-          makeConversation("conv-1"),
-          makeConversation("conv-2"),
-        ]);
+      const listSpy = vi.spyOn(client, "getConversations").mockResolvedValue({
+        data: [makeConversation("conv-1"), makeConversation("conv-2")],
+        hasMore: false,
+        total: 2,
+      });
 
       const root = document.createElement("div");
       document.body.appendChild(root);
@@ -1254,7 +1253,11 @@ describe("mountChatWidget", () => {
       });
 
       // The list refreshes after a turn (e.g. a freshly created thread shows up).
-      listSpy.mockResolvedValue([makeConversation("conv-3")]);
+      listSpy.mockResolvedValue({
+        data: [makeConversation("conv-3")],
+        hasMore: false,
+        total: 1,
+      });
       await widget.sendMessage("hi");
       await vi.waitFor(() => {
         expect(widget.threads.map((t) => t.id)).toEqual(["conv-3"]);
@@ -1267,9 +1270,11 @@ describe("mountChatWidget", () => {
 
     it("does not load threads by default; refreshThreads() still works on demand", async () => {
       const client = new AgoClient({ baseUrl: "https://example.test" });
-      const listSpy = vi
-        .spyOn(client, "getConversations")
-        .mockResolvedValue([makeConversation("conv-1")]);
+      const listSpy = vi.spyOn(client, "getConversations").mockResolvedValue({
+        data: [makeConversation("conv-1")],
+        hasMore: false,
+        total: 1,
+      });
 
       const root = document.createElement("div");
       document.body.appendChild(root);

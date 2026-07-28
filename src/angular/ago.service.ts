@@ -91,9 +91,9 @@ export class AgoService {
     return this.client.sendMessage(content, options);
   }
 
-  /** Get all conversations */
+  /** Get the most recent conversations (first page). */
   getConversations(): Promise<Conversation[]> {
-    return this.client.getConversations();
+    return this.client.getConversations().then((result) => result.data);
   }
 
   /** Get a specific conversation with messages */

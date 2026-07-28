@@ -92,6 +92,7 @@ export type {
   AgoConfig,
   AgoMessage,
   Conversation,
+  PaginatedResult,
   AgoAgent,
   AgoSource,
   ToolCallData,

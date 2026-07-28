@@ -855,7 +855,7 @@ export function mountChatWidget(
   // array reference is kept stable (mutated in place) so a held reference stays live.
   async function refreshThreads(): Promise<Conversation[]> {
     try {
-      const next = await client.getConversations();
+      const { data: next } = await client.getConversations();
       threads.splice(0, threads.length, ...next);
     } catch {
       // Keep the previous list on failure (offline, transient error).

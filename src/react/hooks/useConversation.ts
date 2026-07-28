@@ -53,8 +53,8 @@ export function useConversation({
     setError(null);
 
     try {
-      const convs = await client.getConversations();
-      setConversations(convs);
+      const { data } = await client.getConversations();
+      setConversations(data);
     } catch (err) {
       setError(
         err instanceof Error ? err : new Error("Failed to load conversations")
