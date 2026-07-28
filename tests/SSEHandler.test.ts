@@ -371,4 +371,39 @@ describe("SSEHandler", () => {
       expect(onComplete).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe("onTitle", () => {
+    it("fires with the streamed title and conversation id", async () => {
+      const onTitle = vi.fn();
+      const handler = new SSEHandler({ onTitle });
+
+      const response = createMockSSEStream([
+        'data: {"content":"Hi","message_id":"m1","thread":{"id":"t1"}}\n\n',
+        'data: {"status":"DONE","message_id":"m1","thread":{"id":"t1"}}\n\n',
+        'data: {"title":"Refund help","thread":{"id":"t1"}}\n\n',
+      ]);
+
+      await handler.processStream(response);
+
+      expect(onTitle).toHaveBeenCalledTimes(1);
+      expect(onTitle).toHaveBeenCalledWith({
+        conversationId: "t1",
+        title: "Refund help",
+      });
+    });
+
+    it("does not fire for chunks without a title", async () => {
+      const onTitle = vi.fn();
+      const handler = new SSEHandler({ onTitle });
+
+      const response = createMockSSEStream([
+        'data: {"content":"Hi","message_id":"m1","thread":{"id":"t1"}}\n\n',
+        'data: {"status":"DONE","message_id":"m1","thread":{"id":"t1"}}\n\n',
+      ]);
+
+      await handler.processStream(response);
+
+      expect(onTitle).not.toHaveBeenCalled();
+    });
+  });
 });

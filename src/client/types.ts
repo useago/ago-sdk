@@ -308,6 +308,8 @@ export interface SSEChunkData {
   message_id?: string;
   status?: MessageStatus;
   thread?: { id: string };
+  /** Generated conversation title, streamed once at the end of the first turn. */
+  title?: string;
   agent?: { id: string; name: string; display_name?: string };
   knowledge_sources?: Array<{
     knowledge_document: {
@@ -409,6 +411,12 @@ export interface AgoClientEvents {
    * notably `createFormCollector` — can replay them to restore their state.
    */
   "conversation:loaded": Conversation;
+  /**
+   * The conversation's title was generated and streamed during a live turn
+   * (the backend emits it once, at the end of the first turn). Lets the UI
+   * update a header without a refetch.
+   */
+  "conversation:title": { conversationId: string; title: string };
   "toolCall:received": ToolCallData;
   "toolCall:form": ToolCallData;
   "function:invoke": ClientFunctionInvocation;

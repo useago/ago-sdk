@@ -41,6 +41,11 @@ export interface SSEHandlerCallbacks {
     conversationId: string;
   }) => void;
   /**
+   * The conversation's title was generated and streamed (the backend emits it
+   * once, near the end of the first turn).
+   */
+  onTitle?: (data: { conversationId: string; title: string }) => void;
+  /**
    * The main answer text is finished (the backend emitted `status: "DONE"`) but
    * follow-up replies may still be streaming. Fires once, before {@link onComplete},
    * with the message as it stands at that moment (no `followUpReplies` yet).
@@ -181,6 +186,15 @@ export class SSEHandler {
           messageId: this.message.id,
         });
       }
+    }
+
+    // A streamed title (generated once at the end of the first turn) — surface
+    // it so a UI can update its header without a refetch.
+    if (data.title && this.message.conversationId) {
+      this.callbacks.onTitle?.({
+        conversationId: this.message.conversationId,
+        title: data.title,
+      });
     }
 
     // Handle content
