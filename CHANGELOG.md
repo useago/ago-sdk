@@ -5,6 +5,21 @@ All notable changes to `@useago/sdk` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.5] - 2026-07-28
+
+### Added
+
+- `conversation:title` event: the backend streams a generated conversation
+  title once at the end of the first turn, so the UI can update a header
+  without a refetch.
+
+### Changed
+
+- `getConversations(options?)` is now paginated. It accepts `{ page, pageSize }`
+  (`pageSize` capped at 100 by the backend) and returns a
+  `PaginatedResult<Conversation>` envelope (`{ data, hasMore, total }`) instead
+  of a plain array.
+
 ## [1.5.4] - 2026-07-22
 
 ### Added
