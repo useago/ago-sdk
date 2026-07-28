@@ -40,6 +40,7 @@ import type {
   ClientFunctionInvocation,
   ClientFunctionsMode,
   Conversation,
+  PaginatedResult,
   SendMessageOptions,
   SubmitToolCallResult,
   ToolCallData,
@@ -640,23 +641,43 @@ export class AgoClient {
   // ─────────────────────────────────────────────────────────────────
 
   /**
-   * Get list of conversations
+   * Get a page of conversations, newest-first. `pageSize` is capped at 100 by
+   * the backend (default 50). Returns the `{ data, has_more, total }` envelope
+   * so callers can page; `total` counts across all pages.
    */
-  async getConversations(): Promise<Conversation[]> {
-    const response = await this.httpClient.get<{
-      count: number;
-      items: Array<{
-        id: string;
-        title: string;
-        last_message_date: string;
-      }>;
-    }>("/api/sdk/v1/conversations");
+  async getConversations(options?: {
+    page?: number;
+    pageSize?: number;
+  }): Promise<PaginatedResult<Conversation>> {
+    const query = new URLSearchParams();
+    if (options?.page !== undefined) query.set("page", String(options.page));
+    if (options?.pageSize !== undefined)
+      query.set("page_size", String(options.pageSize));
+    const qs = query.toString();
 
-    return response.items.map((item) => ({
-      id: item.id,
-      title: item.title,
-      lastMessageDate: new Date(item.last_message_date),
+    const response = await this.httpClient.get<{
+      data?: Array<{
+        id: string;
+        title?: string | null;
+        created_at?: string | null;
+        last_message_at?: string | null;
+      }>;
+      has_more?: boolean;
+      total?: number;
+    }>(`/api/sdk/v1/conversations${qs ? `?${qs}` : ""}`);
+
+    const rows = Array.isArray(response.data) ? response.data : [];
+    const data: Conversation[] = rows.map((row) => ({
+      id: String(row.id),
+      title: row.title ?? "",
+      lastMessageDate: new Date(row.last_message_at ?? row.created_at ?? 0),
     }));
+
+    return {
+      data,
+      hasMore: response.has_more ?? false,
+      total: response.total ?? data.length,
+    };
   }
 
   /**
@@ -666,7 +687,8 @@ export class AgoClient {
     const response = await this.httpClient.get<{
       id: string;
       title: string;
-      last_message_date: string;
+      created_at?: string | null;
+      last_message_at?: string | null;
       messages: Array<{
         id: string;
         content: string;
@@ -682,7 +704,9 @@ export class AgoClient {
     const conversation: Conversation = {
       id: response.id,
       title: response.title,
-      lastMessageDate: new Date(response.last_message_date),
+      lastMessageDate: new Date(
+        response.last_message_at ?? response.created_at ?? 0
+      ),
       messages: response.messages.map((m) => ({
         id: m.id,
         conversationId: response.id,

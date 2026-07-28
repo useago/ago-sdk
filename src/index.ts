@@ -25,6 +25,7 @@ export type {
   FunctionDefinition,
   FunctionSchema,
   MessageStatus,
+  PaginatedResult,
   SendMessageOptions,
   SSEChunkData,
   SubmitToolCallResult,

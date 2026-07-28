@@ -210,6 +210,16 @@ export interface Conversation {
 }
 
 /**
+ * A page of list results, mirroring the API's `{ data, has_more, total }`
+ * envelope. `total` is the count across all pages, not just this page.
+ */
+export interface PaginatedResult<T> {
+  data: T[];
+  hasMore: boolean;
+  total: number;
+}
+
+/**
  * Tool call data from SSE stream
  */
 export interface ToolCallData {
