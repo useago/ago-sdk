@@ -97,3 +97,58 @@ describe("getConversations", () => {
     expect(result.total).toBe(0);
   });
 });
+
+describe("getConversation", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("maps persisted follow_up_replies onto followUpReplies so a reloaded thread re-renders the pills", async () => {
+    stubFetchJson({
+      id: "c1",
+      title: "T",
+      messages: [
+        { id: "m1", content: "Hi", role: "user", status: "DONE", created_at: "2026-07-20T10:00:00Z" },
+        {
+          id: "m2",
+          content: "Here you go",
+          role: "assistant",
+          status: "DONE",
+          created_at: "2026-07-20T10:00:01Z",
+          follow_up_replies: ["Track my order", "Add a user"],
+        },
+      ],
+    });
+    const client = new AgoClient({ baseUrl: "https://x.example.com" });
+
+    const conv = await client.getConversation("c1");
+
+    expect(conv.messages?.[1].followUpReplies).toEqual(["Track my order", "Add a user"]);
+    // A message with no suggestions stays undefined (nothing to render).
+    expect(conv.messages?.[0].followUpReplies).toBeUndefined();
+  });
+
+  it("leaves followUpReplies undefined when the field is absent or empty", async () => {
+    stubFetchJson({
+      id: "c1",
+      title: "T",
+      messages: [
+        { id: "m1", content: "x", role: "assistant", status: "DONE", created_at: "2026-07-20T10:00:00Z" },
+        {
+          id: "m2",
+          content: "y",
+          role: "assistant",
+          status: "DONE",
+          created_at: "2026-07-20T10:00:01Z",
+          follow_up_replies: [],
+        },
+      ],
+    });
+    const client = new AgoClient({ baseUrl: "https://x.example.com" });
+
+    const conv = await client.getConversation("c1");
+
+    expect(conv.messages?.[0].followUpReplies).toBeUndefined();
+    expect(conv.messages?.[1].followUpReplies).toBeUndefined();
+  });
+});
