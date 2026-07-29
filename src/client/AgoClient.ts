@@ -701,6 +701,7 @@ export class AgoClient {
         hidden?: boolean;
         tool_call_data?: Array<Record<string, unknown>>;
         attachments?: Array<Record<string, unknown>>;
+        follow_up_replies?: string[];
       }>;
     }>(`/api/sdk/v1/conversations/${conversationId}`);
 
@@ -722,6 +723,12 @@ export class AgoClient {
         attachments:
           m.attachments && m.attachments.length > 0
             ? m.attachments.map(mapAttachment)
+            : undefined,
+        // Re-render the follow-up pills under the last answer on reload; the
+        // widget only shows them on the last message (see renderMessage isLast).
+        followUpReplies:
+          m.follow_up_replies && m.follow_up_replies.length > 0
+            ? m.follow_up_replies
             : undefined,
       })),
     };
