@@ -101,6 +101,7 @@ function createDrivableClient() {
   const sendMessage = vi.fn(
     () => new Promise<AgoMessage>((resolve) => (resolveSend = resolve)),
   );
+  const stop = vi.fn(async () => null);
   const client = {
     on: (e: string, h: (data: unknown) => void) => {
       (handlers[e] ??= []).push(h);
@@ -109,9 +110,16 @@ function createDrivableClient() {
       handlers[e] = (handlers[e] ?? []).filter((x) => x !== h);
     },
     sendMessage,
+    stop,
     getMessages: vi.fn(async () => []),
   } as unknown as AgoClient;
-  return { client, emit, sendMessage, resolveSend: (m: AgoMessage) => resolveSend(m) };
+  return {
+    client,
+    emit,
+    sendMessage,
+    stop,
+    resolveSend: (m: AgoMessage) => resolveSend(m),
+  };
 }
 
 function setTextareaValue(textarea: HTMLTextAreaElement, value: string) {
@@ -198,6 +206,66 @@ describe("ChatWidget input blocking during a turn", () => {
     expect(
       container.querySelectorAll(".ago-message__followup-btn"),
     ).toHaveLength(2);
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+});
+
+describe("ChatWidget stop button", () => {
+  it("swaps Send for Stop while the agent answers and stops the turn on click", async () => {
+    const { client, emit, stop } = createDrivableClient();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<ChatWidget client={client} />);
+    });
+
+    const textarea = container.querySelector("textarea")!;
+    const form = container.querySelector("form")!;
+
+    await act(async () => {
+      setTextareaValue(textarea, "Hi");
+    });
+    await act(async () => {
+      form.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true }),
+      );
+    });
+
+    const stopBtn = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Stop generating"]',
+    );
+    expect(stopBtn).not.toBeNull();
+    expect(stopBtn!.disabled).toBe(false);
+
+    await act(async () => {
+      stopBtn!.click();
+    });
+    expect(stop).toHaveBeenCalledTimes(1);
+
+    // The turn ends as CANCELED: the partial answer stays, the input is back.
+    await act(async () => {
+      emit("message:complete", {
+        id: "m1",
+        conversationId: "c1",
+        content: "Partial",
+        role: "assistant",
+        status: "CANCELED",
+        createdAt: new Date(),
+      } satisfies AgoMessage);
+      emit("message:stopped", { conversationId: "c1", messageId: "m1" });
+    });
+
+    expect(container.textContent).toContain("Partial");
+    expect(textarea.disabled).toBe(false);
+    expect(
+      container.querySelector('button[aria-label="Stop generating"]'),
+    ).toBeNull();
 
     await act(async () => {
       root.unmount();

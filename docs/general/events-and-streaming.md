@@ -27,6 +27,7 @@ const final = await client.waitFor("message:complete", { timeout: 10_000 });
 | `message:chunk` | `{ content, conversationId, messageId }` |
 | `message:answer-complete` | `AgoMessage`: the main answer text is done, but follow-up replies may still be pending; fires once, before `message:complete` |
 | `message:complete` | `AgoMessage` |
+| `message:stopped` | `{ conversationId, messageId }`: the user stopped the turn (`client.stop()`). Fires once the stream has unwound, after the `message:complete` that carries the partial answer with status `CANCELED` (or on its own when there was nothing to complete). `messageId` is `""` when the stop landed before the backend had named the message. See [Stop the answer](core.md#stop-the-answer) |
 | `message:waiting-client` | `{ conversationId, messageId, waitingToolCallIds }`: the turn paused on client function call(s) (`clientFunctionsMode: "pause"`). `message:complete` does not fire for the paused stream — it fires when the resumed turn concludes. The SDK submits the results and resumes on its own; listen to this to keep a "working…" indicator up |
 | `message:empty` | `{ conversationId, messageId }`: the reply completed as `DONE` with no content, tool calls, or follow-ups (usually an unknown `agent` slug). Fires after `message:complete` AND after `sendMessage` resolves, so subscribing right after the `await` still catches it. Both ids are `""` when the stream carried no message data at all. See [Empty replies](configuration.md#empty-replies). |
 | `message:error` | `{ error, code?, conversationId?, messageId? }`: `code` is the stable [error code](configuration.md#error-codes) when the failure was an `AgoError` |
@@ -104,6 +105,32 @@ for await (const ev of createMessageStream(client, "Hello!", { conversationId })
 
 Options: `{ conversationId?, agentId?, files? }`. The generator cleans up its
 listeners automatically when the loop ends.
+
+---
+
+## Stopping a stream
+
+`client.stop()` interrupts the turn being generated: it closes the stream and
+calls the backend to stop generating. Closing the stream alone would leave the
+agent running server-side.
+
+```ts
+document.getElementById("stop").onclick = () => void client.stop();
+
+client.on("message:stopped", ({ messageId }) => {
+  console.log("stopped", messageId);
+});
+```
+
+The text that already arrived stays: the message is finalized as `CANCELED` and
+the pending `sendMessage` resolves with it instead of rejecting.
+`message:complete` fires with the partial message, then `message:stopped`.
+
+Finalize your UI on `message:stopped`. It is the one event that always fires,
+while `message:complete` is skipped when there is nothing to complete: a stop
+that landed before the backend had named the message, and a turn stopped while
+it was paused on client functions (no stream is open then). Full details in
+[Stop the answer](core.md#stop-the-answer).
 
 ---
 

@@ -66,6 +66,16 @@ export interface SSEHandlerCallbacks {
   onError?: (error: Error) => void;
 }
 
+export interface SSEHandlerOptions {
+  /**
+   * Signal of the fetch feeding this stream. When it fires the read rejects,
+   * and that is a deliberate stop rather than a failure: the handler keeps the
+   * text produced so far, ends the message as `CANCELED`, and does NOT call
+   * `onError`.
+   */
+  signal?: AbortSignal;
+}
+
 /**
  * Handles SSE streaming responses from AGO backend
  */
@@ -83,7 +93,10 @@ export class SSEHandler {
   // so this guards a handler from running twice (e.g. a duplicate form submit).
   private firedClientFunctions = new Set<string>();
 
-  constructor(private callbacks: SSEHandlerCallbacks) {}
+  constructor(
+    private callbacks: SSEHandlerCallbacks,
+    private options: SSEHandlerOptions = {}
+  ) {}
 
   /**
    * Process a streaming response
@@ -120,6 +133,13 @@ export class SSEHandler {
 
       return this.buildFinalMessage();
     } catch (error) {
+      // The caller closed the stream (see `AgoClient.stop`). Not a failure:
+      // finish the message as CANCELED with whatever text already arrived, so
+      // the partial answer stays on screen and `onComplete` still fires once.
+      if (this.options.signal?.aborted) {
+        this.message.status = "CANCELED";
+        return this.buildFinalMessage();
+      }
       const streamError =
         error instanceof Error
           ? error

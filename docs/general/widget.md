@@ -62,6 +62,7 @@ const widget = mountChatWidget("#chat", {
 
 // Programmatic control:
 widget.sendMessage("Hello");
+widget.stop(); // interrupt the answer being generated (no-op when idle)
 widget.destroy(); // removes listeners, uninstalls forms, clears the DOM
 ```
 
@@ -78,6 +79,7 @@ widget.destroy(); // removes listeners, uninstalls forms, clears the DOM
 | `welcomeMessage?`       | `string \| { message: string; mode?: "static" \| "streaming"; speed?; followUpReplies? }` | `"Hello! How can I help you today?"`                       |
 | `placeholder?`          | `string`                                                                                  | `"Type a message..."`                                      |
 | `allowFiles?`           | `boolean`                                                                                 | `false`                                                    |
+| `allowStop?`            | `boolean`                                                                                 | `true` (see [Stop button](#stop-button))                   |
 | `height?`               | `string \| number`                                                                        | `500` (ignored for side panels)                            |
 | `placement?`            | `"inline" \| "left" \| "right"`                                                           | `"inline"`                                                 |
 | `width?`                | `string \| number`                                                                        | `400` (side panels only)                                   |
@@ -99,6 +101,25 @@ widget.destroy(); // removes listeners, uninstalls forms, clears the DOM
 | `onMessageReceived?`    | `({ id, content }) => void`                                                               | —                                                          |
 | `onFormSubmitted?`      | `({ name, values, result }) => void`                                                      | —                                                          |
 | `onFormError?`          | `({ name, values, error }) => void`                                                       | —                                                          |
+
+### Stop button
+
+While the agent answers, the send button becomes a **Stop** button that
+interrupts the turn. The stream closes and the backend is told to stop
+generating, so the partial answer stays on screen with status `CANCELED` instead
+of the agent finishing in the background. Set `allowStop: false` to keep the
+disabled spinner shown by earlier versions.
+
+```ts
+const widget = mountChatWidget("#ago-chat", {
+  config: { baseUrl: "https://playground.api.useago.com", agent: "generic-guide" },
+});
+
+widget.stop(); // same path as the Stop button; no-op when nothing is generating
+```
+
+Swap `baseUrl` for your own `https://YOUR-DOMAIN.api.useago.com` once you have a
+tenant. See [Stop the answer](core.md#stop-the-answer) for the client-level API.
 
 ### Streamed welcome message
 
@@ -126,7 +147,7 @@ mountChatWidget("#ago-chat", {
 ```
 
 `mountChatWidget` returns a handle:
-`{ client, element, sendMessage, session, threads, refreshThreads, destroy }` (`session` is
+`{ client, element, sendMessage, stop, session, threads, refreshThreads, destroy }` (`session` is
 present only when `persistConversation` is set; `open`/`close`/`toggle` are present for side
 placements and, in a browser, for inline placement, see [Side panel](#side-panel-left--right)
 and [Mobile fullscreen](#mobile-fullscreen)). `threads` is the visitor's conversation list,

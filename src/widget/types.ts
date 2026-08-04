@@ -162,6 +162,12 @@ export interface MountChatWidgetOptions {
   placeholder?: string;
   /** Enable file attachments. */
   allowFiles?: boolean;
+  /**
+   * While the agent is answering, turn the send button into a Stop button that
+   * interrupts the turn. Default `true`; set `false` to keep showing a disabled
+   * spinner instead.
+   */
+  allowStop?: boolean;
   /** Widget height (number → px). Ignored when `placement` is `"left"`/`"right"`
    * (a side panel is always full-height). */
   height?: string | number;
@@ -322,6 +328,8 @@ export interface ChatWidgetHandle {
   element: HTMLElement;
   /** Programmatically send a message (same path as the input). */
   sendMessage: (content: string, files?: File[]) => Promise<void>;
+  /** Stop the turn being generated (same path as the Stop button). No-op when idle. */
+  stop: () => Promise<void>;
   /**
    * Open / close / toggle the panel. Present for `placement: "left" | "right"`,
    * and for `placement: "inline"` in a browser (where they expand / collapse the

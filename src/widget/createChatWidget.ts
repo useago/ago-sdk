@@ -168,6 +168,7 @@ export function mountChatWidget(
     welcomeMessage = "Hello! How can I help you today?",
     placeholder = "Type a message...",
     allowFiles = false,
+    allowStop = true,
     height = 500,
     placement = "inline",
     width = 400,
@@ -365,6 +366,7 @@ export function mountChatWidget(
     placeholder,
     allowFiles,
     onSend: (content, files) => void send(content, files),
+    onStop: allowStop ? () => void stop() : undefined,
   });
 
   ensureKeyframes();
@@ -675,6 +677,19 @@ export function mountChatWidget(
       onMessageReceived?.({ id: message.id, content: message.content });
     }
   };
+  // The user stopped the turn. `onComplete` has usually already finalized the
+  // bubble as CANCELED; this covers what it can't — a stop that landed before
+  // the backend named the message, and a turn stopped while it was paused on a
+  // client function (no stream is open then, so no completion event follows).
+  const onStopped = (): void => {
+    const target = lastInProgressAssistant();
+    if (target) {
+      if (target.content) target.status = "CANCELED";
+      else messages = messages.filter((m) => m !== target);
+    }
+    isLoading = false;
+    render();
+  };
   const onError = (data: { error: string }): void => {
     errorMessage = data.error;
     isLoading = false;
@@ -721,6 +736,7 @@ export function mountChatWidget(
   client.on("message:chunk", onChunk);
   client.on("message:answer-complete", onAnswerComplete);
   client.on("message:complete", onComplete);
+  client.on("message:stopped", onStopped);
   client.on("message:error", onError);
 
   // Forward form submit outcomes to the optional callbacks. The success notice is
@@ -826,7 +842,10 @@ export function mountChatWidget(
         userMsg.id = `user-${stamp}`;
         userMsg.conversationId = response.conversationId;
       }
-      if (!messages.some((m) => m.id === response.id)) {
+      // A turn stopped before the backend named the message has no id and no
+      // text: the placeholder below is simply dropped, leaving the user's
+      // message and no empty assistant bubble.
+      if (response.id && !messages.some((m) => m.id === response.id)) {
         const idx = messages.findIndex(
           (m) => m.id === `temp-assistant-${stamp}`,
         );
@@ -849,6 +868,15 @@ export function mountChatWidget(
       messages = messages.filter((m) => !m.id.startsWith("temp-"));
       render();
     }
+  }
+
+  // Stop the turn being generated (the Stop button, and `widget.stop()`). The
+  // client closes the stream and tells the backend to stop; the partial answer
+  // stays on screen. `onComplete` fires with status CANCELED and clears the
+  // loading state, so there is nothing to unwind here.
+  async function stop(): Promise<void> {
+    if (!isLoading) return;
+    await client.stop();
   }
 
   // Load the visitor's conversation list and publish it on `widget.threads`. The
@@ -899,6 +927,7 @@ export function mountChatWidget(
     client,
     element: mountInto,
     sendMessage: send,
+    stop,
     ...(isSide || inlineFullscreen
       ? { open: openCtl, close: closeCtl, toggle: toggleCtl }
       : {}),
@@ -911,6 +940,7 @@ export function mountChatWidget(
       client.off("message:chunk", onChunk);
       client.off("message:answer-complete", onAnswerComplete);
       client.off("message:complete", onComplete);
+      client.off("message:stopped", onStopped);
       client.off("message:error", onError);
       if (onFormSubmitted) client.off("form:submitted", onFormSubmittedEvent);
       if (onFormError) client.off("form:error", onFormErrorEvent);

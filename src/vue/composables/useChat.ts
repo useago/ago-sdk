@@ -37,6 +37,7 @@ export function useChat(options: UseChatOptions = {}) {
     isLoading: msgResult.isLoading,
     error,
     sendMessage: msgResult.sendMessage,
+    stop: msgResult.stop,
     clearMessages: msgResult.clearMessages,
     conversationId: msgResult.conversationId,
     // Conversations

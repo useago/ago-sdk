@@ -24,6 +24,11 @@ export interface ChatWidgetProps {
   placeholder?: string;
   /** Enable file attachments */
   allowFiles?: boolean;
+  /**
+   * While the agent is answering, turn the send button into a Stop button that
+   * interrupts the turn. Defaults to `true`.
+   */
+  allowStop?: boolean;
   /** Widget height */
   height?: string | number;
   /** URL of a logo to display in the header */
@@ -63,6 +68,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
   welcomeMessage = "Hello! How can I help you today?",
   placeholder = "Type a message...",
   allowFiles = false,
+  allowStop = true,
   height = 500,
   logoUrl,
   showAgentName = false,
@@ -75,7 +81,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const contextClient = useOptionalAgoClient();
   const resolvedClient = client ?? contextClient;
-  const { messages, isLoading, error, sendMessage } = useMessages({
+  const { messages, isLoading, error, sendMessage, stop } = useMessages({
     client,
     conversationId: initialConversationId,
   });
@@ -267,6 +273,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
       {/* Input */}
       <ChatInput
         onSend={handleSend}
+        onStop={allowStop ? () => void stop() : undefined}
         disabled={isAnswering}
         placeholder={placeholder}
         allowFiles={allowFiles}

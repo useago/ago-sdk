@@ -130,6 +130,9 @@ use `ago.on(event, handler)` / `ago.off(event, handler)`.
 
 ```ts
 ago.sendMessage(content, options?)        // Promise<AgoMessage>
+ago.stop()                                 // stop the turn being generated
+ago.stopMessage(messageId)                 // stop a turn by id
+ago.isGenerating()                         // boolean
 ago.getConversations()                     // Promise<Conversation[]>
 ago.getConversation(id)
 ago.getMessages(conversationId)
@@ -149,6 +152,17 @@ ago.on(event, handler) / ago.off(event, handler)
 ago.updateConfig(partialConfig)
 ago.getClient()                            // underlying AgoClient
 ago.destroy()
+```
+
+`stop()` closes the stream and tells the backend to stop generating. The partial
+text is kept, the message is finalized as `CANCELED`, and the pending
+`sendMessage` resolves with it (it does not reject). It resolves to `null` when
+nothing was generating, so a Stop button can call it unconditionally:
+
+```ts
+async onStop() {
+  await this.ago.stop();
+}
 ```
 
 ## 5. Functions, navigation and context

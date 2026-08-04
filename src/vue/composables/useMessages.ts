@@ -54,11 +54,38 @@ export function useMessages(options: UseMessagesOptions = {}) {
     isLoading.value = false;
   };
 
+  // The user stopped the turn. `message:complete` has usually already finalized
+  // the bubble as CANCELED; this covers what it can't — a stop that landed
+  // before the backend named the message, and a turn stopped while it was paused
+  // on a client function (no stream is open then, so no completion follows).
+  const handleStopped = () => {
+    let idx = -1;
+    for (let i = messages.value.length - 1; i >= 0; i--) {
+      const m: AgoMessage = messages.value[i];
+      if (
+        m.role === "assistant" &&
+        (m.status === "IN_PROGRESS" || m.status === "WAITING_CLIENT")
+      ) {
+        idx = i;
+        break;
+      }
+    }
+    if (idx >= 0) {
+      if (messages.value[idx].content) {
+        messages.value[idx] = { ...messages.value[idx], status: "CANCELED" };
+      } else {
+        messages.value.splice(idx, 1);
+      }
+    }
+    isLoading.value = false;
+  };
+
   onMounted(() => {
     client.on("message:start", handleStart);
     client.on("message:chunk", handleChunk);
     client.on("message:complete", handleComplete);
     client.on("message:error", handleError);
+    client.on("message:stopped", handleStopped);
   });
 
   onUnmounted(() => {
@@ -66,6 +93,7 @@ export function useMessages(options: UseMessagesOptions = {}) {
     client.off("message:chunk", handleChunk);
     client.off("message:complete", handleComplete);
     client.off("message:error", handleError);
+    client.off("message:stopped", handleStopped);
   });
 
   async function sendMessage(content: string, files?: File[]): Promise<AgoMessage | null> {
@@ -116,11 +144,20 @@ export function useMessages(options: UseMessagesOptions = {}) {
     }
   }
 
+  /**
+   * Stop the turn that is generating: closes the stream and tells the backend to
+   * stop. The partial answer stays in the transcript as `CANCELED`. No-op when
+   * nothing is generating.
+   */
+  async function stop(): Promise<void> {
+    await client.stop();
+  }
+
   function clearMessages() {
     messages.value = [];
     conversationId.value = undefined;
     error.value = null;
   }
 
-  return { messages, isLoading, error, conversationId, sendMessage, clearMessages };
+  return { messages, isLoading, error, conversationId, sendMessage, stop, clearMessages };
 }

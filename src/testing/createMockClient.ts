@@ -71,6 +71,9 @@ export function createMockClient(
   const defaults: Record<string, MockFn> = {
     sendMessage: async () => noopMessage,
     continueMessage: async () => noopMessage,
+    stop: async () => null,
+    stopMessage: async () => ({ status: "not_running" }),
+    isGenerating: () => false,
     resumePendingClientFunctions: async () => null,
     registerResumeGate: () => () => undefined,
     getConversations: async () => [noopConversation],

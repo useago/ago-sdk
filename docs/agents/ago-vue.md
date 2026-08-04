@@ -64,7 +64,7 @@ All-in-one reactive state (messages + conversations). Everything returned is a
 import { ref } from "vue";
 import { useChat } from "@useago/sdk/vue";
 
-const { messages, sendMessage, isLoading, error } = useChat();
+const { messages, sendMessage, stop, isLoading, error } = useChat();
 const draft = ref("");
 
 async function onSend() {
@@ -81,11 +81,17 @@ async function onSend() {
   </div>
   <form @submit.prevent="onSend">
     <input v-model="draft" :disabled="isLoading" placeholder="Ask anything..." />
-    <button :disabled="isLoading">Send</button>
+    <button v-if="isLoading" type="button" @click="stop()">Stop</button>
+    <button v-else>Send</button>
   </form>
   <p v-if="error" role="alert">{{ error.message }}</p>
 </template>
 ```
+
+`stop()` interrupts the answer being generated: the stream closes and the backend
+is told to stop generating, the partial text stays in `messages` with status
+`CANCELED`, and `isLoading` goes back to `false`. It is a no-op when nothing is
+generating.
 
 Each assistant message carries the knowledge sources it used in `m.sources` (an
 `AgoSource[]`, each `{ id, title, url? }`). Render them as links.
@@ -178,7 +184,8 @@ useAgoEvents("message:complete", (msg) => console.log("Got reply:", msg.content)
 ```
 
 Key events: `message:start`, `message:chunk` (`{ content }` per token),
-`message:complete` (`AgoMessage`), `message:error`.
+`message:complete` (`AgoMessage`), `message:stopped`
+(`{ conversationId, messageId }`, after the turn was stopped), `message:error`.
 
 ## 6. Client context
 

@@ -1,6 +1,6 @@
 import { ActivityLedger } from "../activity/ActivityLedger";
 import type { ActivityEntry, ActivityInput } from "../activity/ActivityLedger";
-import { HttpClient } from "../api/HttpClient";
+import { HttpClient, isAbortError } from "../api/HttpClient";
 import type {
   FormCollectorDefinition,
   FormCollectorSchema,
@@ -42,6 +42,7 @@ import type {
   Conversation,
   PaginatedResult,
   SendMessageOptions,
+  StopMessageResult,
   SubmitToolCallResult,
   ToolCallData,
 } from "./types";
@@ -74,6 +75,21 @@ type PendingResume = {
   resultsReady: boolean;
   /** Guards double-continue (e.g. duplicate submit responses). */
   started: boolean;
+};
+
+/**
+ * The turn currently streaming, so {@link AgoClient.stop} can close its stream
+ * and name the message to stop server-side.
+ */
+type ActiveTurn = {
+  controller: AbortController;
+  /** Assistant message id, captured from the first frame that carries one. */
+  messageId: string | null;
+  conversationId: string | null;
+  /** The user asked to stop: an abort here is deliberate, not a network drop. */
+  stopRequested: boolean;
+  /** The stop endpoint was already called for this turn (call it once). */
+  stopPosted: boolean;
 };
 
 function escapeRegExp(value: string): string {
@@ -178,6 +194,23 @@ export class AgoClient {
   /** App-provided gate deciding WHEN a paused turn resumes (see {@link registerResumeGate}). */
   private resumeGate: ResumeGate | null = null;
 
+  /** The turn currently streaming, or `null` when the client is idle. */
+  private activeTurn: ActiveTurn | null = null;
+
+  /**
+   * A turn that closed as `WAITING_CLIENT` and has not resumed yet. There is no
+   * open stream in that window, but the turn is still live for the user, so it
+   * stays stoppable (see {@link stop}).
+   */
+  private pausedTurn: { messageId: string; conversationId: string } | null = null;
+
+  /**
+   * Turns stopped while they were paused on client functions. A resume may
+   * already be queued (or waiting on the resume gate) at that point; this drops
+   * it, so a stopped turn is never restarted.
+   */
+  private stoppedTurnIds = new Set<string>();
+
   /**
    * Proactive-mode controller, set when the client was created with
    * `proactive` options or when `createAgoProactive(client, opts)` was called.
@@ -251,7 +284,8 @@ export class AgoClient {
       body.hidden = true;
     }
 
-    let response: Response;
+    const turn = this.beginTurn();
+    let response: Response | null;
 
     if (options?.files && options.files.length > 0) {
       // Use FormData for file uploads
@@ -285,15 +319,47 @@ export class AgoClient {
         formData.append("files", file);
       }
 
-      response = await this.httpClient.postFormData("/api/sdk/v1/messages", formData);
+      response = await this.sendRequest(turn, () =>
+        this.httpClient.postFormData("/api/sdk/v1/messages", formData, {
+          signal: turn.controller.signal,
+        })
+      );
     } else {
-      response = await this.httpClient.postStream("/api/sdk/v1/messages", body);
+      response = await this.sendRequest(turn, () =>
+        this.httpClient.postStream("/api/sdk/v1/messages", body, {
+          signal: turn.controller.signal,
+        })
+      );
     }
 
-    return this.processSSEResponse(response);
+    // Stopped before the response arrived (see sendRequest): nothing streamed.
+    if (!response) return this.buildStoppedMessage(turn);
+
+    return this.processSSEResponse(response, turn);
   }
 
-  private async processSSEResponse(response: Response): Promise<AgoMessage> {
+  /**
+   * Fire the streaming request, returning `null` when the user stopped before
+   * the response came back. Any other failure ends the turn and propagates, so
+   * a real error still reaches the caller.
+   */
+  private async sendRequest(
+    turn: ActiveTurn,
+    request: () => Promise<Response>
+  ): Promise<Response | null> {
+    try {
+      return await request();
+    } catch (error) {
+      this.endTurn(turn);
+      if (isAbortError(error)) return null;
+      throw error;
+    }
+  }
+
+  private async processSSEResponse(
+    response: Response,
+    turn?: ActiveTurn
+  ): Promise<AgoMessage> {
     // One stream == one assistant message. Client-function invocations are
     // deliberately NOT in the final message's `toolCalls` (SSEHandler filters
     // `type === "client_function"`), and their payloads carry no messageId, so
@@ -303,6 +369,12 @@ export class AgoClient {
 
     const handler = new SSEHandler({
       onRawChunk: (data) => {
+        // Capture the ids the moment they appear: `stop()` addresses the turn by
+        // message id, and a stop can land before the first content chunk.
+        if (turn) {
+          if (data.message_id && !turn.messageId) turn.messageId = data.message_id;
+          if (data.thread?.id) turn.conversationId = data.thread.id;
+        }
         this.eventEmitter.emit("stream:message", data);
       },
       onStart: (data) => {
@@ -338,10 +410,20 @@ export class AgoClient {
         this.eventEmitter.emit("message:answer-complete", message);
       },
       onWaitingClient: (data) => {
+        // The stream ends here but the turn does not: keep it stoppable while
+        // the client functions run and the resume is being prepared.
+        this.pausedTurn = {
+          messageId: data.messageId,
+          conversationId: data.conversationId,
+        };
         this.eventEmitter.emit("message:waiting-client", data);
         this.markResumeSignal(data.messageId, data.conversationId, "waitingConfirmed");
       },
       onComplete: (message) => {
+        // A turn stopped before the backend named its message has nothing to
+        // complete: emitting it would land a blank bubble in the transcript.
+        // `message:stopped` still fires, and that is what UIs finalize on.
+        if (turn?.stopRequested && !message.id) return;
         this.eventEmitter.emit("message:complete", message);
       },
       onError: (error) => {
@@ -350,12 +432,172 @@ export class AgoClient {
           code: error instanceof AgoError ? error.code : undefined,
         });
       },
-    });
+    },
+    { signal: turn?.controller.signal });
 
-    const message = await handler.processStream(response);
-    if (message.status !== "WAITING_CLIENT") {
-      this.maybeFlagEmptyReply(message, sawClientFunction);
+    try {
+      const message = await handler.processStream(response);
+
+      if (turn?.stopRequested) {
+        // A stop pressed before any frame carried a message id had nothing to
+        // address. The id may have arrived in the frames parsed before the abort
+        // landed — use it now, or the turn runs to completion server-side with
+        // the user believing it stopped.
+        void this.postStopForTurn(turn, turn.messageId ?? message.id);
+        this.eventEmitter.emit("message:stopped", {
+          conversationId: turn.conversationId ?? message.conversationId ?? "",
+          messageId: turn.messageId ?? message.id ?? "",
+        });
+      }
+
+      if (message.status !== "WAITING_CLIENT") {
+        this.maybeFlagEmptyReply(message, sawClientFunction);
+      }
+      return message;
+    } finally {
+      if (turn) this.endTurn(turn);
     }
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // Stop generation
+  // ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Stop the turn that is generating right now: closes the stream so the UI
+   * stops immediately, and tells the backend to stop generating.
+   *
+   * Both halves matter. Closing the stream alone does NOT stop the agent — it
+   * keeps running and the full answer reappears the next time the conversation
+   * is loaded. The backend unwinds at its next safe point (any tool already
+   * running finishes, no further tool or reasoning round starts), keeps the text
+   * produced so far and finalizes the message as `CANCELED`.
+   *
+   * The in-flight `sendMessage` / `continueMessage` promise resolves normally
+   * with that partial message (it does not reject), `message:complete` fires
+   * with status `CANCELED`, then `message:stopped`.
+   *
+   * ```ts
+   * // "Stop" button
+   * stopButton.onclick = () => void client.stop();
+   * ```
+   *
+   * Returns the backend's verdict, or `null` when nothing was generating or the
+   * stop landed before the message had an id (the stream is still closed).
+   */
+  async stop(): Promise<StopMessageResult | null> {
+    const turn = this.activeTurn;
+    if (turn) {
+      turn.stopRequested = true;
+      const messageId = turn.messageId;
+      // Abort first so the UI stops on the spot; the POST below is what actually
+      // stops the agent. The id is posted from processSSEResponse when it only
+      // shows up in the frames parsed before the abort landed.
+      turn.controller.abort();
+      if (!messageId) return null;
+      return this.postStopForTurn(turn, messageId);
+    }
+
+    // No open stream, but a turn paused on client functions is still live.
+    const paused = this.pausedTurn;
+    if (!paused) return null;
+    this.pausedTurn = null;
+    // Drop the queued auto-resume: a stopped turn must not be restarted. The
+    // flag covers a resume already waiting on the gate, which the map no longer
+    // holds.
+    this.pendingResumes.delete(paused.messageId);
+    this.stoppedTurnIds.add(paused.messageId);
+
+    let result: StopMessageResult | null = null;
+    try {
+      result = await this.stopMessage(paused.messageId);
+    } catch (error) {
+      logger.warn("Failed to stop the paused turn:", error);
+    }
+    this.eventEmitter.emit("message:stopped", {
+      conversationId: paused.conversationId,
+      messageId: paused.messageId,
+    });
+    return result;
+  }
+
+  /**
+   * Ask the backend to stop a specific in-flight turn, without touching any
+   * local stream. Idempotent — stopping a finished turn answers
+   * `{ status: "not_running" }` rather than failing. Most apps want
+   * {@link stop} instead; use this to stop a turn started elsewhere (e.g. one
+   * still running after a page reload, found via `getConversation`).
+   */
+  async stopMessage(messageId: string): Promise<StopMessageResult> {
+    const response = await this.httpClient.post<{
+      status: StopMessageResult["status"];
+      message_status?: AgoMessage["status"];
+    }>(`/api/sdk/v1/messages/${messageId}/stop`);
+    return {
+      status: response.status,
+      messageStatus: response.message_status,
+    };
+  }
+
+  /** Whether a turn is generating right now (i.e. {@link stop} has something to stop). */
+  isGenerating(): boolean {
+    return this.activeTurn !== null || this.pausedTurn !== null;
+  }
+
+  /** Open a new turn, replacing any bookkeeping left by the previous one. */
+  private beginTurn(): ActiveTurn {
+    this.pausedTurn = null;
+    const turn: ActiveTurn = {
+      controller: new AbortController(),
+      messageId: null,
+      conversationId: null,
+      stopRequested: false,
+      stopPosted: false,
+    };
+    this.activeTurn = turn;
+    return turn;
+  }
+
+  private endTurn(turn: ActiveTurn): void {
+    if (this.activeTurn === turn) this.activeTurn = null;
+  }
+
+  /** POST the stop for a turn, once, never letting the failure escape. */
+  private async postStopForTurn(
+    turn: ActiveTurn,
+    messageId: string
+  ): Promise<StopMessageResult | null> {
+    if (!messageId || turn.stopPosted) return null;
+    turn.stopPosted = true;
+    try {
+      return await this.stopMessage(messageId);
+    } catch (error) {
+      // Best effort: the stream is closed either way, so the UI has stopped.
+      // Worst case the backend finishes the turn and the text shows up on the
+      // next load.
+      logger.warn("Failed to stop the turn server-side:", error);
+      return null;
+    }
+  }
+
+  /** The message a caller gets back when the stop beat the response. */
+  private buildStoppedMessage(turn: ActiveTurn): AgoMessage {
+    const message: AgoMessage = {
+      id: turn.messageId ?? "",
+      conversationId: turn.conversationId ?? "",
+      content: "",
+      role: "assistant",
+      status: "CANCELED",
+      createdAt: new Date(),
+    };
+    // Only a named message is worth completing: an unnamed one would land in a
+    // transcript as a blank bubble. `message:stopped` always fires, and that is
+    // what UIs finalize on.
+    if (message.id) this.eventEmitter.emit("message:complete", message);
+    this.eventEmitter.emit("message:stopped", {
+      conversationId: message.conversationId,
+      messageId: message.id,
+    });
     return message;
   }
 
@@ -410,11 +652,19 @@ export class AgoClient {
       body.client_context = clientContext;
     }
 
-    const response = await this.httpClient.postStream(
-      `/api/sdk/v1/messages/${messageId}/continue`,
-      body
+    const turn = this.beginTurn();
+    // The resumed turn keeps the same assistant message, so it is stoppable from
+    // the first millisecond — no need to wait for a frame to name it.
+    turn.messageId = messageId;
+    const response = await this.sendRequest(turn, () =>
+      this.httpClient.postStream(
+        `/api/sdk/v1/messages/${messageId}/continue`,
+        body,
+        { signal: turn.controller.signal }
+      )
     );
-    return this.processSSEResponse(response);
+    if (!response) return this.buildStoppedMessage(turn);
+    return this.processSSEResponse(response, turn);
   }
 
   /**
@@ -459,6 +709,10 @@ export class AgoClient {
     }
 
     this.pendingResumes.delete(messageId);
+
+    // The user stopped the turn while it was paused (possibly while the gate
+    // above was holding). Resuming it now would restart what they just stopped.
+    if (this.stoppedTurnIds.delete(messageId)) return;
 
     try {
       await this.continueMessage(messageId);
@@ -1590,6 +1844,12 @@ export class AgoClient {
   destroy(): void {
     this.proactive?.destroy();
     this.proactive = null;
+    // Close any stream still open, so a destroyed client stops reading (and its
+    // in-flight sendMessage resolves) instead of streaming into nothing.
+    this.activeTurn?.controller.abort();
+    this.activeTurn = null;
+    this.pausedTurn = null;
+    this.stoppedTurnIds.clear();
     this.eventEmitter.removeAllListeners();
     this.functionRegistry.clear();
     this.contextRegistry.clear();

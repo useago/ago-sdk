@@ -72,6 +72,24 @@ await ago.sendMessage("Summarise this", { files: [fileInput.files[0]], conversat
 await ago.sendMessage("Escalate this", { agentId: "human-handoff" });
 ```
 
+Stop the answer being generated. `stop()` closes the stream AND calls the backend
+to stop generating; closing the stream alone would leave the agent running:
+
+```ts
+document.getElementById("stop").onclick = () => void ago.stop();
+```
+
+The partial text is kept, the message is finalized as `CANCELED`, and the pending
+`sendMessage` resolves with it (it does not reject). `message:complete` fires with
+the partial message, then `message:stopped`. Finalize your UI on
+`message:stopped`: it always fires, while `message:complete` is skipped when
+there is nothing to complete (a stop that beat the backend naming the message, or
+a turn stopped while paused on client functions). `stop()` resolves to `null` when
+nothing was generating, `isGenerating()` reports whether there is anything to
+stop, and `stopMessage(messageId)` stops a turn by id (e.g. one still running
+after a page reload). A turn paused on client functions is stoppable too, and
+stopping it cancels the automatic resume.
+
 ## 3. Conversations
 
 ```ts
@@ -173,9 +191,12 @@ const widget = mountChatWidget("#chat", {
 });
 
 widget.sendMessage("Hello");
+widget.stop();    // interrupt the answer being generated (no-op when idle)
 widget.destroy(); // removes listeners, uninstalls forms, clears the DOM
 ```
 
+While the agent answers, the send button becomes a Stop button that interrupts
+the turn; pass `allowStop: false` to keep a disabled spinner instead.
 Set `placement: "left"` or `"right"` for a fixed full-height side panel with a
 launcher button. Set `persistConversation: true` to resume the visitor's last
 thread across reloads. Theme it with the `theme` option or `--ago-*` CSS variables
@@ -200,7 +221,8 @@ ago.destroy();                           // clean up listeners, functions, conte
 ## Key events
 
 `message:start`, `message:chunk` (`{ content }` per token), `message:complete`
-(`AgoMessage`), `message:error`, `conversation:loaded`, `context:changed`,
+(`AgoMessage`), `message:stopped` (`{ conversationId, messageId }`, after a
+`stop()`), `message:error`, `conversation:loaded`, `context:changed`,
 `toolCall:received`, `function:invoke`, `function:result`, `connection:status`.
 Use `on` / `off` / `once`, or `await ago.waitFor("message:complete", { timeout })`.
 

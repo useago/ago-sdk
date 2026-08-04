@@ -101,6 +101,7 @@ function Support() {
 | `welcomeMessage?` | `string` | greeting |
 | `placeholder?` | `string` | `"Type a message..."` |
 | `allowFiles?` | `boolean` | `false` |
+| `allowStop?` | `boolean` | `true` (see [Stop button](#stop-button)) |
 | `height?` | `string \| number` | `500` |
 | `logoUrl?` | `string` | — |
 | `showAgentName?` | `boolean` | `false` |
@@ -109,6 +110,34 @@ function Support() {
 | `className?` | `string` | `""` |
 | `onMessageSent?` | `(content) => void` | — |
 | `onMessageReceived?` | `({ id, content }) => void` | — |
+
+### Stop button
+
+While the agent answers, `<ChatWidget>` turns its send button into a **Stop**
+button. Clicking it closes the stream and tells the backend to stop generating,
+so the partial answer stays in the transcript as `CANCELED` instead of the agent
+finishing in the background. Pass `allowStop={false}` to keep the send button
+disabled while answering instead.
+
+Building your own input? `<ChatInput>` takes an `onStop` prop: when it is set and
+`disabled` is true (the agent is answering), the button becomes an enabled Stop
+button.
+
+```tsx
+import { ChatInput, useMessages } from "@useago/sdk/react";
+
+function Composer() {
+  const { sendMessage, stop, isLoading } = useMessages();
+
+  return (
+    <ChatInput
+      onSend={(text, files) => void sendMessage(text, files)}
+      onStop={() => void stop()}
+      disabled={isLoading}
+    />
+  );
+}
+```
 
 ### Suggested replies
 
@@ -181,6 +210,7 @@ function Chat() {
   const {
     messages,
     sendMessage,
+    stop,
     isLoading,
     error,
     conversations,
@@ -193,9 +223,11 @@ function Chat() {
       {messages.map((m) => (
         <p key={m.id}><b>{m.role}:</b> {m.content}</p>
       ))}
-      <button onClick={() => sendMessage("Hello!")} disabled={isLoading}>
-        Send
-      </button>
+      {isLoading ? (
+        <button onClick={() => void stop()}>Stop</button>
+      ) : (
+        <button onClick={() => sendMessage("Hello!")}>Send</button>
+      )}
       {error && <p role="alert">{error.message}</p>}
     </div>
   );
@@ -205,6 +237,11 @@ function Chat() {
 `messages` updates token-by-token as the reply streams in (optimistic user
 message included). `sendMessage(content, files?)` returns the final message or
 `null` on error.
+
+`stop()` interrupts the answer being generated: the stream closes and the
+backend is told to stop, the partial text stays in `messages` with status
+`CANCELED`, and `isLoading` goes back to `false`. It is a no-op when nothing is
+generating. See [Stop the answer](../general/core.md#stop-the-answer).
 
 ### Show the source docs the agent retrieved
 
@@ -251,7 +288,7 @@ function Chat() {
 
 | Hook | Returns |
 | --- | --- |
-| `useMessages({ conversationId? })` | `{ messages, isLoading, error, sendMessage, clearMessages, conversationId }` |
+| `useMessages({ conversationId? })` | `{ messages, isLoading, error, sendMessage, stop, clearMessages, conversationId }` |
 | `useConversation({ autoLoad? })` | `{ conversations, currentConversation, isLoading, error, selectConversation, startNewConversation, refreshConversations }` |
 | `useChat(options)` | both of the above combined |
 

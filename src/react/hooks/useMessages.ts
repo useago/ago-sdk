@@ -20,6 +20,13 @@ export interface UseMessagesResult {
   error: Error | null;
   /** Send a new message */
   sendMessage: (content: string, files?: File[]) => Promise<AgoMessage | null>;
+  /**
+   * Stop the turn that is generating: closes the stream and tells the backend
+   * to stop. The partial answer stays in the transcript as `CANCELED`. No-op
+   * when nothing is generating. Wire it to a Stop button shown while
+   * {@link isLoading} is true.
+   */
+  stop: () => Promise<void>;
   /** Clear messages */
   clearMessages: () => void;
   /** Current conversation ID */
@@ -172,11 +179,37 @@ export function useMessages({
       setIsLoading(false);
     };
 
+    // The user stopped the turn. `message:complete` has usually already finalized
+    // the bubble as CANCELED; this covers what it can't — a stop that landed
+    // before the backend named the message, and a turn stopped while it was
+    // paused on a client function (no stream is open then, so no completion
+    // event follows). An empty bubble is dropped rather than left blank.
+    const handleMessageStopped = () => {
+      setMessages((prev) => {
+        let streamingIndex = -1;
+        for (let i = prev.length - 1; i >= 0; i--) {
+          if (prev[i].role === "assistant" && isStreamingStatus(prev[i].status)) {
+            streamingIndex = i;
+            break;
+          }
+        }
+        if (streamingIndex < 0) return prev;
+        if (!prev[streamingIndex].content) {
+          return prev.filter((_, i) => i !== streamingIndex);
+        }
+        return prev.map((m, i) =>
+          i === streamingIndex ? { ...m, status: "CANCELED" as const } : m
+        );
+      });
+      setIsLoading(false);
+    };
+
     client.on("message:start", handleMessageStart);
     client.on("message:chunk", handleMessageChunk);
     client.on("message:answer-complete", handleAnswerComplete);
     client.on("message:complete", handleMessageComplete);
     client.on("message:error", handleMessageError);
+    client.on("message:stopped", handleMessageStopped);
 
     return () => {
       client.off("message:start", handleMessageStart);
@@ -184,6 +217,7 @@ export function useMessages({
       client.off("message:answer-complete", handleAnswerComplete);
       client.off("message:complete", handleMessageComplete);
       client.off("message:error", handleMessageError);
+      client.off("message:stopped", handleMessageStopped);
     };
   }, [client, conversationId]);
 
@@ -268,6 +302,10 @@ export function useMessages({
     [client, conversationId]
   );
 
+  const stop = useCallback(async () => {
+    await client.stop();
+  }, [client]);
+
   const clearMessages = useCallback(() => {
     setMessages([]);
     setConversationId(undefined);
@@ -279,6 +317,7 @@ export function useMessages({
     isLoading,
     error,
     sendMessage,
+    stop,
     clearMessages,
     conversationId,
   };

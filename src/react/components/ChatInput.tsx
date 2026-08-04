@@ -2,6 +2,12 @@ import React, { useCallback, useRef, useState } from "react";
 
 export interface ChatInputProps {
   onSend: (message: string, files?: File[]) => void;
+  /**
+   * Stop the turn being generated. When provided, the send button becomes an
+   * enabled Stop button for as long as `disabled` is true (i.e. while the agent
+   * is answering).
+   */
+  onStop?: () => void;
   disabled?: boolean;
   placeholder?: string;
   allowFiles?: boolean;
@@ -13,6 +19,7 @@ export interface ChatInputProps {
  */
 export const ChatInput: React.FC<ChatInputProps> = ({
   onSend,
+  onStop,
   disabled = false,
   placeholder = "Type a message...",
   allowFiles = false,
@@ -217,23 +224,47 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           }}
         />
 
-        <button
-          type="submit"
-          disabled={disabled || !canSend}
-          style={{
-            padding: "10px 18px",
-            border: "none",
-            borderRadius: "20px",
-            backgroundColor: disabled || !canSend ? "#b5bfc8" : "#03182f",
-            color: "#fff",
-            cursor: disabled || !canSend ? "not-allowed" : "pointer",
-            fontWeight: 500,
-            fontSize: "16px",
-            transition: "background-color 0.15s",
-          }}
-        >
-          Send
-        </button>
+        {/* While the agent answers, the same slot becomes Stop — it has to stay
+            enabled, which is why it's a separate button rather than more
+            ternaries on the send one. */}
+        {disabled && onStop ? (
+          <button
+            type="button"
+            onClick={onStop}
+            aria-label="Stop generating"
+            style={{
+              padding: "10px 18px",
+              border: "none",
+              borderRadius: "20px",
+              backgroundColor: "#03182f",
+              color: "#fff",
+              cursor: "pointer",
+              fontWeight: 500,
+              fontSize: "16px",
+              transition: "background-color 0.15s",
+            }}
+          >
+            Stop
+          </button>
+        ) : (
+          <button
+            type="submit"
+            disabled={disabled || !canSend}
+            style={{
+              padding: "10px 18px",
+              border: "none",
+              borderRadius: "20px",
+              backgroundColor: disabled || !canSend ? "#b5bfc8" : "#03182f",
+              color: "#fff",
+              cursor: disabled || !canSend ? "not-allowed" : "pointer",
+              fontWeight: 500,
+              fontSize: "16px",
+              transition: "background-color 0.15s",
+            }}
+          >
+            Send
+          </button>
+        )}
       </div>
     </form>
   );
