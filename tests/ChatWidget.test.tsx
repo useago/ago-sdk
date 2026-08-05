@@ -10,11 +10,6 @@ import type { AgoMessage } from "../src/client/types";
 // React's act() requires this flag outside of @testing-library.
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-// jsdom does not implement scrollIntoView, which ChatWidget calls on mount.
-if (!Element.prototype.scrollIntoView) {
-  Element.prototype.scrollIntoView = () => {};
-}
-
 const orderForm: CreateFormCollectorOptions = {
   name: "order",
   description: "The order the user wants to place.",
@@ -130,6 +125,61 @@ function setTextareaValue(textarea: HTMLTextAreaElement, value: string) {
   setter.call(textarea, value);
   textarea.dispatchEvent(new Event("input", { bubbles: true }));
 }
+
+describe("ChatWidget message scrolling", () => {
+  it("scrolls only the message pane when a message is sent", async () => {
+    const previousScrollIntoView = Element.prototype.scrollIntoView;
+    const pageScrollSpy = vi.fn();
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: pageScrollSpy,
+    });
+
+    const { client } = createDrivableClient();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    try {
+      await act(async () => {
+        root.render(<ChatWidget client={client} />);
+      });
+
+      const messages = container.querySelector<HTMLElement>(
+        ".ago-chat-widget__messages",
+      )!;
+      Object.defineProperty(messages, "scrollHeight", {
+        configurable: true,
+        value: 420,
+      });
+
+      await act(async () => {
+        setTextareaValue(container.querySelector("textarea")!, "Bonjour");
+      });
+      await act(async () => {
+        container.querySelector("form")!.dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true }),
+        );
+      });
+
+      expect(messages.scrollTop).toBe(420);
+      expect(pageScrollSpy).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+      if (previousScrollIntoView) {
+        Object.defineProperty(Element.prototype, "scrollIntoView", {
+          configurable: true,
+          value: previousScrollIntoView,
+        });
+      } else {
+        delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+      }
+    }
+  });
+});
 
 describe("ChatWidget input blocking during a turn", () => {
   it("blocks while the answer streams, re-enables once the answer is done, then shows chips", async () => {

@@ -78,7 +78,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
   onMessageSent,
   onMessageReceived,
 }) => {
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const contextClient = useOptionalAgoClient();
   const resolvedClient = client ?? contextClient;
   const { messages, isLoading, error, sendMessage, stop } = useMessages({
@@ -128,9 +128,14 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedClient, formsKey]);
 
-  // Auto-scroll to bottom when new messages arrive
+  // Auto-scroll inside the message pane when messages arrive. Using
+  // scrollIntoView on a bottom sentinel also scrolls ancestor containers (and
+  // often the whole page when the widget is sticky), which makes sending a
+  // message unexpectedly move the surrounding application.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const messagesContainer = messagesContainerRef.current;
+    if (!messagesContainer) return;
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
   }, [messages]);
 
   // Callback when message is received
@@ -212,6 +217,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
 
       {/* Messages */}
       <div
+        ref={messagesContainerRef}
         className="ago-chat-widget__messages"
         // Announce streamed replies to screen readers as they arrive, without
         // stealing focus.
@@ -267,7 +273,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
           </div>
         )}
 
-        <div ref={messagesEndRef} />
+        <div />
       </div>
 
       {/* Input */}
