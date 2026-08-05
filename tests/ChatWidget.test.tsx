@@ -179,6 +179,52 @@ describe("ChatWidget message scrolling", () => {
       }
     }
   });
+
+  it("preserves the reader's position while they review earlier messages", async () => {
+    const { client, emit } = createDrivableClient();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<ChatWidget client={client} />);
+    });
+
+    const messages = container.querySelector<HTMLElement>(
+      ".ago-chat-widget__messages",
+    )!;
+    Object.defineProperties(messages, {
+      scrollHeight: { configurable: true, value: 600 },
+      clientHeight: { configurable: true, value: 200 },
+    });
+
+    await act(async () => {
+      setTextareaValue(container.querySelector("textarea")!, "Bonjour");
+      container.querySelector("form")!.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true }),
+      );
+    });
+
+    messages.scrollTop = 100;
+    await act(async () => {
+      messages.dispatchEvent(new Event("scroll", { bubbles: true }));
+      emit("message:answer-complete", {
+        id: "m1",
+        conversationId: "c1",
+        content: "Réponse en cours",
+        role: "assistant",
+        status: "DONE",
+        createdAt: new Date(),
+      } satisfies AgoMessage);
+    });
+
+    expect(messages.scrollTop).toBe(100);
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
 });
 
 describe("ChatWidget input blocking during a turn", () => {

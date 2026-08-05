@@ -79,6 +79,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
   onMessageReceived,
 }) => {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const shouldAutoScrollRef = useRef(true);
   const contextClient = useOptionalAgoClient();
   const resolvedClient = client ?? contextClient;
   const { messages, isLoading, error, sendMessage, stop } = useMessages({
@@ -128,13 +129,14 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedClient, formsKey]);
 
-  // Auto-scroll inside the message pane when messages arrive. Using
+  // Auto-scroll inside the message pane when messages arrive, unless the
+  // reader intentionally moved up to revisit earlier messages. Using
   // scrollIntoView on a bottom sentinel also scrolls ancestor containers (and
   // often the whole page when the widget is sticky), which makes sending a
   // message unexpectedly move the surrounding application.
   useEffect(() => {
     const messagesContainer = messagesContainerRef.current;
-    if (!messagesContainer) return;
+    if (!messagesContainer || !shouldAutoScrollRef.current) return;
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
   }, [messages]);
 
@@ -152,6 +154,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
   }, [messages, onMessageReceived]);
 
   const handleSend = async (content: string, files?: File[]) => {
+    shouldAutoScrollRef.current = true;
     onMessageSent?.(content);
     await sendMessage(content, files);
   };
@@ -219,6 +222,11 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
       <div
         ref={messagesContainerRef}
         className="ago-chat-widget__messages"
+        onScroll={(event) => {
+          const pane = event.currentTarget;
+          shouldAutoScrollRef.current =
+            pane.scrollHeight - pane.scrollTop - pane.clientHeight <= 48;
+        }}
         // Announce streamed replies to screen readers as they arrive, without
         // stealing focus.
         role="log"

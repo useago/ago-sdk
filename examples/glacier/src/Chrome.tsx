@@ -30,7 +30,7 @@ export function AnnounceBar() {
   );
 }
 
-export function BoutiqueHeader({ cartCount, grandTotal }: { cartCount: number; grandTotal: number }) {
+export function BoutiqueHeader({ orderCount, grandTotal }: { orderCount: number; grandTotal: number }) {
   const { pathname } = useLocation();
   const isActive = (to: string) => (to === '/' ? pathname === '/' : pathname.startsWith(to));
 
@@ -114,7 +114,7 @@ export function BoutiqueHeader({ cartCount, grandTotal }: { cartCount: number; g
             color: 'var(--text-muted)',
           }}
         >
-          Panier · {cartCount} — {grandTotal.toFixed(2).replace('.', ',')} €
+          Commande · {orderCount} — {grandTotal.toFixed(2).replace('.', ',')} €
         </span>
         <ButtonLink to="/parfums" variant="accent" size="sm">
           Commander

@@ -69,7 +69,7 @@ export function SectionHeading({
           {eyebrow}
         </Eyebrow>
       )}
-      <h2
+      <h1
         style={{
           fontFamily: 'var(--font-display)',
           fontWeight: 500,
@@ -81,7 +81,7 @@ export function SectionHeading({
         }}
       >
         {title}
-      </h2>
+      </h1>
       {ornament && (
         <div
           style={{

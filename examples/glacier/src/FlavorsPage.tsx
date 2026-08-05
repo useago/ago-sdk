@@ -24,7 +24,7 @@ const FILTER_ALLERGENS: Record<Exclude<DietaryFilter, 'all'>, Allergen[]> = {
 
 const FILTER_LABELS: Record<DietaryFilter, string> = {
   all: 'Tous',
-  'sans-lactose': 'Sans lactose',
+  'sans-lactose': 'Sans lait (recette)',
   'sans-fruits-a-coque': 'Sans fruits à coque',
   'sans-gluten': 'Sans gluten',
 };

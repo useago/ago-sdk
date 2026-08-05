@@ -173,6 +173,7 @@ export default function App() {
   const currentPrice = computePrice(current);
   const cartTotal = computeCartTotal(cart);
   const grandTotal = Math.round((cartTotal + currentPrice) * 100) / 100;
+  const orderCount = cart.length + (current.scoops.length > 0 ? 1 : 0);
 
   // Scroll the boutique back to the top when the agent (or the reader) changes
   // page — the header is sticky, the content is not.
@@ -204,7 +205,7 @@ export default function App() {
   return (
     <div className="gl-shell">
       <AnnounceBar />
-      <BoutiqueHeader cartCount={cart.length} grandTotal={grandTotal} />
+      <BoutiqueHeader orderCount={orderCount} grandTotal={grandTotal} />
 
       <main className="gl-main">
         <aside className="gl-chat" aria-label="Chat avec le maître glacier">
@@ -228,7 +229,7 @@ export default function App() {
           </div>
           <div className="gl-chat-footnote">
             <span aria-hidden>✦</span>
-            Allergènes et origines vérifiés à chaque composition
+            Fiches allergènes et origines accessibles à tout moment
           </div>
         </aside>
 

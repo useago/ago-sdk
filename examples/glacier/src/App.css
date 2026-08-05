@@ -153,8 +153,8 @@ button { font-family: var(--font-body); }
 .gl-chat {
   position: sticky;
   top: 96px;
-  height: calc(100vh - 120px);
-  min-height: 640px;
+  height: calc(100dvh - 120px);
+  min-height: 0;
   background: var(--ink-900);
   color: var(--text-inverse);
   border: 1px solid rgba(181, 140, 78, 0.5);
@@ -707,8 +707,8 @@ button { font-family: var(--font-body); }
   position: sticky;
   top: 96px;
   display: flex;
-  min-height: 600px;
-  max-height: calc(100vh - 120px);
+  min-height: min(600px, calc(100dvh - 120px));
+  max-height: calc(100dvh - 120px);
   flex-direction: column;
   overflow: hidden;
   background: var(--surface-card);
@@ -1518,10 +1518,7 @@ button { font-family: var(--font-body); }
     position: static;
     height: auto;
     min-height: 540px;
-    order: 2;
   }
-
-  .gl-stage { order: 1; }
 }
 
 @media (max-width: 720px) {

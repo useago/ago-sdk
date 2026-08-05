@@ -132,7 +132,7 @@ export const FLAVOR_IDS = Object.keys(FLAVORS);
 // allergen list alone. Derived, never stored, so it can't drift from FLAVORS.
 export function dietLabel(allergens: Allergen[]): string | undefined {
   if (allergens.includes('lait') || allergens.includes('œufs')) return undefined;
-  return 'sans lactose';
+  return 'sans lait dans la recette';
 }
 
 export interface Topping {
