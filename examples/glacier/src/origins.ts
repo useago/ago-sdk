@@ -5,6 +5,8 @@ export interface Origin {
   country: string;
   emoji: string;
   accent: string;
+  imageSrc: string;
+  imageAlt: string;
   tagline: string;
   story: string;
   notes: string[];
@@ -20,6 +22,8 @@ export const ORIGINS: Record<string, Origin> = {
     country: 'Polynésie française',
     emoji: '🌺',
     accent: '#f5d28a',
+    imageSrc: '/images/origins/vanille-tahiti.webp',
+    imageAlt: "Gousses de vanille de Tahiti et fleur de vanillier sur un tressage de pandanus",
     tagline: 'Vanilla tahitensis — la vanille la plus parfumée du monde.',
     story:
       "Cultivée sur les atolls de Raiatea, Taha'a et Huahine, la vanille de Tahiti est une espèce à part (Vanilla tahitensis), distincte de la vanille bourbon. Ses gousses, plus charnues et plus courtes, libèrent un parfum floral unique — notes d'anis, de prune et de fleur blanche — qui ne supporte pas la cuisson agressive. Nous la laissons infuser à froid 24h dans le lait avant turbinage.",
@@ -37,6 +41,8 @@ export const ORIGINS: Record<string, Origin> = {
     country: 'Sicile, Italie',
     emoji: '🌋',
     accent: '#bdd49a',
+    imageSrc: '/images/origins/pistache-bronte.webp',
+    imageAlt: "Pistaches de Bronte sur la roche volcanique, face aux pentes de l'Etna",
     tagline: 'Le pistacchio verde di Bronte DOP — l\'or vert sicilien.',
     story:
       "Sur les coulées de lave de l'Etna, à 500m d'altitude, les pistachiers de Bronte ne produisent qu'une année sur deux. Le sol volcanique donne à cette pistache une couleur émeraude intense et une douceur sans amertume. Récoltées à la main fin août, les pistaches sont mondées, légèrement torréfiées, puis broyées en pâte pure — sans colorant ni huile ajoutée.",
@@ -54,6 +60,8 @@ export const ORIGINS: Record<string, Origin> = {
     country: 'Menton, France',
     emoji: '🍋',
     accent: '#fff2a8',
+    imageSrc: '/images/origins/citron-menton.webp',
+    imageAlt: 'Citrons de Menton sur une terrasse de pierre dominant la Méditerranée',
     tagline: 'IGP Citron de Menton — peu acide, intensément parfumé.',
     story:
       "Le citron de Menton, IGP depuis 2015, pousse sur les coteaux qui dominent la Méditerranée. Le microclimat — pas de gel, ensoleillement maximal — donne un fruit à la peau épaisse, riche en huiles essentielles, et au jus moins acide que la moyenne. Nous utilisons le zeste pour parfumer le sorbet, et le jus pressé le matin même. Aucun arôme ajouté.",
@@ -71,6 +79,8 @@ export const ORIGINS: Record<string, Origin> = {
     country: 'Inde',
     emoji: '🥭',
     accent: '#ffc070',
+    imageSrc: '/images/origins/mangue-alphonso.webp',
+    imageAlt: "Mangues Alphonso mûres dans un verger de la côte de Konkan",
     tagline: 'La reine des mangues — saison courte, parfum inégalé.',
     story:
       "La mangue Alphonso (\"Hapus\") ne se cultive que sur une étroite bande côtière du Maharashtra, entre avril et juin. Sa chair, sans fibre, d'un orange profond, concentre des arômes de pêche, d'abricot et de safran. Nous l'achetons en purée pasteurisée à froid, importée par bateau, pour conserver la fraîcheur du fruit cueilli à maturité.",
@@ -88,6 +98,8 @@ export const ORIGINS: Record<string, Origin> = {
     country: 'Italie',
     emoji: '🌰',
     accent: '#c89a6b',
+    imageSrc: '/images/origins/noisette-piemont.webp',
+    imageAlt: 'Noisettes Tonda Gentile récoltées dans les collines des Langhe',
     tagline: 'Tonda Gentile Trilobata IGP — la noisette des grands chocolatiers.',
     story:
       "La Tonda Gentile pousse sur les mêmes collines que le Barolo et le Barbaresco. Ronde, à coque fine, elle est récoltée fin août quand elle tombe naturellement de l'arbre, puis torréfiée doucement à 140°C pendant 25 minutes — ni cru, ni amer. C'est la noisette que Ferrero et les plus grands maîtres chocolatiers utilisent. Nous la concassons à la dernière minute.",
@@ -105,6 +117,8 @@ export const ORIGINS: Record<string, Origin> = {
     country: 'Équateur',
     emoji: '🍫',
     accent: '#5b3a29',
+    imageSrc: '/images/origins/cacao-equateur.webp',
+    imageAlt: "Cabosse de cacao Nacional ouverte sur une feuille de bananier en Équateur",
     tagline: 'Cacao Nacional Arriba — le grand cru équatorien.',
     story:
       "Le cacao Nacional, originaire de la haute Amazonie équatorienne, est l'une des plus anciennes variétés cultivées au monde. Classé \"fine flavour\" par l'ICCO, il développe des notes florales rares — jasmin, agrumes, fruits rouges. Nous utilisons un chocolat noir 70% conché 72 heures à partir de fèves fermentées sous feuilles de bananier dans la vallée d'Esmeraldas.",
@@ -122,6 +136,8 @@ export const ORIGINS: Record<string, Origin> = {
     country: 'France',
     emoji: '🍓',
     accent: '#f4a8b6',
+    imageSrc: '/images/origins/fraise-gariguette.webp',
+    imageAlt: 'Gariguettes fraîchement cueillies dans un panier en osier dans le Sud-Ouest',
     tagline: 'Gariguette — la fraise française par excellence, mars à juin.',
     story:
       "Variété française obtenue en 1976 à l'INRAE d'Avignon, la Gariguette est reconnaissable à sa forme allongée et conique, sa couleur rouge orangé brillante et son parfum prononcé. Récoltée à pleine maturité — elle ne mûrit plus après cueillette — elle ne se conserve que 48h. Nous la travaillons fraîche en pleine saison, et passons à la Mara des Bois en juillet-août.",
@@ -139,6 +155,8 @@ export const ORIGINS: Record<string, Origin> = {
     country: 'Éthiopie',
     emoji: '☕',
     accent: '#7a4a2a',
+    imageSrc: '/images/origins/cafe-ethiopie.webp',
+    imageAlt: 'Cerises de café et grains de Sidamo sur une claie dans les hauts plateaux éthiopiens',
     tagline: 'Sidamo lavé — berceau du café arabica.',
     story:
       "L'Éthiopie est le berceau historique de l'arabica, et la région du Sidamo, entre 1800 et 2200m d'altitude, en produit l'une des expressions les plus aromatiques. Notre lot est un Grade 1 lavé, aux notes de bergamote, jasmin et myrtille. Nous l'infusons en espresso double, refroidi rapidement, dans une base lactée — pour conserver l'acidité vive du grain.",
@@ -152,3 +170,11 @@ export const ORIGINS: Record<string, Origin> = {
 };
 
 export const ORIGIN_IDS = Object.keys(ORIGINS);
+
+// Reverse of `relatedFlavorId`, so a parfum card can link through to the
+// terroir it comes from without duplicating the mapping.
+export const ORIGIN_BY_FLAVOR: Record<string, Origin> = Object.fromEntries(
+  Object.values(ORIGINS)
+    .filter((o) => o.relatedFlavorId)
+    .map((o) => [o.relatedFlavorId as string, o]),
+);

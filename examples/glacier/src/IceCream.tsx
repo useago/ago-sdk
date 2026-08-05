@@ -1,4 +1,6 @@
+import type { CSSProperties } from 'react';
 import { CONES, ConeType, FLAVORS, TOPPINGS } from './flavors';
+import { GoldFrame, Pill } from './ui';
 
 export interface IceCreamState {
   cone: ConeType;
@@ -12,14 +14,41 @@ interface Props {
 
 export default function IceCream({ state }: Props) {
   return (
-    <div className="ice-cream-stage">
-      <IceCreamSvg state={state} showPlaceholder />
-      <IceCreamMeta state={state} />
-    </div>
+    <GoldFrame>
+      <div
+        style={{
+          background: 'radial-gradient(90% 120% at 50% 0%, var(--vanille-soft) 0%, var(--ivory) 62%)',
+          border: '1px solid var(--border-hairline)',
+          borderRadius: 'var(--r-lg)',
+          padding: '40px 32px 32px',
+          minHeight: '460px',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '20px',
+        }}
+      >
+        <IceCreamSvg
+          state={state}
+          showPlaceholder
+          style={{ width: '100%', maxWidth: '340px', flex: 1, filter: 'drop-shadow(0 12px 24px rgba(74,46,24,0.16))' }}
+        />
+        <IceCreamMeta state={state} />
+      </div>
+    </GoldFrame>
   );
 }
 
-export function IceCreamSvg({ state, showPlaceholder = false }: { state: IceCreamState; showPlaceholder?: boolean }) {
+export function IceCreamSvg({
+  state,
+  showPlaceholder = false,
+  style,
+}: {
+  state: IceCreamState;
+  showPlaceholder?: boolean;
+  style?: CSSProperties;
+}) {
   const { cone, scoops, toppings } = state;
 
   const cx = 200;
@@ -70,11 +99,7 @@ export function IceCreamSvg({ state, showPlaceholder = false }: { state: IceCrea
   const topY = baseY - (scoops.length - 1) * (scoopRadius * 2 - scoopOverlap) - scoopRadius;
 
   return (
-    <svg
-      viewBox="0 0 400 520"
-      className="ice-cream-svg"
-      xmlns="http://www.w3.org/2000/svg"
-    >
+    <svg viewBox="0 0 400 520" style={style} xmlns="http://www.w3.org/2000/svg">
       <ellipse cx={cx} cy={490} rx={110} ry={14} fill="#00000015" />
 
       {cone === 'cone' && <Cone />}
@@ -90,13 +115,14 @@ export function IceCreamSvg({ state, showPlaceholder = false }: { state: IceCrea
       {showPlaceholder && scoops.length === 0 && (
         <text
           x={cx}
-          y={180}
+          y={175}
           textAnchor="middle"
-          fontSize="18"
-          fill="#94a3b8"
-          fontFamily="IBM Plex Sans"
+          fontSize="12"
+          letterSpacing="2"
+          fill="var(--text-faint)"
+          fontFamily="var(--font-body)"
         >
-          Demandez à AGO de composer votre glace…
+          DEMANDEZ VOTRE GLACE AU COMPTOIR
         </text>
       )}
     </svg>
@@ -106,24 +132,21 @@ export function IceCreamSvg({ state, showPlaceholder = false }: { state: IceCrea
 function IceCreamMeta({ state }: { state: IceCreamState }) {
   const { cone, scoops, toppings } = state;
   return (
-    <div className="ice-cream-meta">
-      <Pill label={CONES[cone].name} tone="neutral" />
+    <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '8px' }}>
+      <Pill tone="default" caps>
+        {CONES[cone].name}
+      </Pill>
       {scoops.map((id, i) => (
-        <Pill key={i} label={FLAVORS[id]?.name ?? id} tone="flavor" color={FLAVORS[id]?.color} />
+        <Pill key={i} color={FLAVORS[id]?.color} speckle={FLAVORS[id]?.speckle}>
+          {FLAVORS[id]?.name ?? id}
+        </Pill>
       ))}
       {toppings.map((id, i) => (
-        <Pill key={`t-${i}`} label={TOPPINGS[id]?.name ?? id} tone="topping" />
+        <Pill key={`t-${i}`} tone="gold">
+          {TOPPINGS[id]?.name ?? id}
+        </Pill>
       ))}
     </div>
-  );
-}
-
-function Pill({ label, tone, color }: { label: string; tone: 'neutral' | 'flavor' | 'topping'; color?: string }) {
-  return (
-    <span className={`pill pill--${tone}`}>
-      {color && <span className="pill-dot" style={{ backgroundColor: color }} />}
-      {label}
-    </span>
   );
 }
 
@@ -133,12 +156,12 @@ function Cone() {
       {/* Triangle cone */}
       <polygon
         points="148,260 252,260 200,460"
-        fill="#d99a55"
-        stroke="#7a4d20"
+        fill="var(--caramel)"
+        stroke="var(--cafe)"
         strokeWidth={1.5}
       />
       {/* Waffle pattern */}
-      <g stroke="#7a4d20" strokeWidth={1} opacity={0.7}>
+      <g stroke="var(--cafe)" strokeWidth={1} opacity={0.7}>
         <line x1="160" y1="280" x2="240" y2="280" />
         <line x1="166" y1="305" x2="234" y2="305" />
         <line x1="172" y1="330" x2="228" y2="330" />
@@ -150,7 +173,7 @@ function Cone() {
         <line x1="230" y1="270" x2="205" y2="450" />
       </g>
       {/* Top rim */}
-      <ellipse cx="200" cy="260" rx="52" ry="9" fill="#c98648" stroke="#7a4d20" strokeWidth="1.5" />
+      <ellipse cx="200" cy="260" rx="52" ry="9" fill="var(--or-700)" stroke="var(--cafe)" strokeWidth="1.5" />
     </g>
   );
 }
@@ -160,11 +183,11 @@ function WaffleCup() {
     <g>
       <path
         d="M 140 270 L 260 270 L 248 440 Q 200 460 152 440 Z"
-        fill="#d99a55"
-        stroke="#7a4d20"
+        fill="var(--caramel)"
+        stroke="var(--cafe)"
         strokeWidth={1.5}
       />
-      <g stroke="#7a4d20" strokeWidth={0.8} opacity={0.7}>
+      <g stroke="var(--cafe)" strokeWidth={0.8} opacity={0.7}>
         <line x1="150" y1="300" x2="250" y2="300" />
         <line x1="152" y1="330" x2="248" y2="330" />
         <line x1="154" y1="360" x2="246" y2="360" />
@@ -173,7 +196,7 @@ function WaffleCup() {
         <line x1="200" y1="280" x2="200" y2="450" />
         <line x1="230" y1="280" x2="240" y2="440" />
       </g>
-      <ellipse cx="200" cy="270" rx="60" ry="10" fill="#c98648" stroke="#7a4d20" strokeWidth="1.5" />
+      <ellipse cx="200" cy="270" rx="60" ry="10" fill="var(--or-700)" stroke="var(--cafe)" strokeWidth="1.5" />
     </g>
   );
 }
@@ -183,19 +206,19 @@ function Cup() {
     <g>
       <path
         d="M 130 280 L 270 280 L 256 450 Q 200 470 144 450 Z"
-        fill="#fafafa"
-        stroke="#94a3b8"
+        fill="var(--shell)"
+        stroke="var(--border-strong)"
         strokeWidth={1.5}
       />
-      <ellipse cx="200" cy="280" rx="70" ry="11" fill="#ffffff" stroke="#94a3b8" strokeWidth="1.5" />
+      <ellipse cx="200" cy="280" rx="70" ry="11" fill="var(--shell)" stroke="var(--border-strong)" strokeWidth="1.5" />
       <text
         x="200"
         y="380"
         textAnchor="middle"
         fontSize="18"
-        fontFamily="Fraunces"
+        fontFamily="var(--font-display)"
         fontWeight="600"
-        fill="#03182f"
+        fill="var(--text-strong)"
       >
         glacier
       </text>

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import {
-  AgoNudge,
   ChatWidget,
   useAgoAutoContinueAfterNavigation,
   useAgoClient,
@@ -11,21 +10,23 @@ import {
   type AgoStateControl,
 } from '@useago/sdk/react';
 import { initDevPanel } from '@useago/sdk/devtools';
-import IceCream, { IceCreamSvg, IceCreamState } from './IceCream';
+import type { IceCreamState } from './IceCream';
 import FlavorsPage from './FlavorsPage';
 import {
   buildIceCreamControls,
   buildIceCreamFunctions,
-  CartItem,
   computeCartTotal,
   computePrice,
-  OrderStore,
   lookupWikipediaArticle,
+  type CartItem,
+  type OrderStore,
 } from './functions';
-import { CONES, FLAVORS, TOPPINGS } from './flavors';
 import { IngredientsContent } from './IngredientsPage';
 import { OriginsIndex, OriginDetail } from './OriginsPage';
 import { ORIGINS } from './origins';
+import { AnnounceBar, BoutiqueFooter, BoutiqueHeader } from './Chrome';
+import { ShopExperience } from './ShopExperience';
+import { ButtonLink, SectionHeading } from './ui';
 
 const INITIAL_CURRENT: IceCreamState = {
   cone: 'cone',
@@ -173,38 +174,78 @@ export default function App() {
   const cartTotal = computeCartTotal(cart);
   const grandTotal = Math.round((cartTotal + currentPrice) * 100) / 100;
 
-  const isShop = location.pathname === ROUTES.shop.path;
+  // Scroll the boutique back to the top when the agent (or the reader) changes
+  // page — the header is sticky, the content is not.
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, [location.pathname]);
+
+  const focusChat = () => {
+    const input = document.querySelector<HTMLTextAreaElement>('.gl-chat .ago-chat-input textarea');
+    input?.focus();
+    if (window.innerWidth <= 1180) input?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+
+  const addCurrentToCart = () => {
+    void fns.addToCart.handler({});
+  };
+
+  const removeCartItem = (id: string) => {
+    void fns.updateCart.handler({ action: 'remove', cartItemId: id });
+  };
+
+  const clearCart = () => {
+    void fns.updateCart.handler({ action: 'clear' });
+  };
 
   return (
-    <div className="glacier-shell">
-      <AppHeader isShop={isShop} cart={cart} current={current} grandTotal={grandTotal} />
+    <div className="gl-shell">
+      <AnnounceBar />
+      <BoutiqueHeader cartCount={cart.length} grandTotal={grandTotal} />
 
-      <main className="glacier-main">
-        <aside className="glacier-chat">
-          <ChatWidget
-            title="Glacière AGO"
-            welcomeMessage="Bonjour ! Je suis votre glacier. Quelle glace vous tente aujourd'hui ? Je peux composer plusieurs glaces, les ajouter au panier, ou vous renseigner sur les ingrédients, les allergènes et l'origine de nos produits — dites-moi si vous avez une allergie ou si vous voulez en savoir plus sur la vanille de Tahiti."
-            placeholder="Ex. : 2 boules pistache et chocolat avec chantilly…"
-            height="100%"
-            allowFiles={false}
-          />
+      <main className="gl-main">
+        <aside className="gl-chat" aria-label="Chat avec le maître glacier">
+          <div className="gl-chat-identity">
+            <span className="gl-chat-seal" aria-hidden>G</span>
+            <div>
+              <span className="gl-chat-presence"><i /> Maître glacier disponible</span>
+              <h2>Le comptoir privé</h2>
+              <p>Une envie, une allergie, un souvenir : décrivez-le simplement.</p>
+            </div>
+          </div>
+          <div className="gl-chat-widget-shell">
+            <ChatWidget
+              title="Composer avec le glacier"
+              welcomeMessage="Bonjour. Dites-moi ce qui vous ferait plaisir — je compose la glace et votre ticket se met à jour à droite."
+              placeholder="Deux boules pistache et chocolat…"
+              height="100%"
+              allowFiles={false}
+              allowStop
+            />
+          </div>
+          <div className="gl-chat-footnote">
+            <span aria-hidden>✦</span>
+            Allergènes et origines vérifiés à chaque composition
+          </div>
         </aside>
 
-        <section className="glacier-stage">
+        <section className="gl-stage">
           <Routes>
             <Route
               path={ROUTES.shop.path}
               element={
                 <>
                   <ShopStateBridge controls={controls} />
-                  <CartStrip cart={cart} />
-                  <IceCream state={current} />
-                  <Recap
+                  <ShopExperience
                     current={current}
                     currentPrice={currentPrice}
                     cart={cart}
                     cartTotal={cartTotal}
                     grandTotal={grandTotal}
+                    onAddCurrent={addCurrentToCart}
+                    onRemoveCartItem={removeCartItem}
+                    onClearCart={clearCart}
+                    onFocusChat={focusChat}
                   />
                 </>
               }
@@ -218,11 +259,7 @@ export default function App() {
         </section>
       </main>
 
-      {/* Proactive nudge (see the `proactive` config in main.tsx): a small
-          dismissable toast near the stage. Accepting runs the nudge's action
-          and/or pre-seeds the chat — the reply streams into the widget on the
-          left, so there is no separate "open chat" step here. */}
-      <AgoNudge openChatLabel="Me faire aider dans le chat" />
+      <BoutiqueFooter />
     </div>
   );
 }
@@ -235,178 +272,12 @@ function ShopStateBridge({ controls }: { controls: AgoStateControl[] }) {
   return null;
 }
 
-function AppHeader({
-  isShop,
-  cart,
-  current,
-  grandTotal,
-}: {
-  isShop: boolean;
-  cart: CartItem[];
-  current: IceCreamState;
-  grandTotal: number;
-}) {
-  if (isShop) {
-    return (
-      <header className="glacier-header">
-        <div className="glacier-brand">
-          <span className="glacier-logo">🍦</span>
-          <div>
-            <h1>La Glacier AGO</h1>
-            <p className="glacier-tagline">Composez vos glaces avec l'assistant — ajoutez-en plusieurs au panier.</p>
-          </div>
-        </div>
-        <div className="glacier-header-right">
-          <Link to={ROUTES.origins.path} className="nav-button">Origines</Link>
-          <Link to={ROUTES.ingredients.path} className="nav-button">Ingrédients & allergènes</Link>
-          <div className="glacier-price">
-            <span className="glacier-price-label">
-              Total {cart.length > 0 ? `(${cart.length} au panier${current.scoops.length > 0 ? ' + en cours' : ''})` : ''}
-            </span>
-            <span className="glacier-price-value">{grandTotal.toFixed(2)} €</span>
-          </div>
-        </div>
-      </header>
-    );
-  }
-
-  return (
-    <header className="glacier-header">
-      <div className="glacier-brand">
-        <span className="glacier-logo">🧾</span>
-        <div>
-          <h1>La Glacier AGO</h1>
-          <p className="glacier-tagline">Explorez nos ingrédients, allergènes et origines.</p>
-        </div>
-      </div>
-      <div className="glacier-header-right">
-        <Link to={ROUTES.ingredients.path} className="nav-button">Ingrédients</Link>
-        <Link to={ROUTES.origins.path} className="nav-button">Origines</Link>
-        <Link to={ROUTES.shop.path} className="nav-button nav-button--primary">← Retour à la boutique</Link>
-      </div>
-    </header>
-  );
-}
-
 function NotFound() {
   return (
-    <div className="origins-main">
-      <section className="origins-intro">
-        <h2>Page introuvable</h2>
-        <p>
-          Cette page n'existe pas. <Link to={ROUTES.shop.path}>Retour à la boutique</Link>.
-        </p>
-      </section>
-    </div>
-  );
-}
-
-function Recap({
-  current,
-  currentPrice,
-  cart,
-  cartTotal,
-  grandTotal,
-}: {
-  current: IceCreamState;
-  currentPrice: number;
-  cart: CartItem[];
-  cartTotal: number;
-  grandTotal: number;
-}) {
-  return (
-    <div className="recap-card">
-      <h2>Votre commande</h2>
-
-      <div className="recap-section">
-        <div className="recap-section-title">
-          <span>Panier</span>
-          <span className="recap-section-meta">
-            {cart.length === 0 ? 'vide' : `${cart.length} glace${cart.length > 1 ? 's' : ''}`}
-          </span>
-        </div>
-        {cart.length === 0 ? (
-          <p className="recap-empty">Aucune glace ajoutée. Composez-en une, puis dites « ajoute au panier ».</p>
-        ) : (
-          <ul className="cart-list">
-            {cart.map((item, i) => (
-              <li key={item.id} className="cart-item">
-                <span className="cart-item-pos">{i + 1}</span>
-                <div className="cart-item-body">
-                  <div className="cart-item-title">
-                    {item.scoops.length > 0
-                      ? item.scoops.map((id) => FLAVORS[id]?.name ?? id).join(' + ')
-                      : '—'}
-                  </div>
-                  <div className="cart-item-sub">
-                    {CONES[item.cone].name}
-                    {item.toppings.length > 0 && ' · ' + item.toppings.map((id) => TOPPINGS[id]?.name ?? id).join(', ')}
-                  </div>
-                </div>
-                <span className="cart-item-price">{computePrice(item).toFixed(2)} €</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      <div className="recap-section">
-        <div className="recap-section-title">
-          <span>En cours de composition</span>
-          <span className="recap-section-meta">{currentPrice.toFixed(2)} €</span>
-        </div>
-        <ul className="recap-list">
-          <li>
-            <span className="recap-label">Contenant</span>
-            <span className="recap-value">{CONES[current.cone].name}</span>
-          </li>
-          <li>
-            <span className="recap-label">Boules ({current.scoops.length})</span>
-            <span className="recap-value">
-              {current.scoops.length === 0
-                ? '—'
-                : current.scoops.map((id) => FLAVORS[id]?.name ?? id).join(', ')}
-            </span>
-          </li>
-          <li>
-            <span className="recap-label">Toppings</span>
-            <span className="recap-value">
-              {current.toppings.length === 0
-                ? '—'
-                : current.toppings.map((id) => TOPPINGS[id]?.name ?? id).join(', ')}
-            </span>
-          </li>
-        </ul>
-      </div>
-
-      <div className="recap-total">
-        <span>Total</span>
-        <span>{grandTotal.toFixed(2)} €</span>
-      </div>
-      {cart.length > 0 && (
-        <div className="recap-subtotal">
-          <span>Panier</span>
-          <span>{cartTotal.toFixed(2)} €</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CartStrip({ cart }: { cart: CartItem[] }) {
-  if (cart.length === 0) return null;
-  return (
-    <div className="cart-strip">
-      <div className="cart-strip-label">Panier ({cart.length})</div>
-      <div className="cart-strip-row">
-        {cart.map((item, i) => (
-          <div key={item.id} className="cart-strip-item" title={`Glace ${i + 1}`}>
-            <div className="cart-strip-svg">
-              <IceCreamSvg state={item} />
-            </div>
-            <div className="cart-strip-num">{i + 1}</div>
-          </div>
-        ))}
+    <div>
+      <SectionHeading eyebrow="Égaré" title="Page introuvable" lede="Cette page n'existe pas." />
+      <div style={{ marginTop: '32px' }}>
+        <ButtonLink to={ROUTES.shop.path} variant="gold">Retour à la boutique</ButtonLink>
       </div>
     </div>
   );
