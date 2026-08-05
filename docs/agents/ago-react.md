@@ -75,10 +75,12 @@ function Support() {
 }
 ```
 
-Common props: `title`, `welcomeMessage`, `placeholder`, `allowFiles`, `height`,
-`logoUrl`, `showAgentName`, `forms`, `onMessageSent`, `onMessageReceived`,
+Common props: `title`, `welcomeMessage`, `placeholder`, `allowFiles`, `allowStop`,
+`height`, `logoUrl`, `showAgentName`, `forms`, `onMessageSent`, `onMessageReceived`,
 `onFollowUpClick`, `className`. When the agent returns follow-up suggestions the
 widget renders them as clickable buttons (clicking sends the reply by default).
+While the agent answers, the send button becomes a **Stop** button that
+interrupts the turn (`allowStop`, default `true`; pass `false` to disable it).
 
 `ChatWidget` is a high-level component. For a custom interface, use `useChat`.
 
@@ -91,14 +93,16 @@ All-in-one state for a custom chat interface (composes `useMessages` +
 import { useChat } from "@useago/sdk/react";
 
 function Chat() {
-  const { messages, sendMessage, isLoading, error } = useChat();
+  const { messages, sendMessage, stop, isLoading, error } = useChat();
 
   return (
     <div>
       {messages.map((m) => (
         <p key={m.id}><b>{m.role}:</b> {m.content}</p>
       ))}
-      <button onClick={() => sendMessage("Hello!")} disabled={isLoading}>Send</button>
+      {isLoading
+        ? <button onClick={() => void stop()}>Stop</button>
+        : <button onClick={() => sendMessage("Hello!")}>Send</button>}
       {error && <p role="alert">{error.message}</p>}
     </div>
   );
@@ -108,6 +112,12 @@ function Chat() {
 `messages` updates token-by-token as the reply streams (the optimistic user
 message is included). `sendMessage(content, files?)` resolves with the final
 message or `null` on error.
+
+`stop()` interrupts the answer being generated: the stream closes and the backend
+is told to stop generating, the partial text stays in `messages` with status
+`CANCELED`, and `isLoading` goes back to `false`. It is a no-op when nothing is
+generating. Building your own input? `<ChatInput onStop={...} disabled={isLoading} />`
+renders the same Stop button.
 
 Show the knowledge sources the agent retrieved via `m.sources` (an `AgoSource[]`,
 each `{ id, title, url? }`):
@@ -259,8 +269,9 @@ useEffect(() => {
 ```
 
 Key events: `message:start`, `message:chunk` (`{ content }` per token),
-`message:complete` (`AgoMessage`), `message:error`, `toolCall:received`,
-`function:invoke`, `function:result`.
+`message:complete` (`AgoMessage`), `message:stopped`
+(`{ conversationId, messageId }`, after the turn was stopped), `message:error`,
+`toolCall:received`, `function:invoke`, `function:result`.
 
 ## Exports cheat-sheet (`@useago/sdk/react`)
 

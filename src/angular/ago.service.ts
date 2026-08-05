@@ -8,6 +8,7 @@ import type {
   AgoClientEvents,
   AgoEventName,
   SendMessageOptions,
+  StopMessageResult,
   SubmitToolCallResult,
 } from "../client/types";
 import type {
@@ -89,6 +90,25 @@ export class AgoService {
   /** Send a message and get a streaming response */
   sendMessage(content: string, options?: SendMessageOptions): Promise<AgoMessage> {
     return this.client.sendMessage(content, options);
+  }
+
+  /**
+   * Stop the turn that is generating: closes the stream and tells the backend to
+   * stop generating. The partial answer is kept and the message ends as
+   * `CANCELED`. No-op when nothing is generating.
+   */
+  stop(): Promise<StopMessageResult | null> {
+    return this.client.stop();
+  }
+
+  /** Ask the backend to stop a specific in-flight turn (e.g. one found after a reload). */
+  stopMessage(messageId: string): Promise<StopMessageResult> {
+    return this.client.stopMessage(messageId);
+  }
+
+  /** Whether a turn is generating right now. */
+  isGenerating(): boolean {
+    return this.client.isGenerating();
   }
 
   /** Get the most recent conversations (first page). */

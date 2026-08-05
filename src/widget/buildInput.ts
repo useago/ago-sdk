@@ -21,6 +21,11 @@ interface BuildInputArgs {
   placeholder: string;
   allowFiles: boolean;
   onSend: (content: string, files?: File[]) => void;
+  /**
+   * Stop the turn being generated. When provided, the send button becomes an
+   * enabled Stop button while the agent is answering instead of a dead spinner.
+   */
+  onStop?: () => void;
 }
 
 export function buildInput(args: BuildInputArgs): {
@@ -96,6 +101,9 @@ export function buildInput(args: BuildInputArgs): {
     'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
     'aria-hidden="true" style="animation: ago-spin 0.8s linear infinite">' +
     '<path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>';
+  const STOP_ICON =
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" ' +
+    'aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>';
 
   const sendBtn = document.createElement("button");
   sendBtn.type = "submit";
@@ -116,17 +124,32 @@ export function buildInput(args: BuildInputArgs): {
     cursor: "pointer",
   });
 
-  // The send button is disabled while the agent is answering (spinner shown) and
-  // when there's nothing to send (no text and no files), matching `submit()`.
+  // While the agent is answering the same slot becomes Stop (when the caller
+  // wired `onStop`) — enabled, since stopping is the only thing left to do.
+  // Without `onStop` it stays a disabled spinner, as before. Otherwise the send
+  // button is disabled when there's nothing to send, matching `submit()`.
   let answering = false;
+  const canStop = (): boolean => answering && !!args.onStop;
   const refreshSendBtn = (): void => {
     const hasContent = textarea.value.trim() !== "" || files.length > 0;
-    const disabled = answering || !hasContent;
+    const stopping = canStop();
+    const disabled = !stopping && (answering || !hasContent);
     sendBtn.disabled = disabled;
-    sendBtn.innerHTML = answering ? SPINNER_ICON : ARROW_ICON;
+    // `type` drives the click: a submit button would send instead of stopping.
+    sendBtn.type = stopping ? "button" : "submit";
+    sendBtn.setAttribute("aria-label", stopping ? "Stop generating" : "Send");
+    sendBtn.innerHTML = stopping
+      ? STOP_ICON
+      : answering
+        ? SPINNER_ICON
+        : ARROW_ICON;
     sendBtn.style.opacity = disabled && !answering ? "0.5" : "1";
     sendBtn.style.cursor = disabled ? "default" : "pointer";
   };
+
+  sendBtn.addEventListener("click", () => {
+    if (canStop()) args.onStop?.();
+  });
 
   let fileInput: HTMLInputElement | null = null;
   let attachBtn: HTMLButtonElement | null = null;

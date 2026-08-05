@@ -231,6 +231,7 @@ act on your app**. Everything else builds on those two ideas.
 | Build a fully custom UI | `useChat` / `useMessages` | [React](../frameworks/react.md#3-custom-ui-with-usechat) |
 | List & resume past conversations | `getConversations` / `conversationId` | [Core](core.md#3-conversations) |
 | Attach files | `sendMessage(text, { files })` | [Core](core.md#file-attachments) |
+| Let the user stop a long answer | `client.stop()` / `stop` from `useChat` | [Core](core.md#stop-the-answer) |
 
 ### Let the agent act on your app
 

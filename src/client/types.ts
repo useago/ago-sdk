@@ -182,6 +182,21 @@ export interface SubmitToolCallResult {
 }
 
 /**
+ * Response of `POST /messages/{id}/stop` (see `AgoClient.stopMessage`).
+ *
+ * - `"stopping"` — the request was accepted; the turn unwinds at its next safe
+ *   point and finalizes as `CANCELED`, keeping the text produced so far.
+ * - `"not_running"` — the turn had already finished. Harmless.
+ * - `"not_supported"` — a background agent run, which cannot be stopped once
+ *   started.
+ */
+export interface StopMessageResult {
+  status: "stopping" | "not_running" | "not_supported";
+  /** The message's status when the stop was requested. */
+  messageStatus?: MessageStatus;
+}
+
+/**
  * Agent information
  */
 export interface AgoAgent {
@@ -395,6 +410,18 @@ export interface AgoClientEvents {
    * message data at all (e.g. a proxy stripped the SSE stream).
    */
   "message:empty": {
+    conversationId: string;
+    messageId: string;
+  };
+  /**
+   * The user stopped the turn (`client.stop()`): the stream was closed and the
+   * backend was told to stop generating. Always fires, so this is the event to
+   * finalize a UI on. When there was an answer to keep, a `message:complete`
+   * carrying it with status `CANCELED` fires first; there is none when the stop
+   * landed before the backend named the message (`messageId` is then an empty
+   * string) or when the stopped turn was paused on client functions.
+   */
+  "message:stopped": {
     conversationId: string;
     messageId: string;
   };

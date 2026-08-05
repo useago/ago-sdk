@@ -22,6 +22,8 @@ export interface UseChatResult {
   error: Error | null;
   /** Send a message */
   sendMessage: (content: string, files?: File[]) => Promise<AgoMessage | null>;
+  /** Stop the turn that is generating (the "Stop" button). No-op when idle. */
+  stop: () => Promise<void>;
   /** Clear current messages */
   clearMessages: () => void;
   /** Current conversation ID */
@@ -73,6 +75,7 @@ export function useChat(options: UseChatOptions = {}): UseChatResult {
     isLoading: messageResult.isLoading,
     error: messageResult.error || conversationResult.error,
     sendMessage: messageResult.sendMessage,
+    stop: messageResult.stop,
     clearMessages: messageResult.clearMessages,
     conversationId: messageResult.conversationId,
     conversations: conversationResult.conversations,

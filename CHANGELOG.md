@@ -5,6 +5,25 @@ All notable changes to `@useago/sdk` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-08-04
+
+### Added
+
+- Stop generation. `client.stop()` interrupts the turn being generated: it
+  closes the stream and calls the new `POST /api/sdk/v1/messages/{id}/stop`, so
+  the agent really stops instead of finishing in the background. The text
+  produced so far is kept and the message ends as `CANCELED`; the in-flight
+  `sendMessage` resolves with it rather than rejecting.
+- `message:stopped` event, fired once the stopped turn has unwound.
+- `client.stopMessage(messageId)` to stop a turn by id (e.g. one still running
+  after a page reload), and `client.isGenerating()` to know whether there is
+  anything to stop.
+- `stop()` on the React `useMessages` / `useChat` hooks, the Vue `useMessages` /
+  `useChat` composables, the Angular `AgoService`, and the vanilla widget handle.
+- The React `<ChatWidget>` and the vanilla widget now show a Stop button in
+  place of the send button while the agent answers. Opt out with
+  `allowStop: false`.
+
 ## [1.5.6] - 2026-07-29
 
 ### Fixed

@@ -135,6 +135,9 @@ Observable equivalents of the client's `message:start`, `message:chunk`,
 
 ```ts
 ago.sendMessage(content, options?)             // Promise<AgoMessage>
+ago.stop()                                      // Promise<StopMessageResult | null>
+ago.stopMessage(messageId)                      // Promise<StopMessageResult>
+ago.isGenerating()                              // boolean
 ago.getConversations()                          // Promise<Conversation[]>
 ago.getConversation(id)                         // Promise<Conversation>
 ago.getMessages(conversationId)                 // Promise<AgoMessage[]>
@@ -154,6 +157,26 @@ ago.updateConfig(partialConfig)
 ago.getClient()                                 // underlying AgoClient
 ago.destroy()
 ```
+
+### Stop the answer
+
+`stop()` interrupts the turn being generated: it closes the stream and calls the
+backend to stop generating. The partial text is kept, the message is finalized as
+`CANCELED`, and the pending `sendMessage` resolves with it. Wire it to a Stop
+button you show while a reply is streaming.
+
+```ts
+// In the chat component above, next to send():
+//   <button *ngIf="streaming" type="button" (click)="onStop()">Stop</button>
+
+async onStop() {
+  await this.ago.stop(); // resolves to null when nothing is generating
+}
+```
+
+`isGenerating()` reports whether there is anything to stop, and
+`stopMessage(messageId)` stops a turn by id (e.g. one still running after a page
+reload). Details in [Stop the answer](../general/core.md#stop-the-answer).
 
 ---
 

@@ -9,6 +9,7 @@ idiomatic binding (hook / composable / service / component) is also provided.
 | Create client | `new AgoClient()` | `useAgo` / `<AgoProvider>` | `AgoPlugin` / `useAgo` | `provideAgo` / `AgoService` |
 | Zero-config auto-detect | ✅ `createAgo()` | ✅ | ✅ | ✅ |
 | Send message (streaming) | ✅ | ✅ `useChat`/`useMessages` | ✅ `useChat`/`useMessages` | ✅ `AgoService.sendMessage` |
+| Stop generation | ✅ `client.stop()` | ✅ `stop` from `useChat`/`useMessages` | ✅ `stop` from `useChat`/`useMessages` | ✅ `AgoService.stop` |
 | File attachments | ✅ | ✅ | ✅ | ✅ |
 | List / load conversations | ✅ | ✅ `useConversation` | ✅ `useConversation` | ✅ `AgoService` |
 | All-in-one chat state | — | ✅ `useChat` | ✅ `useChat` | ➖ compose manually |

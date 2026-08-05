@@ -73,6 +73,49 @@ ago.on("message:error", ({ error }) => console.error(error));
 const reply = await ago.sendMessage("How do I reset my password?");
 ```
 
+### Stop the answer
+
+`stop()` interrupts the turn being generated. It closes the stream so the UI
+stops on the spot, **and** calls the backend to stop generating. Both halves
+matter: closing the stream alone does not stop the agent, which keeps running
+and hands you the full answer the next time the conversation is loaded.
+
+```ts
+document.getElementById("stop").onclick = () => void ago.stop();
+
+const reply = await ago.sendMessage("Write a long report");
+// Pressed Stop? This still resolves, with the partial text and status "CANCELED".
+```
+
+The text produced so far is kept and the message is finalized as `CANCELED`. The
+in-flight `sendMessage` / `continueMessage` promise **resolves** with that
+partial message rather than rejecting: `message:complete` fires with it, then
+`message:stopped`.
+
+Finalize your UI on `message:stopped`. It is the one event that always fires,
+while `message:complete` is skipped when there is nothing to complete: a stop
+that landed before the backend had named the message, and a turn stopped while
+it was paused on client functions (no stream is open then).
+
+`stop()` resolves with the backend's verdict, or `null` when nothing was
+generating (or when the stop landed before the backend had named the message).
+`isGenerating()` tells you whether there is anything to stop, so a button can
+switch between Send and Stop. A turn paused on client functions
+(`WAITING_CLIENT`) counts as generating and is still stoppable; stopping it also
+cancels the automatic resume.
+
+To stop a turn started elsewhere (one still running after a page reload, found
+through `getConversation`), address it by id:
+
+```ts
+const result = await ago.stopMessage(messageId);
+result.status; // "stopping" | "not_running" | "not_supported"
+```
+
+`stopMessage` is idempotent: stopping a turn that already finished answers
+`{ status: "not_running" }` instead of failing. `"not_supported"` is a background
+agent run, which cannot be stopped once started.
+
 ### Continue a conversation
 
 `sendMessage` returns the message, whose `conversationId` you reuse to keep the
@@ -353,6 +396,7 @@ const msg = await ago.waitFor("message:complete", { timeout: 10_000 });
 | `message:chunk`     | `{ content, conversationId, messageId }`                    |
 | `message:answer-complete` | `AgoMessage`: main answer done, follow-up replies may still be pending; fires before `message:complete` |
 | `message:complete`  | `AgoMessage`                                                |
+| `message:stopped`   | `{ conversationId, messageId }`: the turn was stopped with `stop()`; fires after the `message:complete` carrying the partial answer with status `CANCELED`, or on its own when there was nothing to complete |
 | `message:error`     | `{ error, code?, conversationId?, messageId? }`             |
 | `conversation:loaded` | `Conversation`: full conversation loaded from the server (e.g. after a page reload) |
 | `context:changed`   | `ContextSnapshot \| null`: client-side context changed     |
@@ -373,6 +417,10 @@ Prefer callbacks over raw events? See the
 
 - `sendMessage(content, options?)` → `Promise<AgoMessage>`
   - `options.conversationId?` · `options.agentId?` · `options.files?: File[]`
+- `stop()` → `Promise<StopMessageResult | null>`: stop the turn being generated
+  (`null` when nothing was generating)
+- `stopMessage(messageId)` → `Promise<StopMessageResult>`: stop a turn by id
+- `isGenerating()` → `boolean`
 
 ### Conversations
 
@@ -443,6 +491,11 @@ interface Conversation {
   title: string;
   lastMessageDate: Date;
   messages?: AgoMessage[];
+}
+
+interface StopMessageResult {
+  status: "stopping" | "not_running" | "not_supported";
+  messageStatus?: AgoMessage["status"]; // status when the stop was requested
 }
 ```
 

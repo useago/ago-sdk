@@ -162,11 +162,20 @@ export async function* createMessageStream(
     resolve?.();
   };
   const onTool = (data: ToolCallData) => push({ type: "toolCall", data });
+  // The user stopped the turn. `message:complete` usually carries the partial
+  // answer and ends the loop, but not when the stop landed before the backend
+  // named the message (there is nothing to complete) — without this the
+  // generator would hang forever on a stop.
+  const onStopped = () => {
+    done = true;
+    resolve?.();
+  };
 
   client.on("message:start", onStart);
   client.on("message:chunk", onChunk);
   client.on("message:complete", onComplete);
   client.on("message:error", onError);
+  client.on("message:stopped", onStopped);
   client.on("toolCall:received", onTool);
 
   // Fire the request (don't await — we'll consume events via the generator)
@@ -189,6 +198,7 @@ export async function* createMessageStream(
     client.off("message:chunk", onChunk);
     client.off("message:complete", onComplete);
     client.off("message:error", onError);
+    client.off("message:stopped", onStopped);
     client.off("toolCall:received", onTool);
   }
 }

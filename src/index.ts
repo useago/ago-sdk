@@ -28,6 +28,7 @@ export type {
   PaginatedResult,
   SendMessageOptions,
   SSEChunkData,
+  StopMessageResult,
   SubmitToolCallResult,
   ToolCallData,
   ToolCallType,

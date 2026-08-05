@@ -256,6 +256,24 @@ await ago.sendMessage("Summarise this", { files: [fileInput.files[0]], conversat
 await ago.sendMessage("Escalate this", { agentId: "human-handoff" });
 ```
 
+Stop the answer being generated. `stop()` closes the stream AND calls the backend
+to stop generating; closing the stream alone would leave the agent running:
+
+```ts
+document.getElementById("stop").onclick = () => void ago.stop();
+```
+
+The partial text is kept, the message is finalized as `CANCELED`, and the pending
+`sendMessage` resolves with it (it does not reject). `message:complete` fires with
+the partial message, then `message:stopped`. Finalize your UI on
+`message:stopped`: it always fires, while `message:complete` is skipped when
+there is nothing to complete (a stop that beat the backend naming the message, or
+a turn stopped while paused on client functions). `stop()` resolves to `null` when
+nothing was generating, `isGenerating()` reports whether there is anything to
+stop, and `stopMessage(messageId)` stops a turn by id (e.g. one still running
+after a page reload). A turn paused on client functions is stoppable too, and
+stopping it cancels the automatic resume.
+
 ## 3. Conversations
 
 ```ts
@@ -357,9 +375,12 @@ const widget = mountChatWidget("#chat", {
 });
 
 widget.sendMessage("Hello");
+widget.stop();    // interrupt the answer being generated (no-op when idle)
 widget.destroy(); // removes listeners, uninstalls forms, clears the DOM
 ```
 
+While the agent answers, the send button becomes a Stop button that interrupts
+the turn; pass `allowStop: false` to keep a disabled spinner instead.
 Set `placement: "left"` or `"right"` for a fixed full-height side panel with a
 launcher button. Set `persistConversation: true` to resume the visitor's last
 thread across reloads. Theme it with the `theme` option or `--ago-*` CSS variables
@@ -384,7 +405,8 @@ ago.destroy();                           // clean up listeners, functions, conte
 ## Key events
 
 `message:start`, `message:chunk` (`{ content }` per token), `message:complete`
-(`AgoMessage`), `message:error`, `conversation:loaded`, `context:changed`,
+(`AgoMessage`), `message:stopped` (`{ conversationId, messageId }`, after a
+`stop()`), `message:error`, `conversation:loaded`, `context:changed`,
 `toolCall:received`, `function:invoke`, `function:result`, `connection:status`.
 Use `on` / `off` / `once`, or `await ago.waitFor("message:complete", { timeout })`.
 
@@ -496,10 +518,12 @@ function Support() {
 }
 ```
 
-Common props: `title`, `welcomeMessage`, `placeholder`, `allowFiles`, `height`,
-`logoUrl`, `showAgentName`, `forms`, `onMessageSent`, `onMessageReceived`,
+Common props: `title`, `welcomeMessage`, `placeholder`, `allowFiles`, `allowStop`,
+`height`, `logoUrl`, `showAgentName`, `forms`, `onMessageSent`, `onMessageReceived`,
 `onFollowUpClick`, `className`. When the agent returns follow-up suggestions the
 widget renders them as clickable buttons (clicking sends the reply by default).
+While the agent answers, the send button becomes a **Stop** button that
+interrupts the turn (`allowStop`, default `true`; pass `false` to disable it).
 
 `ChatWidget` is a high-level component. For a custom interface, use `useChat`.
 
@@ -512,14 +536,16 @@ All-in-one state for a custom chat interface (composes `useMessages` +
 import { useChat } from "@useago/sdk/react";
 
 function Chat() {
-  const { messages, sendMessage, isLoading, error } = useChat();
+  const { messages, sendMessage, stop, isLoading, error } = useChat();
 
   return (
     <div>
       {messages.map((m) => (
         <p key={m.id}><b>{m.role}:</b> {m.content}</p>
       ))}
-      <button onClick={() => sendMessage("Hello!")} disabled={isLoading}>Send</button>
+      {isLoading
+        ? <button onClick={() => void stop()}>Stop</button>
+        : <button onClick={() => sendMessage("Hello!")}>Send</button>}
       {error && <p role="alert">{error.message}</p>}
     </div>
   );
@@ -529,6 +555,12 @@ function Chat() {
 `messages` updates token-by-token as the reply streams (the optimistic user
 message is included). `sendMessage(content, files?)` resolves with the final
 message or `null` on error.
+
+`stop()` interrupts the answer being generated: the stream closes and the backend
+is told to stop generating, the partial text stays in `messages` with status
+`CANCELED`, and `isLoading` goes back to `false`. It is a no-op when nothing is
+generating. Building your own input? `<ChatInput onStop={...} disabled={isLoading} />`
+renders the same Stop button.
 
 Show the knowledge sources the agent retrieved via `m.sources` (an `AgoSource[]`,
 each `{ id, title, url? }`):
@@ -680,8 +712,9 @@ useEffect(() => {
 ```
 
 Key events: `message:start`, `message:chunk` (`{ content }` per token),
-`message:complete` (`AgoMessage`), `message:error`, `toolCall:received`,
-`function:invoke`, `function:result`.
+`message:complete` (`AgoMessage`), `message:stopped`
+(`{ conversationId, messageId }`, after the turn was stopped), `message:error`,
+`toolCall:received`, `function:invoke`, `function:result`.
 
 ## Exports cheat-sheet (`@useago/sdk/react`)
 
@@ -772,7 +805,7 @@ All-in-one reactive state (messages + conversations). Everything returned is a
 import { ref } from "vue";
 import { useChat } from "@useago/sdk/vue";
 
-const { messages, sendMessage, isLoading, error } = useChat();
+const { messages, sendMessage, stop, isLoading, error } = useChat();
 const draft = ref("");
 
 async function onSend() {
@@ -789,11 +822,17 @@ async function onSend() {
   </div>
   <form @submit.prevent="onSend">
     <input v-model="draft" :disabled="isLoading" placeholder="Ask anything..." />
-    <button :disabled="isLoading">Send</button>
+    <button v-if="isLoading" type="button" @click="stop()">Stop</button>
+    <button v-else>Send</button>
   </form>
   <p v-if="error" role="alert">{{ error.message }}</p>
 </template>
 ```
+
+`stop()` interrupts the answer being generated: the stream closes and the backend
+is told to stop generating, the partial text stays in `messages` with status
+`CANCELED`, and `isLoading` goes back to `false`. It is a no-op when nothing is
+generating.
 
 Each assistant message carries the knowledge sources it used in `m.sources` (an
 `AgoSource[]`, each `{ id, title, url? }`). Render them as links.
@@ -886,7 +925,8 @@ useAgoEvents("message:complete", (msg) => console.log("Got reply:", msg.content)
 ```
 
 Key events: `message:start`, `message:chunk` (`{ content }` per token),
-`message:complete` (`AgoMessage`), `message:error`.
+`message:complete` (`AgoMessage`), `message:stopped`
+(`{ conversationId, messageId }`, after the turn was stopped), `message:error`.
 
 ## 6. Client context
 
@@ -1079,6 +1119,9 @@ use `ago.on(event, handler)` / `ago.off(event, handler)`.
 
 ```ts
 ago.sendMessage(content, options?)        // Promise<AgoMessage>
+ago.stop()                                 // stop the turn being generated
+ago.stopMessage(messageId)                 // stop a turn by id
+ago.isGenerating()                         // boolean
 ago.getConversations()                     // Promise<Conversation[]>
 ago.getConversation(id)
 ago.getMessages(conversationId)
@@ -1098,6 +1141,17 @@ ago.on(event, handler) / ago.off(event, handler)
 ago.updateConfig(partialConfig)
 ago.getClient()                            // underlying AgoClient
 ago.destroy()
+```
+
+`stop()` closes the stream and tells the backend to stop generating. The partial
+text is kept, the message is finalized as `CANCELED`, and the pending
+`sendMessage` resolves with it (it does not reject). It resolves to `null` when
+nothing was generating, so a Stop button can call it unconditionally:
+
+```ts
+async onStop() {
+  await this.ago.stop();
+}
 ```
 
 ## 5. Functions, navigation and context
@@ -1699,6 +1753,7 @@ const final = await client.waitFor("message:complete", { timeout: 10_000 });
 | `message:chunk` | `{ content, conversationId, messageId }` |
 | `message:answer-complete` | `AgoMessage`: the main answer text is done, but follow-up replies may still be pending; fires once, before `message:complete` |
 | `message:complete` | `AgoMessage` |
+| `message:stopped` | `{ conversationId, messageId }`: the user stopped the turn (`client.stop()`). Fires once the stream has unwound, after the `message:complete` that carries the partial answer with status `CANCELED` (or on its own when there was nothing to complete). `messageId` is `""` when the stop landed before the backend had named the message. See [Stop the answer](core.md#stop-the-answer) |
 | `message:waiting-client` | `{ conversationId, messageId, waitingToolCallIds }`: the turn paused on client function call(s) (`clientFunctionsMode: "pause"`). `message:complete` does not fire for the paused stream — it fires when the resumed turn concludes. The SDK submits the results and resumes on its own; listen to this to keep a "working…" indicator up |
 | `message:empty` | `{ conversationId, messageId }`: the reply completed as `DONE` with no content, tool calls, or follow-ups (usually an unknown `agent` slug). Fires after `message:complete` AND after `sendMessage` resolves, so subscribing right after the `await` still catches it. Both ids are `""` when the stream carried no message data at all. See [Empty replies](configuration.md#empty-replies). |
 | `message:error` | `{ error, code?, conversationId?, messageId? }`: `code` is the stable [error code](configuration.md#error-codes) when the failure was an `AgoError` |
@@ -1776,6 +1831,32 @@ for await (const ev of createMessageStream(client, "Hello!", { conversationId })
 
 Options: `{ conversationId?, agentId?, files? }`. The generator cleans up its
 listeners automatically when the loop ends.
+
+---
+
+## Stopping a stream
+
+`client.stop()` interrupts the turn being generated: it closes the stream and
+calls the backend to stop generating. Closing the stream alone would leave the
+agent running server-side.
+
+```ts
+document.getElementById("stop").onclick = () => void client.stop();
+
+client.on("message:stopped", ({ messageId }) => {
+  console.log("stopped", messageId);
+});
+```
+
+The text that already arrived stays: the message is finalized as `CANCELED` and
+the pending `sendMessage` resolves with it instead of rejecting.
+`message:complete` fires with the partial message, then `message:stopped`.
+
+Finalize your UI on `message:stopped`. It is the one event that always fires,
+while `message:complete` is skipped when there is nothing to complete: a stop
+that landed before the backend had named the message, and a turn stopped while
+it was paused on client functions (no stream is open then). Full details in
+[Stop the answer](core.md#stop-the-answer).
 
 ---
 

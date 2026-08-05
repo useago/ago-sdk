@@ -55,7 +55,7 @@ All-in-one reactive state (messages + conversations).
 import { ref } from "vue";
 import { useChat } from "@useago/sdk/vue";
 
-const { messages, sendMessage, isLoading, error } = useChat();
+const { messages, sendMessage, stop, isLoading, error } = useChat();
 const draft = ref("");
 
 async function onSend() {
@@ -72,7 +72,8 @@ async function onSend() {
   </div>
   <form @submit.prevent="onSend">
     <input v-model="draft" :disabled="isLoading" placeholder="Ask anything…" />
-    <button :disabled="isLoading">Send</button>
+    <button v-if="isLoading" type="button" @click="stop()">Stop</button>
+    <button v-else>Send</button>
   </form>
   <p v-if="error" role="alert">{{ error.message }}</p>
 </template>
@@ -81,11 +82,16 @@ async function onSend() {
 Everything returned is a `ref`/`computed`, so it stays reactive. `messages`
 updates token-by-token as the reply streams.
 
+`stop()` interrupts the answer being generated: the stream closes and the
+backend is told to stop, the partial text stays in `messages` with status
+`CANCELED`, and `isLoading` goes back to `false`. It is a no-op when nothing is
+generating. See [Stop the answer](../general/core.md#stop-the-answer).
+
 ### Composables
 
 | Composable | Returns (refs) |
 | --- | --- |
-| `useMessages({ conversationId? })` | `messages`, `isLoading`, `error`, `conversationId`, `sendMessage`, `clearMessages` |
+| `useMessages({ conversationId? })` | `messages`, `isLoading`, `error`, `conversationId`, `sendMessage`, `stop`, `clearMessages` |
 | `useConversation({ autoLoad? })` | `conversations`, `currentConversation`, `isLoading`, `error`, `selectConversation`, `startNewConversation`, `refreshConversations` |
 | `useChat(options)` | both combined |
 

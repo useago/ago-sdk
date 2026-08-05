@@ -3,6 +3,7 @@ import { AgoClient } from "../src/client/AgoClient";
 import type { AgoMessage, Conversation } from "../src/client/types";
 import type { CreateFormCollectorOptions } from "../src/forms/createFormCollector";
 import type { StorageLike } from "../src/state/createStore";
+import { createMockClient } from "../src/testing/createMockClient";
 import { mountChatWidget } from "../src/widget/createChatWidget";
 
 // The widget loads the conversation list on mount (refreshThreads → getConversations).
@@ -1512,6 +1513,98 @@ describe("mountChatWidget", () => {
       widget.destroy();
       root.remove();
       client.destroy();
+    });
+  });
+
+  describe("stop button", () => {
+    /** Send that never settles, so the widget stays in its answering state. */
+    function mountAnswering(options: { allowStop?: boolean } = {}) {
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      vi.spyOn(client, "sendMessage").mockImplementation(
+        () => new Promise<AgoMessage>(() => {}),
+      );
+      const stopSpy = vi
+        .spyOn(client, "stop")
+        .mockImplementation(async () => null);
+
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      const widget = mountChatWidget(root, { client, ...options });
+      void widget.sendMessage("hello");
+
+      return { client, root, widget, stopSpy };
+    }
+
+    it("replaces send with an enabled Stop button while the agent answers", () => {
+      const { client, root, widget, stopSpy } = mountAnswering();
+
+      const stopBtn = root.querySelector<HTMLButtonElement>(
+        '.ago-chat-input button[aria-label="Stop generating"]',
+      );
+      expect(stopBtn).not.toBeNull();
+      expect(stopBtn!.disabled).toBe(false);
+
+      stopBtn!.click();
+      expect(stopSpy).toHaveBeenCalledTimes(1);
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("keeps the disabled spinner when allowStop is false", () => {
+      const { client, root, widget, stopSpy } = mountAnswering({
+        allowStop: false,
+      });
+
+      expect(
+        root.querySelector('.ago-chat-input button[aria-label="Stop generating"]'),
+      ).toBeNull();
+      const sendBtn = root.querySelector<HTMLButtonElement>(
+        '.ago-chat-input button[aria-label="Send"]',
+      )!;
+      expect(sendBtn.disabled).toBe(true);
+      sendBtn.click();
+      expect(stopSpy).not.toHaveBeenCalled();
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("keeps the partial answer and releases the input when the turn is stopped", () => {
+      const mock = createMockClient({
+        overrides: {
+          // Never settles: the widget stays in its answering state until the
+          // stop event arrives.
+          sendMessage: () => new Promise<AgoMessage>(() => {}),
+        },
+      });
+
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      const widget = mountChatWidget(root, { client: mock });
+      void widget.sendMessage("hello");
+
+      // Some text streamed in before the user pressed Stop.
+      mock.__emitEvent("message:chunk", {
+        content: "Partial",
+        conversationId: "c1",
+        messageId: "m1",
+      });
+      mock.__emitEvent("message:stopped", {
+        conversationId: "c1",
+        messageId: "m1",
+      });
+
+      expect(root.textContent).toContain("Partial");
+      // The input is released: the Stop button is gone, send is back.
+      expect(
+        root.querySelector('.ago-chat-input button[aria-label="Stop generating"]'),
+      ).toBeNull();
+
+      widget.destroy();
+      root.remove();
     });
   });
 });

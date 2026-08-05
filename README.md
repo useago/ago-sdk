@@ -198,6 +198,41 @@ Whenever the agent calls the tool, the SDK runs your handler in the browser
 with the generated arguments and sends its return value back to the agent. Keep
 the return value small and structured so the agent can use it reliably.
 
+## Let the user stop a long answer
+
+`<ChatWidget>` already does this: while the agent answers, its send button turns
+into a **Stop** button (pass `allowStop={false}` to opt out). In a custom UI, wire
+the `stop` returned by `useChat` / `useMessages`:
+
+```tsx
+import { useChat } from "@useago/sdk/react";
+
+function Chat() {
+  const { messages, sendMessage, stop, isLoading } = useChat();
+
+  return (
+    <div>
+      {messages.map((m) => (
+        <p key={m.id}><b>{m.role}:</b> {m.content}</p>
+      ))}
+      {isLoading ? (
+        <button onClick={() => void stop()}>Stop</button>
+      ) : (
+        <button onClick={() => sendMessage("Write me a long report")}>Send</button>
+      )}
+    </div>
+  );
+}
+```
+
+Stopping closes the stream **and** tells the backend to stop generating. Closing
+the stream alone would not stop the agent: it would keep running and the full
+answer would reappear on the next load. The text already produced stays on
+screen, the message ends as `CANCELED`, and the pending `sendMessage` resolves
+with that partial message instead of rejecting. Vue and Angular have the same
+`stop`, and the vanilla `mountChatWidget` handle gained `stop()`. Details in
+[Stop the answer](docs/general/core.md#stop-the-answer).
+
 ## Show the source docs the agent retrieved
 
 Each assistant message carries the knowledge sources it used in `m.sources`

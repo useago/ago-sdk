@@ -4,6 +4,20 @@ import { logger } from "../utils/logger";
 
 const WIDGET_ID_KEY = "ago_widget_id";
 
+/**
+ * A fetch rejected because its `AbortSignal` fired (the caller stopped the
+ * turn), not because the network failed. Deliberate stops must surface as
+ * themselves so callers can tell them apart from a dropped connection.
+ */
+export function isAbortError(error: unknown): boolean {
+  return (
+    (typeof DOMException !== "undefined" &&
+      error instanceof DOMException &&
+      error.name === "AbortError") ||
+    (error instanceof Error && error.name === "AbortError")
+  );
+}
+
 function generateAnonId(): string {
   // Try to reuse a previously generated ID from localStorage
   if (typeof localStorage !== "undefined") {
@@ -105,9 +119,17 @@ export class HttpClient {
   }
 
   /**
-   * Make a POST request and return the raw Response (for streaming)
+   * Make a POST request and return the raw Response (for streaming).
+   *
+   * `signal` lets the caller close the stream mid-flight (see
+   * `AgoClient.stop`); an abort is rethrown as-is rather than wrapped in an
+   * `AgoNetworkError`, so a deliberate stop is not mistaken for a network drop.
    */
-  async postStream(path: string, body?: unknown): Promise<Response> {
+  async postStream(
+    path: string,
+    body?: unknown,
+    options?: { signal?: AbortSignal }
+  ): Promise<Response> {
     const url = `${this.baseUrl}${path}`;
     logger.debug("POST (stream)", url, body);
 
@@ -119,6 +141,7 @@ export class HttpClient {
           "Content-Type": "application/json",
         },
         body: body ? JSON.stringify(body) : undefined,
+        signal: options?.signal,
       });
 
       if (!response.ok) {
@@ -127,7 +150,7 @@ export class HttpClient {
 
       return response;
     } catch (error) {
-      if (error instanceof AgoApiError) {
+      if (error instanceof AgoApiError || isAbortError(error)) {
         throw error;
       }
       throw new AgoNetworkError(
@@ -141,7 +164,11 @@ export class HttpClient {
   /**
    * Make a POST request with FormData (for file uploads)
    */
-  async postFormData(path: string, formData: FormData): Promise<Response> {
+  async postFormData(
+    path: string,
+    formData: FormData,
+    options?: { signal?: AbortSignal }
+  ): Promise<Response> {
     const url = `${this.baseUrl}${path}`;
     logger.debug("POST (formData)", url);
 
@@ -153,6 +180,7 @@ export class HttpClient {
         method: "POST",
         headers,
         body: formData,
+        signal: options?.signal,
       });
 
       if (!response.ok) {
@@ -161,7 +189,7 @@ export class HttpClient {
 
       return response;
     } catch (error) {
-      if (error instanceof AgoApiError) {
+      if (error instanceof AgoApiError || isAbortError(error)) {
         throw error;
       }
       throw new AgoNetworkError(
