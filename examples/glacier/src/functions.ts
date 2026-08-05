@@ -1,7 +1,9 @@
 import { defineFunction } from '@useago/sdk';
 import type { AgoStateControl } from '@useago/sdk';
-import { CONES, ConeType, FLAVORS, FLAVOR_IDS, TOPPINGS, TOPPING_IDS } from './flavors';
-import type { IceCreamState } from './IceCream';
+import { CONES, type ConeType, FLAVORS, FLAVOR_IDS, TOPPINGS, TOPPING_IDS } from './flavors';
+import { computeCartTotal, computePrice, type IceCreamState } from './pricing';
+
+export { computeCartTotal, computePrice, type IceCreamState } from './pricing';
 
 const MAX_SCOOPS = 5;
 
@@ -214,19 +216,6 @@ export function buildIceCreamFunctions(store: OrderStore) {
     getState,
     placeOrder,
   };
-}
-
-export function computePrice(state: IceCreamState): number {
-  if (state.scoops.length === 0 && state.toppings.length === 0) return 0;
-  const scoopPrice = state.scoops.reduce((sum, id) => sum + (FLAVORS[id]?.pricePerScoop ?? 2.5), 0);
-  const toppingPrice = state.toppings.reduce((sum, id) => sum + (TOPPINGS[id]?.price ?? 0), 0);
-  const conePrice = CONES[state.cone].price;
-  return Math.round((scoopPrice + toppingPrice + conePrice) * 100) / 100;
-}
-
-export function computeCartTotal(items: IceCreamState[]): number {
-  const total = items.reduce((sum, item) => sum + computePrice(item), 0);
-  return Math.round(total * 100) / 100;
 }
 
 // Calls a public API (Wikipedia) and deliberately returns the RAW response,

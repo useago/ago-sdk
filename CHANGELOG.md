@@ -5,6 +5,19 @@ All notable changes to `@useago/sdk` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] - 2026-08-05
+
+### Added
+
+- The React `<ChatInput>` textarea now exposes an
+  `ago-chat-input__field` class for stable custom styling.
+
+### Fixed
+
+- React `<ChatWidget>` auto-scroll now stays inside the message pane instead of
+  moving ancestor containers or the whole page, and preserves the reader's
+  position while they review earlier messages.
+
 ## [1.6.0] - 2026-08-04
 
 ### Added
