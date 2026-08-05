@@ -133,53 +133,6 @@ const BUTTON_VARIANTS: Record<ButtonVariant, CSSProperties> = {
   link: { background: 'transparent', color: 'var(--accent)', border: '1px solid transparent', padding: '4px 2px' },
 };
 
-export function Button({
-  children,
-  variant = 'primary',
-  size = 'md',
-  disabled = false,
-  fullWidth = false,
-  onClick,
-  style,
-}: {
-  children: ReactNode;
-  variant?: ButtonVariant;
-  size?: ButtonSize;
-  disabled?: boolean;
-  fullWidth?: boolean;
-  onClick?: () => void;
-  style?: CSSProperties;
-}) {
-  return (
-    <button
-      type="button"
-      className="gl-btn"
-      disabled={disabled}
-      onClick={onClick}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: '10px',
-        width: fullWidth ? '100%' : 'auto',
-        fontFamily: 'var(--font-body)',
-        fontWeight: 500,
-        textTransform: 'uppercase',
-        whiteSpace: 'nowrap',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        borderRadius: 'var(--r-sm)',
-        transition: 'var(--t-hover)',
-        opacity: disabled ? 0.4 : 1,
-        ...BUTTON_SIZES[size],
-        ...BUTTON_VARIANTS[variant],
-        ...style,
-      }}
-    >
-      {children}
-    </button>
-  );
-}
-
 export function ButtonLink({
   children,
   to,

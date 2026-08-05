@@ -1410,7 +1410,7 @@ button { font-family: var(--font-body); }
   transform: translate(-50%, -50%);
 }
 
-.ago-chat-input textarea:focus-visible {
+.ago-chat-input__field:focus-visible {
   outline: 2px solid var(--gold) !important;
   outline-offset: 3px !important;
 }

@@ -1,7 +1,6 @@
 import { Link } from 'react-router-dom';
-import { computePrice, type CartItem } from './functions';
+import { computePrice, type CartItem, type IceCreamState } from './functions';
 import { CONES, FLAVORS, TOPPINGS } from './flavors';
-import type { IceCreamState } from './IceCream';
 import { PriceTag } from './ui';
 
 const FEATURED_FLAVOR_IDS = ['pistachio', 'vanilla', 'raspberry', 'lemon'] as const;

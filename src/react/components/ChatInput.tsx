@@ -187,6 +187,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
 
         <textarea
           ref={textareaRef}
+          className="ago-chat-input__field"
           value={message}
           onChange={(e) => {
             setMessage(e.target.value);

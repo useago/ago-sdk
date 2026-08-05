@@ -10,7 +10,6 @@ import {
   type AgoStateControl,
 } from '@useago/sdk/react';
 import { initDevPanel } from '@useago/sdk/devtools';
-import type { IceCreamState } from './IceCream';
 import FlavorsPage from './FlavorsPage';
 import {
   buildIceCreamControls,
@@ -19,6 +18,7 @@ import {
   computePrice,
   lookupWikipediaArticle,
   type CartItem,
+  type IceCreamState,
   type OrderStore,
 } from './functions';
 import { IngredientsContent } from './IngredientsPage';
@@ -34,7 +34,7 @@ const INITIAL_CURRENT: IceCreamState = {
   toppings: [],
 };
 
-// Les routes sont définies une seule fois ici. Le router (<Routes>) et la
+// Les routes exposées à l'agent sont définies ici. Le router (<Routes>) et la
 // navigation de l'agent (useAgoNavigation) lisent tous les deux le chemin et la
 // description sur cet objet — React Router ne permet pas de porter une
 // description sur <Route> directement.
@@ -181,9 +181,12 @@ export default function App() {
   }, [location.pathname]);
 
   const focusChat = () => {
-    const input = document.querySelector<HTMLTextAreaElement>('.gl-chat .ago-chat-input textarea');
+    const input = document.querySelector<HTMLTextAreaElement>('.gl-chat .ago-chat-input__field');
     input?.focus();
-    if (window.innerWidth <= 1180) input?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const chatPanel = input?.closest<HTMLElement>('.gl-chat');
+    if (input && chatPanel && getComputedStyle(chatPanel).position !== 'sticky') {
+      input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
   };
 
   const addCurrentToCart = () => {

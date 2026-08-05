@@ -61,7 +61,7 @@ The boutique styling is a small design system, not page-by-page CSS:
 
 - `src/App.css` declares every token (`--ink-900`, `--framboise`, `--font-display`,
   `--r-lg`, …) plus the shell layout and the `.ago-*` ChatWidget overrides.
-- `src/ui.tsx` holds the pieces built from those tokens: `Button`, `Badge`, `Pill`,
+- `src/ui.tsx` holds the pieces built from those tokens: `ButtonLink`, `Badge`, `Pill`,
   `PriceTag`, `FlavorCard`, `OriginCard`, `SectionHeading`, `GoldFrame`.
 - `src/Chrome.tsx` is the furniture every route shares: announce bar, sticky
   header, footer.

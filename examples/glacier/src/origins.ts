@@ -173,7 +173,7 @@ export const ORIGIN_IDS = Object.keys(ORIGINS);
 
 // Reverse of `relatedFlavorId`, so a parfum card can link through to the
 // terroir it comes from without duplicating the mapping.
-export const ORIGIN_BY_FLAVOR: Record<string, Origin> = Object.fromEntries(
+export const ORIGIN_BY_FLAVOR: Partial<Record<string, Origin>> = Object.fromEntries(
   Object.values(ORIGINS)
     .filter((o) => o.relatedFlavorId)
     .map((o) => [o.relatedFlavorId as string, o]),

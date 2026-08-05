@@ -1,7 +1,12 @@
 import { defineFunction } from '@useago/sdk';
 import type { AgoStateControl } from '@useago/sdk';
 import { CONES, ConeType, FLAVORS, FLAVOR_IDS, TOPPINGS, TOPPING_IDS } from './flavors';
-import type { IceCreamState } from './IceCream';
+
+export interface IceCreamState {
+  cone: ConeType;
+  scoops: string[];
+  toppings: string[];
+}
 
 const MAX_SCOOPS = 5;
 

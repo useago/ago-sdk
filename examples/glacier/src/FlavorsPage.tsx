@@ -157,20 +157,23 @@ export default function FlavorsPage() {
 
       {view === 'grille' ? (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '22px' }}>
-          {flavors.map((f) => (
-            <FlavorCard
-              key={f.id}
-              name={f.name}
-              color={f.color}
-              speckle={f.speckle}
-              description={f.description}
-              price={f.pricePerScoop}
-              dietLabel={dietLabel(f.allergens)}
-              imageSrc={f.imageSrc}
-              imageAlt={f.imageAlt}
-              to={ORIGIN_BY_FLAVOR[f.id] ? `/origines/${ORIGIN_BY_FLAVOR[f.id].id}` : undefined}
-            />
-          ))}
+          {flavors.map((f) => {
+            const origin = ORIGIN_BY_FLAVOR[f.id];
+            return (
+              <FlavorCard
+                key={f.id}
+                name={f.name}
+                color={f.color}
+                speckle={f.speckle}
+                description={f.description}
+                price={f.pricePerScoop}
+                dietLabel={dietLabel(f.allergens)}
+                imageSrc={f.imageSrc}
+                imageAlt={f.imageAlt}
+                to={origin ? `/origines/${origin.id}` : undefined}
+              />
+            );
+          })}
         </div>
       ) : (
         <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column' }}>
