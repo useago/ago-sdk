@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import {
   ChatWidget,
+  type ChatWidgetHandle,
   useAgoAutoContinueAfterNavigation,
   useAgoClient,
   useAgoFunction,
@@ -96,6 +97,7 @@ export default function App() {
     }
   }, [client]);
 
+  const chatRef = useRef<ChatWidgetHandle>(null);
   const currentRef = useRef(current);
   currentRef.current = current;
   const cartRef = useRef(cart);
@@ -181,13 +183,17 @@ export default function App() {
     window.scrollTo({ top: 0 });
   }, [location.pathname]);
 
+  // Sur mobile le chat est une bottom sheet : on la déploie via le ref plutôt
+  // que de chercher le champ dans le DOM du SDK. Sur desktop la colonne est
+  // sticky et déjà visible, il suffit de donner le focus.
   const focusChat = () => {
-    const input = document.querySelector<HTMLTextAreaElement>('.gl-chat .ago-chat-input__field');
-    input?.focus();
-    const chatPanel = input?.closest<HTMLElement>('.gl-chat');
-    if (input && chatPanel && getComputedStyle(chatPanel).position !== 'sticky') {
-      input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (chatRef.current?.state === 'peek') {
+      chatRef.current.expand();
+      return;
     }
+    document
+      .querySelector<HTMLTextAreaElement>('.gl-chat .ago-chat-input__field')
+      ?.focus();
   };
 
   const addCurrentToCart = () => {
@@ -219,6 +225,13 @@ export default function App() {
           </div>
           <div className="gl-chat-widget-shell">
             <ChatWidget
+              ref={chatRef}
+              // 1180 et pas le défaut 768 : c'est le point où la grille de la
+              // boutique passe en une colonne. Laisser le défaut créerait une
+              // zone morte entre 769 et 1180 où la mise en page est empilée mais
+              // le chat se croit encore sur desktop.
+              sheet={{ breakpoint: 1180 }}
+              thinkingLabel="Le glacier réfléchit…"
               title="Composer avec le glacier"
               welcomeMessage="Bonjour. Dites-moi ce qui vous ferait plaisir — je compose la glace et votre ticket se met à jour à droite."
               placeholder="Deux boules pistache et chocolat…"
