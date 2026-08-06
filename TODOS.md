@@ -42,3 +42,87 @@ review (plan: fix DX audit findings).
 - **Where to start:** `src/testing/createMockClient.ts` (track registered
   definitions in a map; return live schemas).
 - **Effort:** S.
+
+## Mobile sheet (`peek`/`full`) — blocked on six API decisions (P2)
+
+Source: 2026-08-05 /autoplan review (plan:
+`.context/mobile-chat-plan.md`, branch `dmourot/mobile-chat-ux-research`).
+Deferred out of the mobile PR because three review phases independently
+concluded the sheet is not ready to implement.
+
+- **What:** A two-state (`peek` / `full`) mobile chat sheet, replacing the
+  current binary inline-card / fullscreen morph.
+- **Blocked on, all unanswered:**
+  1. Does the shared controller return a props bag, or mutate the DOM? React
+     re-renders per streamed token and re-applies its inline `style` object
+     (`ChatWidget.tsx:182-194`), clobbering imperative writes.
+  2. SSR/hydration: reading `matchMedia` during render throws in Node. Needs
+     `useSyncExternalStore` with a server snapshot of `false`.
+  3. `<dialog>`: you cannot promote `show()` to `showModal()` without closing
+     and re-parenting into the top layer, which kills the running transition.
+     Pick one of: explicit modal semantics on a normal element / two surfaces /
+     accept the discontinuity.
+  4. `bottomOffset` + `sheet: false`. A permanent near-max-z-index fixed
+     overlay on a third-party page is a CLAUDE.md scoping decision, and there
+     is currently no way at all to opt out of the mobile behavior
+     (`trigger: "manual"` does not do it, and is ignored for side placement,
+     `types.ts:246-250`).
+  5. Naming: `sheet {}` rather than `mobile {}` (the option is about layout,
+     not device); `expand()`/`collapse()` rather than `snapTo()` (drag-engine
+     vocabulary for a design with no drag). Keep `mobile` as a deprecated
+     alias for at least one minor.
+  6. Exact composition of `peek` (a spec exists in the plan's Phase 2, needs
+     sign-off).
+- **Depends on:** the mobile PR (shared lock manager, `isModal` predicate,
+  state machine, streaming-render fix) landing first.
+- **Effort:** L.
+
+## Glacier mobile sheet + the "agent acts, sheet yields" differentiator (P2)
+
+- **What:** (a) Glacier consuming the sheet; (b) the one behavior no competitor
+  can copy, because Intercom/Crisp/assistant-ui do not drive the host page: the
+  chat gets out of the way when the agent changes the page.
+- **Why (b) matters most:** on mobile today the result of an agent action is
+  off-screen behind the chat. Minimum viable version is example-side only, no
+  SDK API: on `useAgoActivity` action-done, `scrollIntoView({block:'center'})`
+  on the changed element plus a short highlight. ~15 lines.
+- **Blocked by:** (a) needs the sheet, and `ChatWidgetProps` has no `mobile`
+  prop, so Glacier cannot configure a breakpoint until that ships. (b) is NOT
+  blocked and can go any time.
+- **Effort:** (a) M, (b) S.
+
+## Playwright smoke suite for the widget (P2)
+
+- **What:** ~6 real-browser cases. Vitest is jsdom-only (`vitest.config.ts`),
+  which structurally cannot see: real layout, `env(safe-area-inset-*)`, host
+  `!important` beating widget inline styles, `<dialog>` top layer, View
+  Transitions, `getClientRects()` (the focus trap depends on it,
+  `createChatWidget.ts:1039`), or computed theme tokens.
+- **Why:** the host-page-freeze bug (widget locks `body` from inside a View
+  Transition callback) is invisible in jsdom, because jsdom has no
+  `startViewTransition` so the callback runs synchronously.
+- **Cases:** input row inside `visualViewport` at 390x844 side placement;
+  scroll lock/restore; expand-then-destroy leaves no `position: fixed` on body;
+  rotation mid-stream; 44x44 targets *with Glacier's stylesheet loaded*;
+  `prefers-reduced-motion`.
+- **Also:** rewrite the `matchMedia` test stub to be keyed by query string
+  (`tests/createChatWidget.test.ts:576-582` collapses every query to one
+  boolean, so a landscape media query would pass whatever the code asks for).
+- **Note:** no engine simulates an on-screen keyboard. iOS keyboard geometry
+  stays a manual device checklist; say so in the docs rather than implying
+  tests cover it.
+- **Effort:** M.
+
+## Widget diagnostics story (P3)
+
+- **What:** `data-ago-sheet-state` / `data-ago-modal` /
+  `data-ago-scroll-lock-owner` attributes, one-shot dev warnings when a host
+  `!important` rule defeats the expected geometry or the composer stays outside
+  `visualViewport`, and a read-only `widget.getDiagnostics()`.
+- **Why:** an integrator whose widget misbehaves inside their page has no way
+  to find out why. "expected bottom=64px, computed bottom=0px; overridden by
+  `.host-chat{bottom:0!important}`" turns hours of CSS hunting into a fix.
+- **Also:** the dev panel paints at `z-index: 1000`
+  (`src/devtools/initDevPanel.ts:304`) while the widget uses `2147483000`, so
+  the diagnostic tool is hidden behind the thing it should diagnose.
+- **Effort:** M.

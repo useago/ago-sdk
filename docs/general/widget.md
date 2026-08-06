@@ -257,14 +257,29 @@ widget.close?.(); // collapse back to the inline card
 ```
 
 With `placement: "left" | "right"`, the side panel squares off to a true
-full-screen sheet on mobile; the slide-in/out behavior is unchanged.
+full-screen sheet on mobile; the slide-in/out behavior is unchanged. There it is
+a real dialog: it takes `role="dialog"` and `aria-modal`, traps Tab, closes on
+Escape, locks the page behind it, and tracks the visible viewport so the
+on-screen keyboard never covers the composer. Opening it moves focus into the
+panel rather than into the text field, so the keyboard does not eat half the
+screen before anything has been read.
+
+On a desktop viewport that same panel stays deliberately non-modal: the page
+beside it keeps its scroll and its Tab order, because it is still usable.
+
+The page's own scroll lock is restored, not cleared: if your app already pinned
+`<body>` (for its own modal, say), the widget puts your inline styles back
+exactly as it found them when it releases.
 
 On a mobile viewport message bubbles also run wider (user bubbles to 88%, agent
 bubbles to 92%) to reclaim the screen edge on narrow devices. This is automatic and
 reflows when the viewport crosses the `breakpoint`.
 
 Tuning (all optional): `breakpoint` is the max viewport width (px) treated as
-mobile (default `768`); `trigger` sets how the inline card enters full screen:
+mobile (default `768`). A short landscape viewport counts as mobile too
+(`max-height: 500px` in landscape), so a phone turned sideways keeps the
+full-screen sheet and the keyboard handling instead of falling back to the
+desktop layout. `trigger` sets how the inline card enters full screen:
 `"tap"` (default, expand when anywhere on the card is tapped, while follow-up
 replies still send and links still follow), `"focus"` (expand only when the input
 is tapped), or `"manual"` (expand only via `widget.open()`). `onOpen` / `onClose` fire on expand/collapse (and on side-panel
