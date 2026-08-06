@@ -594,9 +594,25 @@ describe("mountChatWidget", () => {
         }),
       );
       return {
-        fire(query: string, matches: boolean) {
+        /**
+         * Flip the compact-layout query and notify its listeners. The widget
+         * owns the exact media string (it is not just a width query — it also
+         * covers short landscape viewports), so target "every query that isn't
+         * the reduced-motion one" instead of hardcoding it here.
+         */
+        fire(matches: boolean) {
           state.mobile = matches;
-          for (const cb of listeners.get(query) ?? []) cb({ matches });
+          for (const [query, set] of listeners) {
+            if (query.includes("prefers-reduced-motion")) continue;
+            for (const cb of set) cb({ matches });
+          }
+        },
+        /** The media string the widget actually registered for compact layout. */
+        compactQuery(): string {
+          for (const query of listeners.keys()) {
+            if (!query.includes("prefers-reduced-motion")) return query;
+          }
+          return "";
         },
       };
     }
@@ -1173,8 +1189,451 @@ describe("mountChatWidget", () => {
       expect(bubble().style.maxWidth).toBe("88%");
 
       // Crossing back to desktop reflows the thread to the narrower width.
-      mq.fire("(max-width: 768px)", false);
+      mq.fire(false);
       expect(bubble().style.maxWidth).toBe("75%");
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+  });
+
+  describe("streaming render + follow-the-bottom", () => {
+    /** Give the pane real geometry: jsdom reports 0 for every scroll metric. */
+    function sizePane(
+      pane: HTMLElement,
+      { scrollHeight = 600, clientHeight = 200 } = {},
+    ) {
+      Object.defineProperty(pane, "scrollHeight", {
+        configurable: true,
+        get: () => scrollHeight,
+      });
+      Object.defineProperty(pane, "clientHeight", {
+        configurable: true,
+        get: () => clientHeight,
+      });
+    }
+
+    it("a streamed chunk swaps only the streaming bubble, not the whole thread", () => {
+      const mock = createMockClient({
+        overrides: { sendMessage: () => new Promise<AgoMessage>(() => {}) },
+      });
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      const widget = mountChatWidget(root, { client: mock });
+      void widget.sendMessage("hello");
+
+      const pane = root.querySelector<HTMLElement>(".ago-chat-widget__messages")!;
+      const userNodeBefore = pane.querySelector(".ago-message--user");
+
+      mock.__emitEvent("message:chunk", {
+        content: "Par",
+        conversationId: "c1",
+        messageId: "m1",
+      });
+      mock.__emitEvent("message:chunk", {
+        content: "tial",
+        conversationId: "c1",
+        messageId: "m1",
+      });
+
+      // Rebuilding the pane per token is what made a screen reader re-read the
+      // whole conversation on every chunk, and what collapsed scrollHeight so a
+      // stick-to-bottom check latched off. The user's bubble must survive
+      // untouched across chunks.
+      expect(pane.querySelector(".ago-message--user")).toBe(userNodeBefore);
+      expect(pane.textContent).toContain("Partial");
+
+      widget.destroy();
+      root.remove();
+      mock.destroy();
+    });
+
+    it("marks the log aria-busy while the answer is being written", () => {
+      const mock = createMockClient({
+        overrides: { sendMessage: () => new Promise<AgoMessage>(() => {}) },
+      });
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      const widget = mountChatWidget(root, { client: mock });
+      const pane = root.querySelector<HTMLElement>(".ago-chat-widget__messages")!;
+
+      expect(pane.getAttribute("aria-busy")).toBe("false");
+      void widget.sendMessage("hello");
+      // Announcements are deferred while streaming; the finished answer is
+      // announced once, when aria-busy clears.
+      expect(pane.getAttribute("aria-busy")).toBe("true");
+
+      widget.destroy();
+      root.remove();
+      mock.destroy();
+    });
+
+    it("stops following the stream once the reader scrolls up, and offers a way back", async () => {
+      const mock = createMockClient({
+        overrides: { sendMessage: () => new Promise<AgoMessage>(() => {}) },
+      });
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      const widget = mountChatWidget(root, { client: mock });
+      const pane = root.querySelector<HTMLElement>(".ago-chat-widget__messages")!;
+      const jump = root.querySelector<HTMLElement>(".ago-chat-widget__jump")!;
+      sizePane(pane);
+
+      void widget.sendMessage("hello");
+      expect(jump.style.display).toBe("none");
+      // Scroll events a render itself provoked are ignored (that is what kept
+      // the pane from latching itself detached on the first token). A real
+      // gesture arrives in a later task, so let the current one drain.
+      await Promise.resolve();
+
+      // The reader scrolls up to re-read something (600 - 100 - 200 = 300 > 48).
+      pane.scrollTop = 100;
+      pane.dispatchEvent(new Event("scroll"));
+      expect(jump.style.display).toBe("flex");
+
+      // New tokens must NOT yank them back down.
+      mock.__emitEvent("message:chunk", {
+        content: "more text",
+        conversationId: "c1",
+        messageId: "m1",
+      });
+      expect(pane.scrollTop).toBe(100);
+
+      // The jump button re-attaches.
+      jump.click();
+      expect(pane.scrollTop).toBe(600);
+      expect(jump.style.display).toBe("none");
+
+      widget.destroy();
+      root.remove();
+      mock.destroy();
+    });
+
+    it("sending re-attaches the pane even if the reader had scrolled away", async () => {
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      vi.spyOn(client, "sendMessage").mockResolvedValue(
+        makeAssistantMessage({ id: "a1" }),
+      );
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      const widget = mountChatWidget(root, { client });
+      const pane = root.querySelector<HTMLElement>(".ago-chat-widget__messages")!;
+      sizePane(pane);
+
+      pane.scrollTop = 0;
+      pane.dispatchEvent(new Event("scroll"));
+
+      await widget.sendMessage("hi");
+      // Sending is an explicit "show me the latest" gesture.
+      expect(pane.scrollTop).toBe(600);
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("puts the user's text back in the composer when the send fails", async () => {
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      vi.spyOn(client, "sendMessage").mockRejectedValue(new Error("offline"));
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      const widget = mountChatWidget(root, { client });
+      const textarea = root.querySelector<HTMLTextAreaElement>("textarea")!;
+
+      await widget.sendMessage("deux boules pistache");
+
+      // The composer is cleared on submit and the optimistic bubble is dropped
+      // on failure, so without restoring the draft the message is gone for good.
+      expect(textarea.value).toBe("deux boules pistache");
+      expect(root.textContent).toContain("offline");
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("does not clobber freshly typed text when restoring a failed draft", async () => {
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      let reject: (e: Error) => void = () => {};
+      vi.spyOn(client, "sendMessage").mockReturnValue(
+        new Promise<AgoMessage>((_, r) => {
+          reject = r;
+        }),
+      );
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      const widget = mountChatWidget(root, { client });
+      const textarea = root.querySelector<HTMLTextAreaElement>("textarea")!;
+
+      const pending = widget.sendMessage("first");
+      textarea.value = "something new";
+      reject(new Error("offline"));
+      await pending;
+
+      expect(textarea.value).toBe("something new");
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("gives every tap target at least 44px", async () => {
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      vi.spyOn(client, "sendMessage").mockResolvedValue(
+        makeAssistantMessage({ id: "a1", followUpReplies: ["Pricing"] }),
+      );
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      const widget = mountChatWidget(root, { client, allowFiles: true });
+
+      await widget.sendMessage("hi");
+
+      const send = root.querySelector<HTMLElement>('button[type="submit"]')!;
+      expect(send.style.width).toBe("44px");
+      expect(send.style.height).toBe("44px");
+
+      const attach = root.querySelector<HTMLElement>(
+        'button[aria-label="Attach file"]',
+      )!;
+      expect(attach.style.minWidth).toBe("44px");
+      expect(attach.style.minHeight).toBe("44px");
+
+      const pill = root.querySelector<HTMLElement>(".ago-message__followup-btn")!;
+      expect(pill.style.minHeight).toBe("44px");
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+  });
+
+  describe("compact side panel + host-safe scroll lock", () => {
+    /** Same shape as the mobile-fullscreen stub, scoped to this block. */
+    function stubCompact(state: { mobile: boolean }) {
+      const listeners = new Map<string, Set<(e: { matches: boolean }) => void>>();
+      vi.stubGlobal(
+        "matchMedia",
+        vi.fn((query: string) => {
+          const isReduce = query.includes("prefers-reduced-motion");
+          const set = listeners.get(query) ?? new Set();
+          listeners.set(query, set);
+          return {
+            get matches() {
+              return isReduce ? false : state.mobile;
+            },
+            media: query,
+            addEventListener: (
+              _: string,
+              cb: (e: { matches: boolean }) => void,
+            ) => set.add(cb),
+            removeEventListener: (
+              _: string,
+              cb: (e: { matches: boolean }) => void,
+            ) => set.delete(cb),
+            dispatchEvent: () => true,
+          };
+        }),
+      );
+      return {
+        compactQuery(): string {
+          for (const query of listeners.keys()) {
+            if (!query.includes("prefers-reduced-motion")) return query;
+          }
+          return "";
+        },
+      };
+    }
+
+    function mountSide(client: AgoClient) {
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+      const widget = mountChatWidget(root, { client, placement: "right" });
+      const wrapper = root.querySelector<HTMLElement>(
+        ".ago-chat-widget-panel",
+      )!;
+      const container = root.querySelector<HTMLElement>(".ago-chat-widget")!;
+      return { root, widget, wrapper, container };
+    }
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      document.body.removeAttribute("style");
+      document.documentElement.removeAttribute("style");
+    });
+
+    it("compact layout also covers a short landscape viewport, not just narrow width", () => {
+      const mq = stubCompact({ mobile: true });
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const { root, widget } = mountSide(client);
+
+      // A phone in landscape is 844x390: a width-only query stops matching and
+      // would switch the compact layout off on the viewport that needs it most.
+      const query = mq.compactQuery();
+      expect(query).toContain("max-width");
+      expect(query).toContain("max-height");
+      expect(query).toContain("orientation: landscape");
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("restores the host's own inline body styles rather than deleting them", () => {
+      stubCompact({ mobile: true });
+      // The host pinned its own body (e.g. for its own modal) before we locked.
+      document.body.style.position = "relative";
+      document.body.style.top = "5px";
+      document.documentElement.style.overflow = "auto";
+
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const { root, widget } = mountSide(client);
+
+      widget.open!();
+      expect(document.body.style.position).toBe("fixed");
+
+      widget.close!();
+      // Deleting these (the old behavior) would silently break the host page.
+      expect(document.body.style.position).toBe("relative");
+      expect(document.body.style.top).toBe("5px");
+      expect(document.documentElement.style.overflow).toBe("auto");
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("the lock is per-owner: one widget cannot release another's", () => {
+      stubCompact({ mobile: true });
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const a = mountSide(client);
+      const b = mountSide(client);
+
+      a.widget.open!();
+      b.widget.open!();
+      expect(document.body.style.position).toBe("fixed");
+
+      // A leaves entirely; B still has the panel open, so the page stays pinned.
+      a.widget.destroy();
+      expect(document.body.style.position).toBe("fixed");
+      // Destroying A twice must not hand the lock a second release.
+      a.widget.destroy();
+      expect(document.body.style.position).toBe("fixed");
+
+      b.widget.destroy();
+      expect(document.body.style.position).toBe("");
+
+      a.root.remove();
+      b.root.remove();
+      client.destroy();
+    });
+
+    it("destroy() while open releases the lock", () => {
+      stubCompact({ mobile: true });
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const { root, widget } = mountSide(client);
+
+      widget.open!();
+      expect(document.body.style.position).toBe("fixed");
+      widget.destroy();
+      expect(document.body.style.position).toBe("");
+
+      root.remove();
+      client.destroy();
+    });
+
+    it("a DESKTOP side panel is not modal: no aria-modal, no Tab trap, no lock", () => {
+      stubCompact({ mobile: false });
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const { root, widget, container } = mountSide(client);
+
+      widget.open!();
+      // The host page is still visible and usable beside the panel, so claiming
+      // modality would lie to assistive tech and strand keyboard users.
+      expect(container.getAttribute("aria-modal")).toBeNull();
+      expect(container.getAttribute("role")).toBeNull();
+      expect(document.body.style.position).toBe("");
+
+      const tab = new KeyboardEvent("keydown", {
+        key: "Tab",
+        bubbles: true,
+        cancelable: true,
+      });
+      document.dispatchEvent(tab);
+      expect(tab.defaultPrevented).toBe(false);
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("a COMPACT side panel is modal and keeps the composer off the keyboard", async () => {
+      stubCompact({ mobile: true });
+      // jsdom has no visualViewport; drive it by hand. Layout viewport stays
+      // window.innerHeight (768 in jsdom) — that is exactly why `bottom: 0`
+      // ends up underneath the on-screen keyboard on iOS.
+      const vvListeners = new Map<string, Set<() => void>>();
+      const vv = {
+        height: 768,
+        offsetTop: 0,
+        addEventListener: (type: string, cb: () => void) => {
+          const set = vvListeners.get(type) ?? new Set();
+          set.add(cb);
+          vvListeners.set(type, set);
+        },
+        removeEventListener: (type: string, cb: () => void) => {
+          vvListeners.get(type)?.delete(cb);
+        },
+      };
+      vi.stubGlobal("visualViewport", vv);
+      const fireVv = (type: string) => {
+        for (const cb of vvListeners.get(type) ?? []) cb();
+      };
+
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const { root, widget, wrapper, container } = mountSide(client);
+
+      widget.open!();
+      expect(container.getAttribute("role")).toBe("dialog");
+      expect(container.getAttribute("aria-modal")).toBe("true");
+      // No keyboard yet: the panel spans the viewport.
+      expect(wrapper.style.bottom).toBe("0px");
+
+      // Keyboard opens: the visible viewport shrinks to 500 of a 768 layout.
+      vv.height = 500;
+      fireVv("resize");
+      await new Promise((r) => requestAnimationFrame(r));
+      // 768 - (0 + 500) = 268px of keyboard to clear. Written on the WRAPPER:
+      // `container` is a static flex child here, so writing `top` on it (the
+      // inline path's move) would do nothing at all.
+      expect(wrapper.style.bottom).toBe("268px");
+
+      widget.close!();
+      // Desktop geometry is handed back to CSS, and later viewport changes are
+      // ignored because the listeners were dropped.
+      expect(wrapper.style.bottom).toBe("");
+      vv.height = 300;
+      fireVv("resize");
+      expect(wrapper.style.bottom).toBe("");
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
+    it("opening on a compact viewport does not pop the keyboard", () => {
+      stubCompact({ mobile: true });
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const { root, widget, container } = mountSide(client);
+      const textarea = container.querySelector("textarea")!;
+
+      widget.open!();
+      // Focusing the textarea would open the on-screen keyboard and eat half the
+      // panel before anything is read. Focus lands on the dialog instead — the
+      // launcher that was just clicked is now display:none, so doing nothing
+      // would drop focus to <body> and restart Tab at the top of the host page.
+      expect(document.activeElement).toBe(container);
+      expect(document.activeElement).not.toBe(textarea);
 
       widget.destroy();
       root.remove();

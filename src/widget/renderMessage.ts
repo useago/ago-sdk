@@ -345,7 +345,9 @@ export function renderMessage(
       btn.textContent = reply;
       btn.disabled = !followUpEnabled;
       css(btn, {
-        minHeight: "36px",
+        // Suggested replies are the primary tap target of the whole suggestion
+        // pattern; 36px left them under the 44px comfortable minimum.
+        minHeight: "44px",
         padding: "6px 14px",
         fontSize: "14px",
         borderRadius: MESSAGE_RADIUS,
@@ -407,7 +409,10 @@ export function buildStreamingDots(): HTMLElement {
       width: "6px",
       height: "6px",
       borderRadius: "50%",
-      backgroundColor: "#b5bfc8",
+      // currentColor, not a fixed grey: the dots have to stay legible on a
+      // light panel and on a dark sheet alike.
+      backgroundColor: "currentColor",
+      opacity: "0.55",
       animation: "ago-pulse 1.2s ease-in-out infinite",
       animationDelay: `${i * 0.2}s`,
     });
