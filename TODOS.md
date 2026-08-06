@@ -43,53 +43,18 @@ review (plan: fix DX audit findings).
   definitions in a map; return live schemas).
 - **Effort:** S.
 
-## Mobile sheet (`peek`/`full`) — blocked on six API decisions (P2)
+## Glacier: the "agent acts, the sheet yields" differentiator (P2)
 
-Source: 2026-08-05 /autoplan review (plan:
-`.context/mobile-chat-plan.md`, branch `dmourot/mobile-chat-ux-research`).
-Deferred out of the mobile PR because three review phases independently
-concluded the sheet is not ready to implement.
-
-- **What:** A two-state (`peek` / `full`) mobile chat sheet, replacing the
-  current binary inline-card / fullscreen morph.
-- **Blocked on, all unanswered:**
-  1. Does the shared controller return a props bag, or mutate the DOM? React
-     re-renders per streamed token and re-applies its inline `style` object
-     (`ChatWidget.tsx:182-194`), clobbering imperative writes.
-  2. SSR/hydration: reading `matchMedia` during render throws in Node. Needs
-     `useSyncExternalStore` with a server snapshot of `false`.
-  3. `<dialog>`: you cannot promote `show()` to `showModal()` without closing
-     and re-parenting into the top layer, which kills the running transition.
-     Pick one of: explicit modal semantics on a normal element / two surfaces /
-     accept the discontinuity.
-  4. `bottomOffset` + `sheet: false`. A permanent near-max-z-index fixed
-     overlay on a third-party page is a CLAUDE.md scoping decision, and there
-     is currently no way at all to opt out of the mobile behavior
-     (`trigger: "manual"` does not do it, and is ignored for side placement,
-     `types.ts:246-250`).
-  5. Naming: `sheet {}` rather than `mobile {}` (the option is about layout,
-     not device); `expand()`/`collapse()` rather than `snapTo()` (drag-engine
-     vocabulary for a design with no drag). Keep `mobile` as a deprecated
-     alias for at least one minor.
-  6. Exact composition of `peek` (a spec exists in the plan's Phase 2, needs
-     sign-off).
-- **Depends on:** the mobile PR (shared lock manager, `isModal` predicate,
-  state machine, streaming-render fix) landing first.
-- **Effort:** L.
-
-## Glacier mobile sheet + the "agent acts, sheet yields" differentiator (P2)
-
-- **What:** (a) Glacier consuming the sheet; (b) the one behavior no competitor
-  can copy, because Intercom/Crisp/assistant-ui do not drive the host page: the
-  chat gets out of the way when the agent changes the page.
-- **Why (b) matters most:** on mobile today the result of an agent action is
-  off-screen behind the chat. Minimum viable version is example-side only, no
-  SDK API: on `useAgoActivity` action-done, `scrollIntoView({block:'center'})`
-  on the changed element plus a short highlight. ~15 lines.
-- **Blocked by:** (a) needs the sheet, and `ChatWidgetProps` has no `mobile`
-  prop, so Glacier cannot configure a breakpoint until that ships. (b) is NOT
-  blocked and can go any time.
-- **Effort:** (a) M, (b) S.
+- **What:** the one behavior no competitor can copy, because Intercom, Crisp and
+  assistant-ui do not drive the host page: the chat gets out of the way when the
+  agent changes the page.
+- **Why:** on mobile the result of an agent action can land behind the sheet.
+  Minimum viable version is example-side only, no SDK API: on `useAgoActivity`
+  action-done, `scrollIntoView({block:'center'})` on the changed element plus a
+  short highlight. Roughly 15 lines.
+- **Not blocked by anything.** The sheet itself shipped; this is the part that
+  makes it worth having.
+- **Effort:** S.
 
 ## Playwright smoke suite for the widget (P2)
 

@@ -797,6 +797,91 @@ describe("ChatWidget sheet", () => {
     client.destroy();
   });
 
+  it("does not stack a second title row while the sheet owns the chrome", async () => {
+    stubCompact(true);
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const { container, unmount } = await mount(
+      <AgoProvider client={client}>
+        <ChatWidget title="Comptoir" sheet={{}} />
+      </AgoProvider>,
+    );
+
+    // peek renders its own title, so the in-card header must step aside;
+    // otherwise every consumer without Glacier's `display: none` override gets
+    // two headers stacked.
+    expect(container.querySelector(".ago-chat-widget__header")).toBeNull();
+    const peek = container.querySelector<HTMLElement>(".ago-chat-widget__peek")!;
+    expect(peek.textContent).toContain("Comptoir");
+
+    await act(async () => {
+      peek.click();
+    });
+    expect(container.querySelector(".ago-chat-widget__header")).toBeNull();
+    expect(
+      container.querySelector(".ago-chat-widget__sheet-header")!.textContent,
+    ).toContain("Comptoir");
+
+    await unmount();
+    client.destroy();
+  });
+
+  it("traps Tab inside the expanded sheet", async () => {
+    stubCompact(true);
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const { container, unmount } = await mount(
+      <AgoProvider client={client}>
+        <ChatWidget sheet={{ initialState: "full" }} allowFiles />
+      </AgoProvider>,
+    );
+
+    // jsdom gives every element a zero-size rect, so the visibility filter would
+    // drop everything. Report a real box for the focusables.
+    for (const el of Array.from(container.querySelectorAll("*"))) {
+      Object.defineProperty(el, "getClientRects", {
+        configurable: true,
+        value: () => [{ width: 10, height: 10 }],
+      });
+    }
+    const focusables = Array.from(
+      container.querySelectorAll<HTMLElement>(
+        'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter((el) => el.getClientRects().length > 0);
+    expect(focusables.length).toBeGreaterThan(1);
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+
+    // `aria-modal` alone does not stop focus walking out into the background we
+    // just scroll-locked, which would strand the user off-screen.
+    last.focus();
+    const fwd = new KeyboardEvent("keydown", {
+      key: "Tab",
+      bubbles: true,
+      cancelable: true,
+    });
+    await act(async () => {
+      document.dispatchEvent(fwd);
+    });
+    expect(fwd.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(first);
+
+    first.focus();
+    const back = new KeyboardEvent("keydown", {
+      key: "Tab",
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    await act(async () => {
+      document.dispatchEvent(back);
+    });
+    expect(back.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(last);
+
+    await unmount();
+    client.destroy();
+  });
+
   it("leaves room for a host bottom nav via bottomOffset", async () => {
     stubCompact(true);
     const client = new AgoClient({ baseUrl: "https://example.test" });

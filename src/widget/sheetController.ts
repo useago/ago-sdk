@@ -17,6 +17,8 @@
  * `role="dialog"` / `aria-modal` / focus trapping from `isModal` instead.
  */
 
+import { RADIUS } from "./styles";
+
 /** The two resting states. There is no `half`: it needs a drag engine to be worth having. */
 export type SheetState = "peek" | "full";
 
@@ -149,7 +151,11 @@ export function createSheetController(
       zIndex: SHEET_Z_INDEX,
       display: "flex",
       flexDirection: "column",
-      borderRadius: current === "full" ? "0" : "16px 16px 0 0",
+      // Through the theming token, like every other rounded surface in the
+      // widget: radius is part of the public contract, so a host setting
+      // `--ago-radius` must not find the sheet ignoring it.
+      borderRadius:
+        current === "full" ? "0" : `${RADIUS} ${RADIUS} 0 0`,
       paddingBottom: "env(safe-area-inset-bottom)",
     };
     if (current === "full") {

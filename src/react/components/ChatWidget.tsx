@@ -87,7 +87,13 @@ export interface ChatWidgetProps {
 
 /** Imperative handle exposed via `ref`. */
 export interface ChatWidgetHandle {
-  /** Expand the sheet to full screen. No-op unless the sheet is on and compact. */
+  /**
+   * Expand the sheet to full screen.
+   *
+   * Only the presentation is gated on a compact viewport: off-compact (or with
+   * the sheet disabled) nothing moves on screen, but the state still changes and
+   * `onStateChange` still fires. Guard on `state` if that matters to you.
+   */
   expand: () => void;
   /** Collapse back to `peek`. The draft and the conversation are kept. */
   collapse: () => void;
@@ -276,7 +282,39 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
     const owner = Symbol("ago-react-sheet");
     lockBackgroundScroll(owner);
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") collapse("user");
+      if (e.key === "Escape") {
+        collapse("user");
+        return;
+      }
+      // Trap Tab inside the sheet. `aria-modal` alone does not stop keyboard
+      // focus from walking out into the background we just scroll-locked, which
+      // would strand the user somewhere they cannot see or scroll to. Mirrors
+      // the vanilla widget's `onModalKeydown`.
+      if (e.key !== "Tab") return;
+      const root = rootRef.current;
+      if (!root) return;
+      const focusables = Array.from(
+        root.querySelectorAll<HTMLElement>(
+          "a[href],button:not([disabled]),textarea:not([disabled])," +
+            'input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])',
+        ),
+        // getClientRects skips display:none subtrees, and unlike offsetParent it
+        // still sees position:fixed elements.
+      ).filter((el) => el.getClientRects().length > 0);
+      if (focusables.length === 0) {
+        e.preventDefault();
+        return;
+      }
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || !root.contains(active))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (active === last || !root.contains(active))) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     document.addEventListener("keydown", onKeyDown);
     // Move focus into the sheet, but NOT into the text field: focusing the
@@ -341,7 +379,10 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
         ...sheet.surface.style,
       }}
     >
-      {/* Header */}
+      {/* Header. Hidden while the sheet is up: `peek` and `full` each render
+          their own title row, and leaving this one in place stacks two of them.
+          The vanilla widget hides its in-card header for the same reason. */}
+      {!sheet.compact && (
       <div
         className="ago-chat-widget__header"
         style={{
@@ -365,6 +406,7 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
           {title}
         </h3>
       </div>
+      )}
 
       {/* Collapsed sheet: a named header plus a two-line preview of the last
           reply. A bare composer bar would show nothing at all while the agent is

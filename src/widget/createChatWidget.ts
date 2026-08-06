@@ -680,12 +680,15 @@ export function mountChatWidget(
    * Fast path for a streamed chunk: swap ONLY the bubble being written into.
    *
    * The full `render()` calls `replaceChildren()`, which is wrong to run per
-   * token for two reasons. Under `aria-live` every node becomes an "addition",
-   * so a screen reader re-reads the whole conversation on every chunk. And
-   * emptying the pane collapses `scrollHeight`, which clamps `scrollTop` to 0
-   * and emits a scroll event — so any "is the reader at the bottom?" check
-   * would latch to "they scrolled away" on the first token and never auto-scroll
-   * again. Swapping one node keeps both properties intact.
+   * token. Under `aria-live` every node becomes an "addition", so a screen
+   * reader re-reads the whole conversation on every chunk. It also re-parses
+   * the markdown of every message in the thread, on every token.
+   *
+   * Emptying the pane additionally collapses `scrollHeight` and clamps
+   * `scrollTop` to 0, which would latch the follow-the-bottom check off on the
+   * first token. That one is already neutralised for both paths by
+   * `withoutScrollTracking`, so it is a reason to keep that guard rather than a
+   * reason this fast path exists.
    *
    * Returns false when the thread shape means the fast path can't apply, so the
    * caller falls back to a full render.
@@ -1302,10 +1305,13 @@ export function mountChatWidget(
   // The side panel needs the same protection but a DIFFERENT write. Its
   // positioned element is `wrapper` (`position: fixed; top: 0; bottom: 0`);
   // `container` is a plain static flex child of it, so writing `top` on
-  // `container` — the inline path's move — has no effect at all there. For the
-  // side panel the one-property write is `bottom`: the wrapper is already
-  // anchored top and bottom, so raising `bottom` by the keyboard overlap
-  // shrinks it off the keyboard while keeping a single snapshot-driven write.
+  // `container` (the inline path's move) has no effect at all there. The side
+  // panel instead raises the wrapper's `bottom` by the keyboard overlap, which
+  // shrinks it clear of the keyboard, and sets `top` to the visible-viewport
+  // offset so it stays put when the page scrolls under it. Two writes rather
+  // than the inline path's one, but both come from the same snapshot in the
+  // same synchronous block, so they still land in a single repaint and the
+  // flashing-frame problem the coalescing exists to prevent does not return.
   function applyVh(): void {
     const vv = window.visualViewport;
     const top = vv?.offsetTop ?? 0;
