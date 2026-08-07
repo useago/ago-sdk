@@ -111,6 +111,46 @@ function Support() {
 | `onMessageSent?` | `(content) => void` | — |
 | `onMessageReceived?` | `({ id, content }) => void` | — |
 
+### Showing what the agent is doing
+
+While the agent works, the widget shows a status row naming the client function
+it is running rather than a bare typing indicator. That gap is widest during a
+pause/resume loop: the agent calls a function, the page fetches, and the
+per-message dots have already gone away because the first tokens arrived.
+
+```tsx
+<ChatWidget
+  functionLabels={{
+    lookupInvoices: "Looking up invoices",
+    setPageState: "Updating the page",
+  }}
+/>
+```
+
+A slow sheen travels across the label while the agent works, and each new step
+fades in as its own element, so a long step still looks alive and a change of
+step reads as a continuation. Re-skin it with `--ago-activity-color`,
+`--ago-activity-sheen` and `--ago-activity-bg`; the animation stops under
+`prefers-reduced-motion`.
+
+The label renders simple inline Markdown (`**bold**`, `*italic*`, `` `code` ``)
+and shows no animated dots beside it: the text is the progress indicator. While
+the row is up, the not-yet-written answer bubble drops its dots too, so you
+never get both at once. Building your own list? `<Message showStreamingDots={false}>`
+does the same thing.
+
+The row keeps each step on screen until another one replaces it or the turn
+ends, rather than clearing when the call returns: a function that takes 40 ms
+would otherwise flash and read as nothing. The agent's `reasoning` steps appear
+in the same row (`showReasoning={false}` to leave them out), so it does not go
+blank between two calls.
+
+Unmapped function names fall back to a prettified version of the name, so the
+row works without configuring anything. Pass a function for full control
+(`(name, args) => string`), or `functionLabels={false}` to keep the plain
+indicator. Building your own UI? [`useAgoActivity`](#useagoactivity) is the same
+data source, with approvals and server-side tool calls included.
+
 ### Stop button
 
 While the agent answers, `<ChatWidget>` turns its send button into a **Stop**
@@ -466,6 +506,53 @@ state before it changes it. Pass `{ functionName }` to rename the function, and
 it re-registers only when the client or that name changes (`set`/`get` closures
 can change every render without churn). The glacier example dogfoods this: the
 ice cream's cone, scoops and toppings are page-state controls.
+
+#### Give the agent back what the page shows
+
+On its own, `setPageState` returns `{ success, applied }`: the agent learns its
+arguments were accepted, not what appeared. Add a `data` source and the rows come
+back as the result of its own call, in the same turn.
+
+```tsx
+const { data: invoices, isFetching } = useQuery({
+  queryKey: ["invoices", status, sort],
+  queryFn: fetchInvoices,
+});
+
+useAgoPageState(controls, {
+  data: {
+    description: "The invoices matching the current filters.",
+    get: () => invoices ?? [],
+    isLoading: () => isFetching,     // isFetching, not isLoading
+  },
+});
+```
+
+`setPageState` then returns `{ success, applied, data }`, and a read-only
+`readPageData` function is registered alongside it for "what's on screen?"
+questions.
+
+Better still, return a promise from `get()` and the SDK awaits it instead of
+polling a flag, which removes the timing guess entirely:
+
+```tsx
+useAgoPageState(controls, {
+  data: {
+    description: "The invoices matching the current filters.",
+    get: () => queryClient.ensureQueryData({ queryKey: ["invoices", status], queryFn: fetchInvoices }),
+  },
+});
+```
+
+If you stay on `isLoading`, pass `isFetching`: TanStack Query's `isLoading` is
+only true on the very first load, so a background refetch would read as idle.
+Note the poll only gives the flag ~100 ms to go up, so a debounced fetch needs
+the promise form. Over the size ceiling
+(`maxResultBytes`, default 50 000 bytes) the snapshot keeps the first whole rows
+that fit and adds a `truncation` field (`{ truncated, returnedItems, totalItems,
+hint }`) beside them. `success` and `applied` are never dropped. The round trip needs `clientFunctionsMode: "pause"`
+(the default). See
+[functions and context](../general/functions-and-context.md#return-what-the-page-displays).
 
 ### Navigate then change the page: `useAgoAutoContinueAfterNavigation`
 

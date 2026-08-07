@@ -666,6 +666,26 @@ useAgoPageState([
 ]);
 ```
 
+Add a `data` source to hand the agent the resulting rows as the result of its own
+call (same turn), instead of only as context on the next message:
+
+```tsx
+const { data: invoices, isFetching } = useQuery({ queryKey: ["invoices", status], queryFn: fetchInvoices });
+
+useAgoPageState(controls, {
+  data: {
+    description: "The invoices matching the current filters.",
+    get: () => invoices ?? [],
+    isLoading: () => isFetching,   // isFetching, not isLoading: a background refetch must count
+  },
+});
+```
+
+`setPageState` then returns `{ success, applied, data }` and a read-only
+`readPageData` function is registered too. The SDK waits for `isLoading` to go
+false before reading, and truncates a long list by whole rows. Needs
+`clientFunctionsMode: "pause"` (the default).
+
 ## 6. Give the agent context: `useAgoContext`
 
 Expose what the user is looking at, sent with every message.
@@ -1438,10 +1458,97 @@ This does two things:
   current `get()` value, so the agent knows what to change. Controls without a
   `get()` are write-only and don't appear in context.
 
-It's fire-and-forget: the handler applies each `set()` locally and returns
-`{ success, applied }`. The new state reaches the agent through the context on
-the next message. React/Vue offer `useAgoPageState(controls, opts?)` with
-lifecycle cleanup; Angular exposes `agoService.registerPageStateFunction(...)`.
+By default it's fire-and-forget: the handler applies each `set()` locally and
+returns `{ success, applied }`. The new state reaches the agent through the
+context on the next message. React/Vue offer `useAgoPageState(controls, opts?)`
+with lifecycle cleanup; Angular exposes
+`agoService.registerPageStateFunction(...)`.
+
+### Return what the page displays
+
+`{ success, applied }` only tells the agent its own arguments were accepted. Ask
+it to "find the user dupont" and it applies the filter but cannot say who it
+found: the rows only reach it on the next message, as context.
+
+Add a `data` source and the rows come back as the result of the agent's own
+call, in the same turn:
+
+```ts
+const { data: users, isFetching } = useQuery({
+  queryKey: ["users", filters],
+  queryFn: fetchUsers,
+});
+
+useAgoPageState(controls, {
+  data: {
+    description: "The users matching the current filters.",
+    get: () => users ?? [],
+    isLoading: () => isFetching,
+  },
+});
+```
+
+`setPageState` now returns `{ success, applied, data }`, and a second function
+`readPageData` is registered: no parameters, changes nothing, returns `{ data }`.
+That one answers "what's on screen?" without touching the page. Both disappear
+when you unregister.
+
+#### Telling the SDK when the work is done
+
+A control change kicks off work, and the SDK has to wait for it. There are two
+ways to say when it finished. They are not equivalent.
+
+**Return a promise from `get()`.** You own the await, so the SDK is exact: it
+resolves when your work resolves. No polling, no timing assumption. With
+TanStack Query, `ensureQueryData` hands you that promise and shares the single
+in-flight request with the UI, so the data is not fetched twice:
+
+```ts
+useAgoPageState(controls, {
+  data: {
+    description: "The users matching the current filters.",
+    get: () => queryClient.ensureQueryData({
+      queryKey: ["users", filters],
+      queryFn: fetchUsers,
+    }),
+  },
+});
+```
+
+**Or declare `isLoading`**, for data you cannot get a promise for. The SDK polls
+it every 50 ms and treats two consecutive `false` readings as settled. That is a
+heuristic: the flag has to be up within ~100 ms of the change, or the SDK
+concludes the page settled and reads the previous rows. A query library that
+flips `isFetching` during render makes it in time; a **debounced** fetch does
+not, and the agent then answers with the previous search's results, silently.
+
+If you do use it, pass `isFetching`, not `isLoading`: TanStack Query's
+`isLoading` is only true on the very first load, so a background refetch would
+look idle.
+
+Both forms are bounded by `settleTimeoutMs` (10 s by default). On timeout the
+SDK returns what the page has rather than holding the turn open. If `get()`
+rejects, the agent is told the read failed instead of being handed an empty
+page.
+
+Two things to keep in mind:
+
+- **Size.** The snapshot lands in the model's context. Over
+  `maxResultBytes` (the client's `maxFunctionResultBytes`, 50 000 by default)
+  the SDK keeps the first whole items that fit and adds a `truncation` field
+  (`{ truncated, returnedItems, totalItems, hint }`) next to them. The counts
+  are nested rather than merged into your snapshot so they can never overwrite
+  a field of your own called `totalItems`. `success` and `applied` always
+  survive intact. Return the columns the agent needs, not your whole row
+  objects.
+- **Pause mode only.** The result travels back inside the turn only when
+  `clientFunctionsMode` is `"pause"` (the default). In `"placeholder"` mode the
+  turn is already over by then, so the agent will not see the data during the
+  call that produced it; the SDK warns once if you declare `data` anyway.
+
+The snapshot deliberately stays out of the `page-state:` context entry, which
+keeps carrying control values only. Putting 200 rows in every message would cost
+a lot for nothing: the data travels only when the agent asks for it.
 
 The SDK also tells the agent **what changed**: on each message it diffs the page
 state against the previous message and adds a `state:delta` entry listing the
