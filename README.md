@@ -145,6 +145,30 @@ so the agent changes only what the user asked for. The current value from each
 `get()` is sent with every message, so the agent knows the state before it
 changes it. Vue and Angular have the same helper.
 
+Add a `data` source and the agent also gets back **what the page now shows**, as
+the result of its own call, so it can answer "did you find dupont?" in the same
+turn:
+
+```tsx
+const { data: invoices, isFetching } = useQuery({
+  queryKey: ["invoices", status, sort],
+  queryFn: fetchInvoices,
+});
+
+useAgoPageState(controls, {
+  data: {
+    description: "The invoices matching the current filters.",
+    get: () => invoices ?? [],
+    isLoading: () => isFetching,   // isFetching, not isLoading
+  },
+});
+```
+
+The SDK waits for `isLoading` to go false before reading, so the agent never
+receives the previous search's rows, and it truncates a long list by whole rows
+rather than sending a huge payload. Details in
+[functions and context](docs/general/functions-and-context.md#return-what-the-page-displays).
+
 ## Turn a JavaScript function into an agent tool
 
 Keep your application logic as a regular JavaScript function, then describe its

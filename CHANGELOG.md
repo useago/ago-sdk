@@ -5,6 +5,121 @@ All notable changes to `@useago/sdk` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-08-07
+
+### Added
+
+- `registerPageStateFunction` / `useAgoPageState` accept a `data` source, so the
+  agent gets back **what the page displays** as the result of its own
+  `setPageState` call instead of only as context on the next message. An agent
+  that filters a list can now say what it found.
+
+  ```ts
+  useAgoPageState(controls, {
+    data: {
+      description: "The users matching the current filters.",
+      get: () => users ?? [],
+      isLoading: () => isFetching, // isFetching, not isLoading
+    },
+  });
+  ```
+
+  `setPageState` then returns `{ success, applied, data }`. Declaring `data`
+  also registers a read-only `readPageData` companion (no parameters, changes
+  nothing, returns `{ data }`) for "what's on screen?" questions; it is removed
+  by `unregisterPageStateFunction`.
+- The SDK waits for the work a control change triggered before reading the
+  snapshot. Two ways to tell it when that work is done:
+  - **`get()` returns a promise** (preferred): awaiting it *is* the completion
+    signal, so the SDK is exact. `get: () => queryClient.ensureQueryData({...})`
+    shares the single in-flight request with the UI.
+  - **`isLoading` is declared**: the SDK polls it every 50 ms and treats two
+    consecutive idle readings as settled. A heuristic, and a flag raised more
+    than ~100 ms after the change (a debounced fetch) is missed, so the agent
+    reads the previous rows.
+
+  Both are capped by `settleTimeoutMs` (10 s by default); a promise that never
+  settles no longer holds the turn open, and a rejected `get()` is reported to
+  the agent as a failed read instead of an empty page.
+- Oversized snapshots are truncated **by item**: the first whole items that fit
+  the budget (`data.maxResultBytes`, defaulting to `maxFunctionResultBytes`) plus
+  a `truncation` field carrying `{ truncated, returnedItems, totalItems, hint }`.
+  The counts are nested so they cannot overwrite a same-named field of your own
+  snapshot. `success` and `applied` are never dropped, so a filter that worked is
+  never reported as an unusable blob. When the snapshot's other fields overflow
+  on their own, it falls back to a size-bounded preview rather than returning
+  something over the ceiling.
+- A `readPageData` companion is only removed by the SDK if the SDK registered it,
+  so a host app that already has a function by that name keeps it, and
+  re-registering a page-state function without `data` drops the stale companion
+  instead of letting it answer with the previous page's rows.
+- `AgoPageDataSource` is exported from the root, `/react`, `/vue` and `/angular`
+  entries.
+- `<ChatWidget>` now says **what the agent is doing** while it works, instead of
+  three dots. While a client function is running it shows a status row naming it
+  ("Updating the page", "Looking up prices"), which matters most during a
+  pause/resume loop: the per-message dots disappear as soon as the first token
+  lands, so a tool pause after some text had been written showed nothing at all.
+
+  ```tsx
+  <ChatWidget functionLabels={{ lookupFlavorPrices: "Je regarde les prix" }} />
+  ```
+
+  The row shows the latest step of the current turn and **keeps it until
+  something replaces it** (another call, a reasoning step) or the turn ends.
+  Clearing it when the call returned made a fast function flash for a few frames
+  and read as nothing at all. The agent's `reasoning` steps are included by
+  default (`showReasoning={false}` to leave them out), so the row does not go
+  blank between two calls.
+
+  `functionLabels` takes a map, or a function `(name, args) => string` for full
+  control. Unmapped names fall back to a prettified function name, so the row
+  works with no configuration. Pass `false` to keep the plain indicator. The row
+  is a `role="status"` live region and is driven by the existing
+  `useAgoActivity` hook, so it covers server-side tool calls and approval holds
+  too. It is scoped to the assistant message being written, so a new turn never
+  opens showing the previous one's last step.
+
+  The label itself is animated: a slow sheen keeps travelling across the text,
+  so a step that sits for several seconds (a fetch, a settle wait) reads as
+  still working rather than stuck, and each new step fades in as its own node so
+  one visibly gives way to the next instead of the characters swapping in place.
+  Colours go through `--ago-activity-color` / `--ago-activity-sheen` /
+  `--ago-activity-bg`; the sheen is behind `@supports (background-clip: text)`
+  and stops under `prefers-reduced-motion`.
+
+  The label carries no animated dots, and the answer bubble above it drops its
+  own while the row is up: the text already reads as progress, and the two
+  together were just noise. `<Message>` takes a `showStreamingDots` prop for
+  the same reason in a custom UI (`false` removes the empty bubble entirely
+  rather than leaving a blank box). It renders simple inline Markdown
+  (`**bold**`, `*italic*`, `` `code` ``) so a backend reasoning step keeps its
+  emphasis; block Markdown is deliberately not supported there, since a
+  paragraph or a table would break a one-line row.
+
+Omit `data` and the result stays exactly `{ success, applied }`, byte for byte.
+The snapshot stays out of the `page-state:` context entry, so it travels only
+when the agent asks for it. The intra-turn round trip requires
+`clientFunctionsMode: "pause"` (the default); the SDK warns once if `data` is
+declared in `"placeholder"` mode.
+
+### Fixed
+
+- Client functions executed on the resume path (after a reload, via
+  `resumePendingClientFunctions`) now emit `function:invoke` and
+  `function:result` like the live stream does. A UI driven by those events used
+  to sit on a spinner for those calls.
+- An agent calling the same client function twice in one turn no longer strands
+  the turn. The per-stream dedupe (which exists because the backend emits one
+  call under two SSE shapes) keyed on function name + arguments alone, so a
+  second call with identical arguments was swallowed: its result was never
+  submitted, the backend never saw every result, and the paused turn stayed in
+  `WAITING_CLIENT` forever. It now uses the invocation id to tell a repeat call
+  apart from a repeat *emission* of the same call. Zero-argument functions (such
+  as the new `readPageData`) hit this every time.
+- Vue's `useAgoPageState` no longer drops `requiresApproval` (and now forwards
+  every option, matching React and Angular).
+
 ## [1.6.2] - 2026-08-06
 
 ### Fixed

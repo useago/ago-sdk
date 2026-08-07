@@ -223,6 +223,26 @@ useAgoPageState([
 ]);
 ```
 
+Add a `data` source to hand the agent the resulting rows as the result of its own
+call (same turn), instead of only as context on the next message:
+
+```tsx
+const { data: invoices, isFetching } = useQuery({ queryKey: ["invoices", status], queryFn: fetchInvoices });
+
+useAgoPageState(controls, {
+  data: {
+    description: "The invoices matching the current filters.",
+    get: () => invoices ?? [],
+    isLoading: () => isFetching,   // isFetching, not isLoading: a background refetch must count
+  },
+});
+```
+
+`setPageState` then returns `{ success, applied, data }` and a read-only
+`readPageData` function is registered too. The SDK waits for `isLoading` to go
+false before reading, and truncates a long list by whole rows. Needs
+`clientFunctionsMode: "pause"` (the default).
+
 ## 6. Give the agent context: `useAgoContext`
 
 Expose what the user is looking at, sent with every message.
