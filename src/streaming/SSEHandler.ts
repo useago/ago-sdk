@@ -76,6 +76,9 @@ export interface SSEHandlerOptions {
   signal?: AbortSignal;
 }
 
+/** Placeholder id for the raw-state form, which carries no invocation id. */
+const NO_INVOCATION_ID = "";
+
 /**
  * Handles SSE streaming responses from AGO backend
  */
@@ -88,10 +91,11 @@ export class SSEHandler {
   private isFirstChunk = true;
   private answerCompleteEmitted = false;
   private waitingClientEmitted = false;
-  // Client-function invocations already dispatched this stream, keyed by name +
-  // arguments. The backend emits the same call under two SSE shapes (see below),
-  // so this guards a handler from running twice (e.g. a duplicate form submit).
-  private firedClientFunctions = new Set<string>();
+  // Client-function invocations already dispatched this stream: name+arguments
+  // -> the invocation ids seen for that shape. The backend emits the same call
+  // under two SSE shapes (see handleChunk), so this guards a handler from
+  // running twice, while still letting the agent call one function repeatedly.
+  private firedClientFunctions = new Map<string, Set<string>>();
 
   constructor(
     private callbacks: SSEHandlerCallbacks,
@@ -264,14 +268,38 @@ export class SSEHandler {
     // event or the raw state dict streamed by the backend (which has no
     // tool_call_data flag). Either form is enough to run the registered handler,
     // but the backend can emit BOTH for one call, so dedupe to run it once.
-    // The id is absent on the raw-state form, so key on the stable function name
-    // + arguments rather than the invocation id.
+    //
+    // Keying on name + arguments alone is not enough: an agent can legitimately
+    // call the same function twice in one turn with the same arguments (a
+    // zero-argument function like `readPageData` collapses to one key every
+    // time). Swallowing the second means its result is never submitted, the
+    // backend never sees every result, and the paused turn never resumes. So
+    // the invocation id breaks the tie when the backend provides one.
     if (data.type === "client_function" && data.function_name) {
       const key = `${data.function_name}::${stableStringify(data.arguments ?? {})}`;
-      if (!this.firedClientFunctions.has(key)) {
-        this.firedClientFunctions.add(key);
+      const invocationId = data.id || "";
+      const seenIds = this.firedClientFunctions.get(key);
+
+      let fire = false;
+      if (!seenIds) {
+        this.firedClientFunctions.set(key, new Set([invocationId]));
+        fire = true;
+      } else if (invocationId && !seenIds.has(invocationId)) {
+        if (seenIds.has(NO_INVOCATION_ID)) {
+          // We saw this call in its id-less raw-state form first. This is the
+          // same call arriving with its id, not a new one: adopt the id.
+          seenIds.delete(NO_INVOCATION_ID);
+          seenIds.add(invocationId);
+        } else {
+          // Same shape, a different invocation id: a genuinely separate call.
+          seenIds.add(invocationId);
+          fire = true;
+        }
+      }
+
+      if (fire) {
         this.callbacks.onClientFunction?.({
-          invocationId: data.id || "",
+          invocationId,
           functionName: data.function_name,
           arguments: data.arguments || {},
           conversationId: this.message.conversationId || "",
