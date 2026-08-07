@@ -1,6 +1,12 @@
 import { defineFunction } from '@useago/sdk';
 import type { AgoStateControl } from '@useago/sdk';
 import { CONES, type ConeType, FLAVORS, FLAVOR_IDS, TOPPINGS, TOPPING_IDS } from './flavors';
+import {
+  fetchMarketPrices,
+  MARKET_PRICES_URL,
+  marketPriceOf,
+  type MarketPrices,
+} from './marketPrices';
 import { computeCartTotal, computePrice, type IceCreamState } from './pricing';
 
 export { computeCartTotal, computePrice, type IceCreamState } from './pricing';
@@ -217,6 +223,38 @@ export function buildIceCreamFunctions(store: OrderStore) {
     placeOrder,
   };
 }
+
+// Tous les prix, d'un coup. Aucun argument : c'est à l'agent de lire la grille
+// et d'en tirer ce qu'on lui demande (le moins cher, deux parfums sous 3 €,
+// l'écart maison/marché). On ne pré-mâche pas la réponse côté front, sinon on
+// ne teste plus son raisonnement, juste notre tri.
+export const lookupFlavorPrices = defineFunction({
+  name: 'lookupFlavorPrices',
+  description:
+    "Prix de TOUS les parfums de la carte, en euros : le tarif maison à la boule et le cours du jour du service de prix externe. Aucun argument. À appeler pour toute question de prix, de comparaison ou de total.",
+  parameters: { type: 'object', properties: {} },
+  handler: async () => {
+    let prices: MarketPrices;
+    try {
+      prices = await fetchMarketPrices();
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+
+    return {
+      ok: true,
+      source: MARKET_PRICES_URL,
+      devise: 'EUR',
+      parfums: FLAVOR_IDS.map((id) => ({
+        id,
+        nom: FLAVORS[id].name,
+        prixMaisonEuros: FLAVORS[id].pricePerScoop,
+        // null = ce parfum n'est pas coté par le service de prix.
+        coursDuJourEuros: marketPriceOf(id, prices),
+      })),
+    };
+  },
+});
 
 // Calls a public API (Wikipedia) and deliberately returns the RAW response,
 // 100 KB to several hundred KB of article HTML, to exercise the SDK's

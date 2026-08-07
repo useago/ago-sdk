@@ -1314,6 +1314,16 @@ button { font-family: var(--font-body); }
   box-shadow: 0 5px 14px rgba(30, 23, 18, 0.16) !important;
 }
 
+/* Ligne « ce que fait l'agent ». Le SDK expose des tokens --ago-activity-*,
+   donc pas besoin de réécrire la règle : on donne juste la palette boutique.
+   Le reflet doit être plus clair que le texte pour se voir passer dessus. */
+.ago-activity {
+  --ago-activity-bg: rgba(255, 252, 245, 0.10);
+  --ago-activity-color: var(--cream);
+  --ago-activity-sheen: #fff;
+  border: 1px solid var(--gold-soft) !important;
+}
+
 .ago-message--assistant .ago-message__content :where(p, li, strong, em, code) {
   color: inherit !important;
 }
