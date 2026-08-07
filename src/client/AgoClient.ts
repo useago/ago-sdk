@@ -7,7 +7,14 @@ import type {
   SubmitConfig,
 } from "../forms/createFormCollector";
 import { FunctionRegistry } from "../functions/FunctionRegistry";
+import {
+  byteLength as pageDataByteLength,
+  DEFAULT_SETTLE_TIMEOUT_MS,
+  readWhenSettled,
+  truncatePageData,
+} from "../functions/pageData";
 import type {
+  AgoPageDataSource,
   AgoPageStateOptions,
   AgoStateControl,
   ClientFunctionDefinition,
@@ -167,6 +174,15 @@ const ACTIVITY_CONTEXT_KEY = "activity:recent";
 const STATE_DELTA_CONTEXT_KEY = "state:delta";
 
 /**
+ * Name of the read-only companion to a page-state function: `readPageData` for
+ * the default `setPageState`, `read<Fn>Data` for a custom name.
+ */
+function readDataFunctionName(fnName: string): string {
+  if (fnName === "setPageState") return "readPageData";
+  return `read${fnName.charAt(0).toUpperCase()}${fnName.slice(1)}Data`;
+}
+
+/**
  * Main SDK client for AGO Chat integration
  */
 export class AgoClient {
@@ -180,6 +196,12 @@ export class AgoClient {
 
   /** Conversations already warned about an empty reply (one warning each). */
   private warnedEmptyConversations = new Set<string>();
+
+  /** Whether the placeholder-mode page-data warning has already been logged. */
+  private warnedPageDataPlaceholder = false;
+
+  /** `readPageData` companions this SDK registered, so cleanup only removes its own. */
+  private pageDataCompanions = new Set<string>();
 
   /** Paused turns awaiting auto-resume, keyed by assistant message id. */
   private pendingResumes = new Map<string, PendingResume>();
@@ -1092,6 +1114,10 @@ export class AgoClient {
         ready = false;
         continue;
       }
+      // Same events as the live stream, so a UI showing what the agent is
+      // doing keeps working for calls that run after a reload instead of
+      // silently sitting on a spinner.
+      this.eventEmitter.emit("function:invoke", invocation);
       let result: unknown;
       let error: string | undefined;
       try {
@@ -1103,6 +1129,11 @@ export class AgoClient {
         error = err instanceof Error ? err.message : "Unknown error";
         logger.error("Client function execution failed:", err);
       }
+      this.eventEmitter.emit("function:result", {
+        invocationId: call.id,
+        result,
+        error,
+      });
       const submitResult = await this.submitToolCallForm(call.id, {
         result,
         error,
@@ -1463,6 +1494,11 @@ export class AgoClient {
    *   },
    * ]);
    * ```
+   *
+   * Pass `opts.data` and the agent also gets back **what the page now shows**,
+   * as the result of its own call, instead of having to wait for the next
+   * message's context. That also registers a read-only `readPageData`
+   * companion. See {@link AgoPageDataSource}.
    */
   registerPageStateFunction(
     controls: AgoStateControl[],
@@ -1470,6 +1506,7 @@ export class AgoClient {
   ): void {
     const fnName = opts?.functionName ?? "setPageState";
     const byName = new Map(controls.map((c) => [c.name, c]));
+    const dataSource = opts?.data;
 
     const controlDescriptions = controls
       .map((c) => `- "${c.name}": ${c.description}`)
@@ -1487,10 +1524,26 @@ export class AgoClient {
           await control.set(value);
           applied[key] = value;
         }
-        return { success: true, applied };
+        // No data source: the result stays byte-for-byte what it always was.
+        if (!dataSource) return { success: true, applied };
+        const data = await this.readPageData(fnName, dataSource, opts);
+        return {
+          success: true,
+          applied,
+          data: truncatePageData(
+            fnName,
+            data,
+            this.pageDataBudget(dataSource) -
+              this.envelopeBytes({ success: true, applied })
+          ),
+        };
       },
       {
-        description: `Change the state of the current page. Set ONLY the controls the user explicitly asked for; leave the others unset. Available controls:\n${controlDescriptions}`,
+        description:
+          `Change the state of the current page. Set ONLY the controls the user explicitly asked for; leave the others unset. Available controls:\n${controlDescriptions}` +
+          (dataSource
+            ? `\nReturns the resulting page data once it has loaded: ${dataSource.description}`
+            : ""),
         parameters: {
           type: "object",
           properties: Object.fromEntries(
@@ -1502,8 +1555,37 @@ export class AgoClient {
           // All optional: the agent sets only what the user asked for.
         },
         requiresApproval: opts?.requiresApproval,
+        // Only pin a ceiling when the page asked for one; otherwise the
+        // registry's live default applies, so `updateConfig` still moves it.
+        maxResultBytes: dataSource?.maxResultBytes,
       }
     );
+
+    const companion = readDataFunctionName(fnName);
+    if (dataSource) {
+      this.warnIfPlaceholderMode(fnName);
+      this.registerFunction(
+        companion,
+        async () => ({
+          data: truncatePageData(
+            fnName,
+            await this.readPageData(fnName, dataSource, opts),
+            this.pageDataBudget(dataSource) - this.envelopeBytes({})
+          ),
+        }),
+        {
+          description: `Read what the current page is displaying, without changing anything: ${dataSource.description}`,
+          parameters: { type: "object", properties: {} },
+          maxResultBytes: dataSource.maxResultBytes,
+        }
+      );
+      this.pageDataCompanions.add(companion);
+    } else if (this.pageDataCompanions.delete(companion)) {
+      // Re-registering the same page-state function without a data source:
+      // drop the companion this SDK created earlier, or it keeps answering
+      // with the previous page's rows.
+      this.unregisterFunction(companion);
+    }
 
     // Surface the current value of every control that can be read, so the agent
     // knows what to change. Re-evaluated on every message (like navigation is
@@ -1524,13 +1606,78 @@ export class AgoClient {
   }
 
   /**
-   * Unregister a page state function and its dynamic context provider.
-   * Mirror of unregistering `navigateToPage`.
+   * Unregister a page state function, its `readPageData` companion, and its
+   * dynamic context provider. Mirror of unregistering `navigateToPage`.
    */
   unregisterPageStateFunction(functionName?: string): void {
     const fnName = functionName ?? "setPageState";
     this.unregisterFunction(fnName);
+    // Only remove the companion if this SDK created it. `readPageData` is a
+    // name a host app could plausibly use for its own function, and unmounting
+    // a page-state hook must not delete it.
+    const companion = readDataFunctionName(fnName);
+    if (this.pageDataCompanions.delete(companion)) {
+      this.unregisterFunction(companion);
+    }
     this.removeDynamicContext(`page-state:${fnName}`);
+  }
+
+  /**
+   * Size ceiling for a page snapshot, before the envelope is accounted for.
+   * Read at call time, not at registration, so `updateConfig` moves it.
+   */
+  private pageDataBudget(source: AgoPageDataSource): number {
+    return (
+      source.maxResultBytes ?? this.functionRegistry.getDefaultMaxResultBytes()
+    );
+  }
+
+  /** Bytes the non-`data` part of the result costs, `data` included as `null`. */
+  private envelopeBytes(rest: Record<string, unknown>): number {
+    return pageDataByteLength(JSON.stringify({ ...rest, data: null })) - 4; // "null"
+  }
+
+  /**
+   * Wait for the page to stop reloading, then read the snapshot. `get` and
+   * `isLoading` are re-read from `source` on every tick so a re-render that
+   * swaps the closures (without re-registering) is picked up mid-wait.
+   */
+  private readPageData(
+    fnName: string,
+    source: AgoPageDataSource,
+    opts?: AgoPageStateOptions
+  ): Promise<unknown> {
+    return readWhenSettled(
+      () => source,
+      opts?.settleTimeoutMs ?? DEFAULT_SETTLE_TIMEOUT_MS
+    ).catch((error) => {
+      logger.warn(`Reading page data for "${fnName}" failed:`, error);
+      // Returning undefined would drop the `data` key entirely on the way to
+      // JSON, and the agent would read that as "no results" rather than "the
+      // read failed". Say so explicitly instead.
+      return {
+        error: "page_data_unavailable",
+        message: error instanceof Error ? error.message : String(error),
+      };
+    });
+  }
+
+  /**
+   * The snapshot only reaches the agent inside the same turn in pause mode,
+   * where the SDK submits the tool result and resumes. In placeholder mode the
+   * turn is already over, so a `data` source looks broken from the outside:
+   * say so once rather than let the integrator hunt for an SDK bug.
+   */
+  private warnIfPlaceholderMode(fnName: string): void {
+    if (this.warnedPageDataPlaceholder) return;
+    if (this.config.clientFunctionsMode !== "placeholder") return;
+    this.warnedPageDataPlaceholder = true;
+    logger.warn(
+      `"${fnName}" declares a data source, but clientFunctionsMode is ` +
+        `"placeholder": the agent will not see that data during the turn it ` +
+        `calls the function. Switch to "pause" (the default) for the data to ` +
+        "come back as the result of its own call."
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────

@@ -72,6 +72,7 @@ export type { ActivityEntry, ActivityInput } from "./activity/ActivityLedger";
 export { defineFunction } from "./functions/defineFunction";
 export { FunctionRegistry } from "./functions/FunctionRegistry";
 export type {
+  AgoPageDataSource,
   AgoPageStateOptions,
   AgoStateControl,
   ClientFunctionDefinition,

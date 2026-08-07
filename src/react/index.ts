@@ -45,7 +45,11 @@ export type { UseChatOptions, UseChatResult } from "./hooks/useChat";
 
 export { useAgoFunction, useAgoNavigation, useAgoPageState } from "./hooks/useAgoFunction";
 export type { UseAgoFunctionOptions, AgoRoute } from "./hooks/useAgoFunction";
-export type { AgoStateControl, AgoPageStateOptions } from "../functions/types";
+export type {
+  AgoStateControl,
+  AgoPageStateOptions,
+  AgoPageDataSource,
+} from "../functions/types";
 
 export { useAgoAutoContinueAfterNavigation } from "./hooks/useAgoAutoContinue";
 export type { AgoAutoContinueOptions } from "./hooks/useAgoAutoContinue";

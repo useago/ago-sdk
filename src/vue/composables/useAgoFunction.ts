@@ -96,6 +96,19 @@ export function useAgoNavigation(
  *   },
  * ]);
  * ```
+ *
+ * Pass `opts.data` to also hand the agent what the page ends up displaying, as
+ * the result of its own `setPageState` call:
+ *
+ * ```ts
+ * useAgoPageState(controls, {
+ *   data: {
+ *     description: "The rows matching the current filters.",
+ *     get: () => rows.value,
+ *     isLoading: () => isFetching.value,
+ *   },
+ * });
+ * ```
  */
 export function useAgoPageState(
   controls: AgoStateControl[],
@@ -105,7 +118,9 @@ export function useAgoPageState(
   const fnName = opts?.functionName ?? "setPageState";
 
   onMounted(() => {
-    client.registerPageStateFunction(controls, { functionName: fnName });
+    // Closures over refs are already live in Vue, so the options go through
+    // untouched — only the name is defaulted.
+    client.registerPageStateFunction(controls, { ...opts, functionName: fnName });
   });
 
   onUnmounted(() => {
