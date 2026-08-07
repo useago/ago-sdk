@@ -42,6 +42,52 @@ logs every function the agent calls. See [`initDevPanel`](../../docs/general/dev
   [result size guard](../../docs/general/functions-and-context.md#result-size-limit)
   truncates it before it reaches the LLM. Watch the console warning and the
   dev panel.)
+- "Va sur la page parfums, passe au cours du jour et dis-moi le moins cher"
+  (the payoff of the page-state `data` option, see below)
+- "Fais-moi un pot avec les deux parfums les moins chers" (the agent calls
+  `lookupFlavorPrices`, which returns the whole grid with no ranking done for
+  it, and has to work out the answer itself)
+
+### The page returns what it displays
+
+`/parfums` can price its flavors two ways: the house tariff (`maison`) or the
+live rate (`marche`), fetched from
+[a public price service](https://useago.github.io/static-json-response/flavours-price.json).
+`priceSource` is a page-state control, so the agent can flip it. The catch: the
+switch fires an HTTP request, so for a moment the rows on screen are still the
+old ones.
+
+`src/FlavorsPage.tsx` therefore passes a `data` source to `useAgoPageState`:
+
+```ts
+data: {
+  description: 'Les parfums actuellement affichés…',
+  // A promise: the SDK awaits it, so it knows exactly when the work the
+  // change triggered has finished. ensure() shares the request already in
+  // flight for the UI, so the prices are fetched once.
+  get: async () => {
+    const live = priceSource === 'marche' ? await ensure() : null;
+    return { priceSource, parfums: [...] };
+  },
+}
+```
+
+The SDK awaits that promise, then returns the rows as the result of the agent's
+own `setPageState` call. So "passe au cours du jour et dis-moi le moins cher" is
+answered in one turn, with the prices that are actually on screen.
+
+The alternative is `isLoading: () => isFetching`, which the SDK polls. It works
+here, but it is a heuristic: the flag has to go up within ~100 ms of the change.
+Put a debounce in front of the fetch and the poll misses it, and the agent
+answers with the previous source's prices, confidently and wrongly. The promise
+cannot miss it.
+
+Declaring `data` also registers `readPageData`: no arguments, changes nothing,
+returns the same snapshot. That is what answers "qu'est-ce qui est affiché ?".
+
+Note `mint` (our Menthe glaciale) is not quoted by the service, which only
+lists `mint_chocolate_chip`. It comes back as `coursDuJourEuros: null` and shows
+"non coté" in the list view, rather than being silently priced wrong.
 
 ## How it works
 

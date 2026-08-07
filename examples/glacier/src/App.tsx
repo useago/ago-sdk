@@ -17,6 +17,7 @@ import {
   buildIceCreamFunctions,
   computeCartTotal,
   computePrice,
+  lookupFlavorPrices,
   lookupWikipediaArticle,
   type CartItem,
   type IceCreamState,
@@ -149,6 +150,30 @@ export default function App() {
     };
   }, [client]);
 
+  // Règle de prix, envoyée avec chaque message. Les tarifs maison sont dans le
+  // prompt de l'agent, donc il répondrait volontiers de mémoire ; on lui dit
+  // explicitement que le cours du jour ne s'invente pas et qu'il doit passer par
+  // une fonction front. Sans cette règle, il annonce un prix plausible et faux.
+  useEffect(() => {
+    client.setContext('pricing-policy', {
+      name: 'Règle sur les prix',
+      description: 'À suivre pour toute question portant sur un prix.',
+      // Entrée constante sur toute la conversation : `stable` la fait épingler
+      // après le prompt système, où le fournisseur la met en cache, au lieu de
+      // la retraiter à côté de chaque message.
+      stable: true,
+      data: {
+        regle:
+          "Ne jamais donner un prix de mémoire. Pour toute question de prix, de comparaison ou de total, appeler lookupFlavorPrices (aucun argument, renvoie toute la carte), puis raisonner sur les valeurs retournées.",
+        deuxPrix:
+          "prixMaisonEuros = notre tarif à la boule, celui qu'on facture. coursDuJourEuros = cours indicatif du service externe, null si le parfum n'est pas coté. Dire lequel des deux on cite.",
+      },
+    });
+    return () => {
+      client.removeContext('pricing-policy');
+    };
+  }, [client]);
+
   // Cone/scoops/toppings are editable page state, but registered ONLY on the
   // shop page (see <ShopStateBridge /> below) — you compose an ice cream where
   // it's visible. So "je veux une glace pistache" from the parfums or origines
@@ -163,6 +188,8 @@ export default function App() {
   // Démo du garde-fou maxFunctionResultBytes : renvoie la réponse brute (et
   // volumineuse) d'une API publique, que le SDK tronque avant l'envoi au LLM.
   useAgoFunction(lookupWikipediaArticle.name, lookupWikipediaArticle);
+  // Cours du jour d'un parfum, via un service de prix externe.
+  useAgoFunction(lookupFlavorPrices.name, lookupFlavorPrices);
 
   useAgoNavigation(navigate, [...Object.values(ROUTES), ORIGIN_DETAIL_ROUTE]);
 
@@ -232,6 +259,21 @@ export default function App() {
               // le chat se croit encore sur desktop.
               sheet={{ breakpoint: 1180 }}
               thinkingLabel="Le glacier réfléchit…"
+              // Ce que l'agent est en train de faire, pendant la boucle. Sans
+              // ça on ne voit que trois points, y compris quand la page part
+              // chercher les cours et que ça dure une seconde ou deux.
+              functionLabels={{
+                lookupFlavorPrices: 'Je regarde les prix',
+                lookupWikipediaArticle: 'Je consulte Wikipédia',
+                setPageState: 'Je mets la page à jour',
+                readPageData: "Je regarde ce qui est affiché",
+                navigateToPage: 'Je change de page',
+                addToCart: 'J’ajoute au panier',
+                updateCart: 'Je mets le panier à jour',
+                placeOrder: 'Je passe la commande',
+                getState: 'Je relis la commande',
+                resetCurrent: 'Je repars de zéro',
+              }}
               title="Composer avec le glacier"
               welcomeMessage="Bonjour. Dites-moi ce qui vous ferait plaisir — je compose la glace et votre ticket se met à jour à droite."
               placeholder="Deux boules pistache et chocolat…"
