@@ -1,7 +1,11 @@
 export { AgoService } from "./ago.service";
 export { provideAgo } from "./provide";
 export type { AgoProvideOptions } from "./provide";
-export type { AgoStateControl, AgoPageStateOptions } from "../functions/types";
+export type {
+  AgoStateControl,
+  AgoPageStateOptions,
+  AgoPageDataSource,
+} from "../functions/types";
 export type { AgoAutoContinueOptions } from "../client/autoContinue";
 
 // Re-export core types for convenience

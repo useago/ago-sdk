@@ -38,6 +38,15 @@ export class FunctionRegistry {
   }
 
   /**
+   * The client-level result-size ceiling in force right now. Callers that size
+   * a payload before returning it must budget against this exact number, or
+   * their careful truncation gets replaced by {@link guardResultSize}'s preview.
+   */
+  getDefaultMaxResultBytes(): number {
+    return this.defaultMaxResultBytes;
+  }
+
+  /**
    * Register a function that AGO can call.
    * Accepts either a single definition object or (name, handler, schema) args.
    */

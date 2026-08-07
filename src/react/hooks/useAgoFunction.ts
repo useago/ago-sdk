@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type {
+  AgoPageDataSource,
   AgoPageStateOptions,
   AgoStateControl,
   ClientFunctionDefinition,
@@ -153,6 +154,21 @@ export function useAgoNavigation(
  *   },
  * ]);
  * ```
+ *
+ * Pass `opts.data` to also hand the agent what the page ends up displaying, as
+ * the result of its own `setPageState` call:
+ *
+ * ```tsx
+ * const { data: rows, isFetching } = useQuery({ queryKey: ["rows", status], queryFn: fetchRows });
+ *
+ * useAgoPageState(controls, {
+ *   data: {
+ *     description: "The rows matching the current filters.",
+ *     get: () => rows ?? [],
+ *     isLoading: () => isFetching,
+ *   },
+ * });
+ * ```
  */
 export function useAgoPageState(
   controls: AgoStateControl[],
@@ -161,11 +177,20 @@ export function useAgoPageState(
   const client = useAgoClient();
   const fnName = opts?.functionName ?? "setPageState";
   const requiresApproval = opts?.requiresApproval;
+  // Only the static shape belongs in the deps: `data` itself is a fresh object
+  // literal on every render, and re-registering that often would churn the
+  // function list for nothing.
+  const hasData = opts?.data !== undefined;
+  const dataDescription = opts?.data?.description;
+  const dataMaxResultBytes = opts?.data?.maxResultBytes;
+  const settleTimeoutMs = opts?.settleTimeoutMs;
 
   // Capture the latest controls without re-registering on every render — the
   // get/set closures change each render, but the schema is stable.
   const controlsRef = useRef(controls);
   controlsRef.current = controls;
+  const optsRef = useRef(opts);
+  optsRef.current = opts;
 
   useEffect(() => {
     // Stable wrappers: name/description/schema are read once (at register
@@ -182,13 +207,36 @@ export function useAgoPageState(
       };
     });
 
+    // Same treatment for the data source: the snapshot must come from the
+    // render that just committed, not from the one that mounted the hook.
+    const data: AgoPageDataSource | undefined = hasData
+      ? {
+          // Defaulted rather than required at runtime: a plain-JS caller who
+          // omits it should still get their data through, not silently lose it.
+          description: dataDescription ?? "What the page is currently showing.",
+          maxResultBytes: dataMaxResultBytes,
+          get: () => optsRef.current?.data?.get(),
+          isLoading: () => optsRef.current?.data?.isLoading?.() ?? false,
+        }
+      : undefined;
+
     client.registerPageStateFunction(stableControls, {
       functionName: fnName,
       requiresApproval,
+      data,
+      settleTimeoutMs,
     });
 
     return () => {
       client.unregisterPageStateFunction(fnName);
     };
-  }, [client, fnName, requiresApproval]);
+  }, [
+    client,
+    fnName,
+    requiresApproval,
+    hasData,
+    dataDescription,
+    dataMaxResultBytes,
+    settleTimeoutMs,
+  ]);
 }

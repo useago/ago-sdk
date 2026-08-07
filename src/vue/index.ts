@@ -5,7 +5,11 @@ export { useChat } from "./composables/useChat";
 export { useMessages } from "./composables/useMessages";
 export { useConversation } from "./composables/useConversation";
 export { useAgoFunction, useAgoNavigation, useAgoPageState } from "./composables/useAgoFunction";
-export type { AgoStateControl, AgoPageStateOptions } from "../functions/types";
+export type {
+  AgoStateControl,
+  AgoPageStateOptions,
+  AgoPageDataSource,
+} from "../functions/types";
 export { useAgoEvents } from "./composables/useAgoEvents";
 export { useAgoStore } from "./composables/useAgoStore";
 export { useProactiveNudge } from "./composables/useProactiveNudge";

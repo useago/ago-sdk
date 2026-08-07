@@ -93,6 +93,68 @@ describe("useAgoPageState", () => {
     });
   });
 
+  it("returns the rows produced by the agent's own change, no re-registration", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const registerSpy = vi.spyOn(client, "registerPageStateFunction");
+
+    function Harness() {
+      const [query, setQuery] = React.useState("");
+      // Derived on every render: the closure the hook registered at mount is
+      // already stale by the time the agent's call comes back.
+      const rows = query ? [`row-for-${query}`] : ["row-initial"];
+      useAgoPageState(
+        [
+          {
+            name: "query",
+            description: "Search",
+            schema: { type: "string" },
+            get: () => query,
+            set: (v) => setQuery(v as string),
+          },
+        ],
+        { data: { description: "The rows on screen.", get: () => rows } }
+      );
+      return <span>{rows.join(",")}</span>;
+    }
+
+    const { root, container } = await mount(client, Harness);
+    expect(registerSpy).toHaveBeenCalledTimes(1);
+    expect(client.getRegisteredFunctions().map((s) => s.name).sort()).toEqual([
+      "readPageData",
+      "setPageState",
+    ]);
+
+    // Start the call inside act() but await it outside: act only commits
+    // pending work when its scope exits, so awaiting in there would read the
+    // pre-commit render. In a browser React commits within the first poll tick
+    // — which is the whole reason the settle loop waits at all.
+    let pending!: Promise<unknown>;
+    await act(async () => {
+      pending = execute(client, "setPageState", { query: "dupont" });
+    });
+    const result = await pending;
+
+    expect(container.textContent).toBe("row-for-dupont");
+    expect(result).toEqual({
+      success: true,
+      applied: { query: "dupont" },
+      data: ["row-for-dupont"],
+    });
+    // The stale-closure rows would have been ["row-initial"].
+    expect(registerSpy).toHaveBeenCalledTimes(1);
+
+    // readPageData sees the same fresh render, and changes nothing.
+    expect(await execute(client, "readPageData", {})).toEqual({
+      data: ["row-for-dupont"],
+    });
+    expect(container.textContent).toBe("row-for-dupont");
+
+    await act(async () => {
+      root.unmount();
+    });
+    expect(client.getRegisteredFunctions()).toHaveLength(0);
+  });
+
   it("honours a custom functionName", async () => {
     const client = new AgoClient({ baseUrl: "https://example.test" });
 
