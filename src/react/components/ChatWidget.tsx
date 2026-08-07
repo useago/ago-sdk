@@ -1,5 +1,6 @@
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useRef,
@@ -18,8 +19,12 @@ import {
   unlockBackgroundScroll,
 } from "../../widget/scrollLock";
 import type { SheetOptions, SheetState } from "../../widget/sheetController";
+import { useAgoActivity } from "../hooks/useAgoActivity";
+import type { AgoActivityItem } from "../hooks/useAgoActivity";
 import { useMessages } from "../hooks/useMessages";
 import { useSheet } from "../hooks/useSheet";
+import { ActivityLine } from "./ActivityLine";
+import { renderInlineMarkdown } from "./inlineMarkdown";
 import { ChatInput } from "./ChatInput";
 import { Message, StreamingDots } from "./Message";
 
@@ -83,6 +88,30 @@ export interface ChatWidgetProps {
    * working and has not produced any text yet. Defaults to `"Thinking..."`.
    */
   thinkingLabel?: string;
+  /**
+   * What to show while a client function the agent called is still running.
+   * Between the call and the turn resuming the page can be busy for seconds,
+   * and a bare typing indicator says nothing about it.
+   *
+   * Map a function name to a label, or pass a function for full control.
+   * Unmapped names fall back to a prettified version of the name itself
+   * (`lookupFlavorPrices` -> "Lookup Flavor Prices"). Pass `false` to keep the
+   * plain thinking indicator.
+   *
+   * ```tsx
+   * <ChatWidget functionLabels={{ lookupFlavorPrices: "Je regarde les prix" }} />
+   * ```
+   */
+  functionLabels?:
+    | Record<string, string>
+    | ((functionName: string, args: Record<string, unknown>) => string)
+    | false;
+  /**
+   * Include the agent's `reasoning` steps in the activity row. On by default:
+   * they are the backend's own progress messages, and without them the row goes
+   * blank between two function calls. Set `false` to show only tool activity.
+   */
+  showReasoning?: boolean;
 }
 
 /** Imperative handle exposed via `ref`. */
@@ -124,6 +153,8 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
   onMessageReceived,
   sheet: sheetOptions = false,
   thinkingLabel = "Thinking...",
+  functionLabels,
+  showReasoning = true,
 }, ref) {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
@@ -348,6 +379,43 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
     lastMessage?.role === "assistant" &&
     (lastMessage.status === "IN_PROGRESS" || lastMessage.status === "WAITING_CLIENT");
 
+  // What the agent is doing right now. The dots alone say "something is
+  // happening" and then vanish as soon as the first token lands, which is
+  // exactly when a tool pause is most likely and least visible.
+  const labelFor = useCallback(
+    (item: AgoActivityItem): string | undefined => {
+      const fn = item.functionName;
+      if (!functionLabels || !fn) return undefined;
+      if (typeof functionLabels === "function") {
+        return functionLabels(fn, item.arguments ?? {});
+      }
+      return functionLabels[fn];
+    },
+    [functionLabels]
+  );
+  const { items } = useAgoActivity({
+    client: resolvedClient ?? undefined,
+    labelFor,
+    includeReasoning: showReasoning,
+  });
+  // Show the latest step of THIS turn and keep it until something replaces it
+  // or the turn ends. Clearing on `function:result` instead meant a fast call
+  // flashed for 40 ms and the user read nothing.
+  //
+  // Items accumulate across turns (the hook never drops them), so scope on the
+  // assistant message being written; otherwise a new turn opens by showing the
+  // previous one's last step.
+  const turnItems = items.filter(
+    (it) => lastMessage?.id !== undefined && it.messageId === lastMessage.id
+  );
+  const activityLabel =
+    functionLabels === false
+      ? undefined
+      : turnItems[turnItems.length - 1]?.label;
+  // When the row is up it IS the progress indicator, so the answer bubble must
+  // not also show its dots right above it.
+  const showingActivity = Boolean(isAnswering && activityLabel);
+
   // Default: clicking a suggested reply sends it as a new user message.
   // `onFollowUpClick={false}` disables interactivity; a function overrides it.
   const handleFollowUpClick =
@@ -475,9 +543,21 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
             <span
               style={{ display: "flex", alignItems: "center", gap: "8px" }}
             >
-              <StreamingDots />
-              <span style={{ fontSize: "13px", opacity: 0.7 }}>
-                {thinkingLabel}
+              {/* Dots only when the label is the generic one. A concrete step
+                  ("Updating the page") already reads as progress. */}
+              {!activityLabel && <StreamingDots />}
+              <span
+                style={{
+                  fontSize: "13px",
+                  opacity: 0.7,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {activityLabel
+                  ? renderInlineMarkdown(activityLabel)
+                  : thinkingLabel}
               </span>
             </span>
           ) : (
@@ -625,9 +705,12 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
               showAgentName={showAgentName}
               isLast={index === messages.length - 1}
               onFollowUpClick={handleFollowUpClick}
+              showStreamingDots={!showingActivity}
             />
           ))
         )}
+
+        {showingActivity && <ActivityLine label={activityLabel ?? ""} />}
 
         {error && (
           <div

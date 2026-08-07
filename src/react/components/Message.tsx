@@ -220,6 +220,13 @@ export interface MessageProps {
    * follow-up buttons render but are not interactive (backwards-compatible).
    */
   onFollowUpClick?: (reply: string) => void;
+  /**
+   * Show the animated dots for an answer that has not started writing yet.
+   * Defaults to `true`. Pass `false` when something else on screen already
+   * reports progress (an activity row naming the running function): the empty
+   * bubble is then dropped entirely rather than left as a blank box.
+   */
+  showStreamingDots?: boolean;
 }
 
 export const Message: React.FC<MessageProps> = ({
@@ -228,6 +235,7 @@ export const Message: React.FC<MessageProps> = ({
   showAgentName = false,
   isLast = false,
   onFollowUpClick,
+  showStreamingDots = true,
 }) => {
   const isUser = message.role === "user";
   // WAITING_CLIENT = paused on client function results mid-turn: still streaming
@@ -305,8 +313,10 @@ export const Message: React.FC<MessageProps> = ({
         </div>
       )}
 
-      {/* Message bubble — hidden for an attachment-only message (no empty box). */}
-      {(message.content || isStreaming) && (
+      {/* Message bubble — hidden for an attachment-only message (no empty box),
+          and for a not-yet-written answer when the caller is already showing
+          what the agent is doing somewhere else (no dots next to that row). */}
+      {(message.content || (isStreaming && showStreamingDots)) && (
         <div
           className="ago-message__content"
           style={{
@@ -323,7 +333,7 @@ export const Message: React.FC<MessageProps> = ({
           {message.content ? (
             <Markdown content={message.content} />
           ) : (
-            isStreaming && <StreamingDots />
+            isStreaming && showStreamingDots && <StreamingDots />
           )}
         </div>
       )}
