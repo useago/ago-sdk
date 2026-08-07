@@ -97,7 +97,11 @@ export async function readWhenSettled(
       "page has now. Raise settleTimeoutMs if the work legitimately takes longer."
   );
   const fallback = source().get();
-  return isThenable(fallback) ? undefined : fallback;
+  if (!isThenable(fallback)) return fallback;
+  // We are not going to wait for this one either, but dropping a promise that
+  // later rejects surfaces as an unhandled rejection in the host page.
+  Promise.resolve(fallback).catch(() => {});
+  return undefined;
 }
 
 function isThenable(value: unknown): value is PromiseLike<unknown> {

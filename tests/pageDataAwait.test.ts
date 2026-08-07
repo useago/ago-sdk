@@ -79,9 +79,49 @@ describe("awaiting the work the change triggered", () => {
     };
 
     const pending = readWhenSettled(() => source, 5_000);
+    // Attach the expectation BEFORE advancing the clock: the rejection lands
+    // during the advance, and a promise that rejects with no handler yet is an
+    // unhandled rejection, which Vitest fails the whole run on.
+    const rejects = expect(pending).rejects.toThrow(
+      "le service de prix est tombé"
+    );
     await vi.advanceTimersByTimeAsync(1_000);
 
-    await expect(pending).rejects.toThrow("le service de prix est tombé");
+    await rejects;
+  });
+
+  it("does not leak an unhandled rejection when it gives up on a slow get()", async () => {
+    vi.useFakeTimers();
+    const unhandled: unknown[] = [];
+    // Node reports these at the process level, which is also how Vitest fails
+    // the run on them. Listening on `window` catches nothing here.
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+
+    try {
+      // Slower than the timeout, and it fails. The first promise is abandoned
+      // at the deadline and the retry is abandoned immediately; neither may
+      // reach the host page as an unhandled rejection.
+      const source = {
+        description: "d",
+        get: () =>
+          new Promise<string[]>((_, reject) => {
+            setTimeout(() => reject(new Error("HTTP 503")), 2_000);
+          }),
+      };
+
+      const pending = readWhenSettled(() => source, 400);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(await pending).toBeUndefined();
+
+      // Give Node a real turn of the loop to report anything unhandled.
+      vi.useRealTimers();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
   });
 });
 
