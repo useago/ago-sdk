@@ -148,7 +148,7 @@ blank between two calls.
 Unmapped function names fall back to a prettified version of the name, so the
 row works without configuring anything. Pass a function for full control
 (`(name, args) => string`), or `functionLabels={false}` to keep the plain
-indicator. Building your own UI? [`useAgoActivity`](#useagoactivity) is the same
+indicator. Building your own UI? [`useAgoActivity`](#9-show-what-the-agent-is-doing-useagoactivity) is the same
 data source, with approvals and server-side tool calls included.
 
 ### Stop button
