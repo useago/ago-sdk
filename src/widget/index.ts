@@ -23,3 +23,16 @@ export type {
   ConversationSession,
   ConversationSessionOptions,
 } from "../state/createConversationSession";
+
+// Framework-agnostic bottom-sheet controller. The vanilla widget and the React
+// `useSheet` hook both drive their presentation from this one state machine, so
+// a Vue or Angular binding can consume it directly rather than reimplementing it.
+export { createSheetController, compactMediaQuery } from "./sheetController";
+export type {
+  SheetController,
+  SheetOptions,
+  SheetSnapshot,
+  SheetState,
+  SheetChangeCause,
+  ElementProps,
+} from "./sheetController";

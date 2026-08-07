@@ -1,7 +1,15 @@
 import React, { useCallback, useRef, useState } from "react";
 
 export interface ChatInputProps {
-  onSend: (message: string, files?: File[]) => void;
+  /**
+   * Send the message. The composer clears immediately so the UI feels instant,
+   * so resolving to `false` means "that send failed" and puts the text (and any
+   * attachments) back rather than losing what the user typed.
+   */
+  onSend: (
+    message: string,
+    files?: File[],
+  ) => void | boolean | Promise<void | boolean>;
   /**
    * Stop the turn being generated. When provided, the send button becomes an
    * enabled Stop button for as long as `disabled` is true (i.e. while the agent
@@ -43,12 +51,23 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   }, []);
 
   const handleSubmit = useCallback(
-    (e: React.FormEvent) => {
+    async (e: React.FormEvent) => {
       e.preventDefault();
-      if (message.trim() || files.length > 0) {
-        onSend(message.trim(), files.length > 0 ? files : undefined);
-        setMessage("");
-        setFiles([]);
+      if (!message.trim() && files.length === 0) return;
+      const sentText = message.trim();
+      const sentFiles = files.length > 0 ? files : undefined;
+      setMessage("");
+      setFiles([]);
+      requestAnimationFrame(autoResize);
+
+      const ok = await onSend(sentText, sentFiles);
+      // A failed send would otherwise destroy the message: the composer was
+      // cleared on submit and the optimistic bubble is dropped on error, so the
+      // text is unrecoverable. Put it back — unless the user has already started
+      // typing something new, which must never be clobbered.
+      if (ok === false) {
+        setMessage((current) => (current.trim() ? current : sentText));
+        if (sentFiles) setFiles((current) => [...sentFiles, ...current]);
         requestAnimationFrame(autoResize);
       }
     },
@@ -59,7 +78,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     (e: React.KeyboardEvent) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
-        handleSubmit(e);
+        void handleSubmit(e);
       }
     },
     [handleSubmit],
@@ -81,7 +100,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
 
   return (
     <form
-      onSubmit={handleSubmit}
+      onSubmit={(e) => void handleSubmit(e)}
       className={`ago-chat-input ${className}`}
       style={{
         display: "flex",
@@ -131,6 +150,15 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                 onClick={() => removeFile(i)}
                 aria-label={`Remove ${file.name}`}
                 style={{
+                  // 44px hit area (Apple HIG minimum). Negative margins keep the
+                  // chip visually the same size: only the tap target grows.
+                  flexShrink: 0,
+                  width: "44px",
+                  height: "44px",
+                  margin: "-14px -12px -14px -4px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
                   border: "none",
                   background: "none",
                   cursor: "pointer",
@@ -163,6 +191,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({
               disabled={disabled}
               aria-label="Attach file"
               style={{
+                // 44px minimum touch target (Apple HIG).
+                flexShrink: 0,
+                minWidth: "44px",
+                minHeight: "44px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
                 padding: "8px",
                 border: "1px solid #dee3e8",
                 borderRadius: "8px",
@@ -234,6 +269,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             onClick={onStop}
             aria-label="Stop generating"
             style={{
+              // 44px minimum height (Apple HIG touch target).
+              minHeight: "44px",
               padding: "10px 18px",
               border: "none",
               borderRadius: "20px",
@@ -252,6 +289,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             type="submit"
             disabled={disabled || !canSend}
             style={{
+              // 44px minimum height (Apple HIG touch target).
+              minHeight: "44px",
               padding: "10px 18px",
               border: "none",
               borderRadius: "20px",

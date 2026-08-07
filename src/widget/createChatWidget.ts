@@ -39,6 +39,10 @@ import {
   RADIUS,
   TEXT_COLOR,
 } from "./styles";
+import {
+  lockBackgroundScroll,
+  unlockBackgroundScroll,
+} from "./scrollLock";
 import type { ChatWidgetHandle, MountChatWidgetOptions } from "./types";
 
 // These public types used to be declared in this file; re-exported from their new
@@ -52,6 +56,13 @@ export type {
 
 /** Fallback text for the form-submitted notice when the response carries none. */
 const DEFAULT_FORM_SUBMITTED_MESSAGE = "Form submitted.";
+
+/**
+ * Minimum comfortable touch target, in px. 44 is Apple's HIG floor (Material
+ * asks 48). Controls smaller than this are the classic cause of "the close
+ * button doesn't work on my phone" reports.
+ */
+export const TOUCH_TARGET = 44;
 
 /**
  * Pull a human message out of a submit response so the notice can echo what the
@@ -78,41 +89,6 @@ function messageFromResult(result: unknown): string | null {
 /** Per-document counter so each mobile-fullscreen widget gets a unique
  * `view-transition-name` (names must be unique across the document). */
 let widgetSeq = 0;
-
-// ── Background scroll lock (fixed-body method) ─────────────────────────
-// `overflow: hidden` on <html>/<body> does not stop touch scrolling on iOS
-// Safari, so a full-screen sheet leaves the page scrollable underneath. The
-// reliable cross-browser fix is to pin the body: capture the scroll offset,
-// `position: fixed` the body shifted up by that offset (so it looks unmoved),
-// then restore the offset on unlock. Ref-counted so multiple widgets can't
-// stomp each other's saved position.
-let scrollLockCount = 0;
-let savedScrollY = 0;
-function lockBackgroundScroll(): void {
-  if (scrollLockCount++ > 0) return;
-  savedScrollY = window.scrollY;
-  const { style } = document.body;
-  style.position = "fixed";
-  style.top = `-${savedScrollY}px`;
-  style.left = "0";
-  style.right = "0";
-  style.width = "100%";
-  // overflow: hidden alone is unreliable on iOS but harmless as a second layer.
-  document.documentElement.style.overflow = "hidden";
-}
-function unlockBackgroundScroll(): void {
-  // Guard against underflow if a teardown unlocks a sheet that never locked.
-  if (scrollLockCount === 0) return;
-  if (--scrollLockCount > 0) return;
-  const { style } = document.body;
-  style.removeProperty("position");
-  style.removeProperty("top");
-  style.removeProperty("left");
-  style.removeProperty("right");
-  style.removeProperty("width");
-  document.documentElement.style.removeProperty("overflow");
-  window.scrollTo(0, savedScrollY);
-}
 
 /** `document` augmented with the View Transitions API (not in all TS DOM libs). */
 type DocumentWithVT = Document & {
@@ -230,14 +206,32 @@ export function mountChatWidget(
   const mobileBreakpoint = options.mobile?.breakpoint ?? 768;
   const mobileTrigger = options.mobile?.trigger ?? "tap";
   const hasMatchMedia = typeof window !== "undefined" && !!window.matchMedia;
+  // Width alone misses a phone in landscape: an iPhone is 844x390 there, so a
+  // `max-width: 768px` query stops matching and the compact layout (keyboard
+  // compensation, safe areas, full-screen sheet) switched itself off on the
+  // viewport that needs it most. The height clause keeps short landscape
+  // viewports compact.
   const mobileMQ = hasMatchMedia
-    ? window.matchMedia(`(max-width: ${mobileBreakpoint}px)`)
+    ? window.matchMedia(
+        `(max-width: ${mobileBreakpoint}px), ` +
+          `(max-height: 500px) and (orientation: landscape)`,
+      )
     : undefined;
   const reduceMotionMQ = hasMatchMedia
     ? window.matchMedia("(prefers-reduced-motion: reduce)")
     : undefined;
+  // Whether this instance has any compact-layout behavior at all. Drives
+  // listener lifecycle for BOTH placements. `inlineFullscreen` below is
+  // narrower: it gates only the inline card -> sheet morph.
+  const mobileEnabled = !!mobileMQ;
   // Inline placement morphs to a sheet on mobile; side panels just square off.
   const inlineFullscreen = !isSide && !!mobileMQ;
+  // Identity for this widget's claim on the document scroll lock, so releasing
+  // is idempotent and never drops another widget's lock.
+  const lockOwner = Symbol("ago-scroll-lock");
+  // Set by destroy(). Async continuations (view transitions, rAF) check it so a
+  // torn-down widget can't scroll a detached node, re-focus, or re-take a lock.
+  let destroyed = false;
 
   // Optional cross-reload resumption of the visitor's last active thread, keyed off
   // a single stable widget id rather than a per-agent stored conversation id.
@@ -251,6 +245,9 @@ export function mountChatWidget(
   let conversationId =
     options.conversationId ?? session?.getLastActiveThread() ?? undefined;
   let messages: AgoMessage[] = [];
+  // The DOM node currently rendered for each message, so a streamed chunk can
+  // swap a single bubble instead of rebuilding the thread.
+  let messageNodes: HTMLElement[] = [];
   let isLoading = false;
   let errorMessage: string | null = null;
   // Handle for the streamed-welcome typewriter, so it can be canceled when the
@@ -332,13 +329,23 @@ export function mountChatWidget(
       closeBtn.textContent = "×";
       css(closeBtn, {
         marginLeft: "auto",
+        // 44px is the minimum comfortable touch target (Apple HIG). Negative
+        // margins keep the glyph optically where it was so the header does not
+        // grow: only the hit area does.
+        flexShrink: "0",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: `${TOUCH_TARGET}px`,
+        height: `${TOUCH_TARGET}px`,
+        margin: `-10px -10px -10px auto`,
         background: "transparent",
         border: "none",
         color: HEADER_TEXT_COLOR,
         fontSize: "22px",
         lineHeight: "1",
         cursor: "pointer",
-        padding: "0 2px",
+        padding: "0",
       });
       closeBtn.addEventListener("click", () => closePanel());
       header.appendChild(closeBtn);
@@ -362,7 +369,104 @@ export function mountChatWidget(
   messagesEl.setAttribute("aria-relevant", "additions text");
   messagesEl.setAttribute("aria-atomic", "false");
 
-  const { inputRow, setDisabled, focus } = buildInput({
+  // ── Follow-the-bottom policy ───────────────────────────────────────
+  // The pane follows new content only while the reader is already at the bottom.
+  // Scroll away to re-read something and the stream stops yanking you back; a
+  // button appears to return. Sending a message always re-attaches.
+  const SCROLL_STICK_PX = 48;
+  let stickToBottom = true;
+  // Re-rendering mutates scrollTop, which fires `scroll`. Those are OUR events,
+  // not the reader's, and treating them as intent is how a pane latches itself
+  // permanently detached. Suppress tracking around every DOM write.
+  let suppressScrollTracking = 0;
+
+  function withoutScrollTracking(mutate: () => void): void {
+    suppressScrollTracking++;
+    try {
+      mutate();
+    } finally {
+      // Released after the event loop turn so the scroll events the mutation
+      // queued are ignored too, not just the synchronous part.
+      const release = (): void => {
+        suppressScrollTracking--;
+      };
+      if (typeof queueMicrotask === "function") queueMicrotask(release);
+      else release();
+    }
+  }
+
+  function atBottom(): boolean {
+    return (
+      messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight <=
+      SCROLL_STICK_PX
+    );
+  }
+
+  const jumpBtn = document.createElement("button");
+  jumpBtn.type = "button";
+  jumpBtn.className = "ago-chat-widget__jump";
+  jumpBtn.setAttribute("aria-label", "Jump to latest message");
+  jumpBtn.innerHTML =
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" ' +
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+    'stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M12 5v14M19 12l-7 7-7-7"/></svg>';
+  css(jumpBtn, {
+    position: "absolute",
+    left: "50%",
+    bottom: "12px",
+    transform: "translateX(-50%)",
+    width: `${TOUCH_TARGET}px`,
+    height: `${TOUCH_TARGET}px`,
+    display: "none",
+    alignItems: "center",
+    justifyContent: "center",
+    border: `1px solid ${BORDER_COLOR}`,
+    borderRadius: "50%",
+    backgroundColor: PANEL_BACKGROUND,
+    color: TEXT_COLOR,
+    boxShadow: "rgba(15, 15, 15, 0.16) 0px 2px 10px 0px",
+    cursor: "pointer",
+    zIndex: "2",
+  });
+  jumpBtn.addEventListener("click", () => {
+    stickToBottom = true;
+    withoutScrollTracking(() => {
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    });
+    syncJumpBtn();
+  });
+
+  function syncJumpBtn(): void {
+    jumpBtn.style.display = stickToBottom ? "none" : "flex";
+  }
+
+  /** Follow the bottom if the reader hasn't deliberately scrolled away. */
+  function autoScroll(): void {
+    if (stickToBottom) {
+      withoutScrollTracking(() => {
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      });
+    }
+    syncJumpBtn();
+  }
+
+  messagesEl.addEventListener("scroll", () => {
+    if (suppressScrollTracking > 0) return;
+    stickToBottom = atBottom();
+    syncJumpBtn();
+  });
+
+  // The pane is the positioning context for the jump button.
+  const messagesWrap = div({
+    position: "relative",
+    flex: "1",
+    display: "flex",
+    minHeight: "0",
+  });
+  messagesWrap.append(messagesEl, jumpBtn);
+
+  const { inputRow, setDisabled, focus, restoreDraft } = buildInput({
     placeholder,
     allowFiles,
     onSend: (content, files) => void send(content, files),
@@ -371,7 +475,7 @@ export function mountChatWidget(
 
   ensureKeyframes();
 
-  container.append(...(header ? [header] : []), messagesEl, inputRow);
+  container.append(...(header ? [header] : []), messagesWrap, inputRow);
 
   // In side mode the panel lives inside a fixed, full-height wrapper pinned to the
   // chosen edge; otherwise it's mounted inline as before. `mountInto` is whatever
@@ -520,7 +624,14 @@ export function mountChatWidget(
         void expandInline();
       });
     }
-    document.addEventListener("keydown", onInlineKeydown);
+  }
+  // Escape + the Tab trap belong to whatever is currently MODAL, which is a
+  // full-screen compact sheet in either placement — not to the inline morph
+  // specifically. Registered whenever a compact layout is possible; the handler
+  // itself no-ops unless `isModal()` (so a desktop side panel keeps normal Tab
+  // behavior and the host page stays keyboard-reachable).
+  if (mobileEnabled) {
+    document.addEventListener("keydown", onModalKeydown);
   }
   // Re-apply geometry when crossing the breakpoint (side squares off / inline
   // collapses out of full screen). Relevant for both placements when an mq exists.
@@ -547,8 +658,75 @@ export function mountChatWidget(
   const followUpHandler =
     onFollowUpClick === false ? undefined : (onFollowUpClick ?? sendFollowUp);
 
+  /** Presentation options for the bubble at `index`. Shared by both render paths. */
+  function messageOpts(index: number): Parameters<typeof renderMessage>[1] {
+    const last = messages.length - 1;
+    return {
+      isLast: index === last,
+      // Last bubble of a same-sender block (gets the iMessage tail).
+      isLastOfBlock:
+        index === last || messages[index + 1].role !== messages[index].role,
+      bubbleStyle,
+      showAgentName,
+      agentBubble,
+      followUpEnabled,
+      followUpHandler,
+      // On a small viewport let bubbles run wider to reclaim horizontal space.
+      isMobile: !!mobileMQ?.matches,
+    };
+  }
+
+  /**
+   * Fast path for a streamed chunk: swap ONLY the bubble being written into.
+   *
+   * The full `render()` calls `replaceChildren()`, which is wrong to run per
+   * token. Under `aria-live` every node becomes an "addition", so a screen
+   * reader re-reads the whole conversation on every chunk. It also re-parses
+   * the markdown of every message in the thread, on every token.
+   *
+   * Emptying the pane additionally collapses `scrollHeight` and clamps
+   * `scrollTop` to 0, which would latch the follow-the-bottom check off on the
+   * first token. That one is already neutralised for both paths by
+   * `withoutScrollTracking`, so it is a reason to keep that guard rather than a
+   * reason this fast path exists.
+   *
+   * Returns false when the thread shape means the fast path can't apply, so the
+   * caller falls back to a full render.
+   */
+  function renderStreamingTail(): boolean {
+    if (errorMessage || formNotices.length > 0) return false;
+    const index = messages.length - 1;
+    const message = messages[index];
+    if (!message || message.role !== "assistant") return false;
+    const current = messageNodes[index];
+    if (!current || current.parentNode !== messagesEl) return false;
+    const next = renderMessage(message, messageOpts(index));
+    withoutScrollTracking(() => messagesEl.replaceChild(next, current));
+    messageNodes[index] = next;
+    autoScroll();
+    return true;
+  }
+
   function render(): void {
+    withoutScrollTracking(renderAll);
+    autoScroll();
+    // Block the input only while the agent is generating the main answer. Once the
+    // answer is done (status DONE) it re-enables, even though the stream stays open
+    // while follow-up replies are still being generated.
+    const last = messages[messages.length - 1];
+    const isAnswering =
+      isLoading &&
+      last?.role === "assistant" &&
+      (last.status === "IN_PROGRESS" || last.status === "WAITING_CLIENT");
+    // Defer live-region announcements while the answer is being written; the
+    // completed answer is announced once, when aria-busy clears.
+    messagesEl.setAttribute("aria-busy", isAnswering ? "true" : "false");
+    setDisabled(isAnswering);
+  }
+
+  function renderAll(): void {
     messagesEl.replaceChildren();
+    messageNodes = [];
     if (messages.length === 0) {
       // In streaming mode the empty state stays blank: the greeting plays as a
       // real assistant bubble (see streamWelcome), so there are no messages to
@@ -566,23 +744,9 @@ export function mountChatWidget(
       }
     } else {
       messages.forEach((message, index) => {
-        // Last bubble of a same-sender block (gets the iMessage tail).
-        const isLastOfBlock =
-          index === messages.length - 1 ||
-          messages[index + 1].role !== message.role;
-        messagesEl.appendChild(
-          renderMessage(message, {
-            isLast: index === messages.length - 1,
-            isLastOfBlock,
-            bubbleStyle,
-            showAgentName,
-            agentBubble,
-            followUpEnabled,
-            followUpHandler,
-            // On a small viewport let bubbles run wider to reclaim horizontal space.
-            isMobile: !!mobileMQ?.matches,
-          }),
-        );
+        const node = renderMessage(message, messageOpts(index));
+        messageNodes[index] = node;
+        messagesEl.appendChild(node);
       });
     }
     // One confirmation per submitted form, below the conversation.
@@ -604,16 +768,6 @@ export function mountChatWidget(
       err.textContent = errorMessage;
       messagesEl.appendChild(err);
     }
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-    // Block the input only while the agent is generating the main answer. Once the
-    // answer is done (status DONE) it re-enables, even though the stream stays open
-    // while follow-up replies are still being generated.
-    const last = messages[messages.length - 1];
-    const isAnswering =
-      isLoading &&
-      last?.role === "assistant" &&
-      (last.status === "IN_PROGRESS" || last.status === "WAITING_CLIENT");
-    setDisabled(isAnswering);
   }
 
   // ── Streaming event wiring ─────────────────────────────────────────
@@ -638,7 +792,9 @@ export function mountChatWidget(
     const target = lastInProgressAssistant();
     if (!target) return;
     target.content += data.content;
-    render();
+    // Swap just the bubble being written into; fall back to a full render only
+    // when the thread shape rules the fast path out (see renderStreamingTail).
+    if (!renderStreamingTail()) render();
   };
   const onAnswerComplete = (message: AgoMessage): void => {
     // Main answer text is done; follow-up replies may still be streaming. Reveal
@@ -657,8 +813,10 @@ export function mountChatWidget(
     }
     render();
     // The answer is done and the input has just re-enabled — return the cursor to
-    // it so the user can reply without clicking back in.
-    focus();
+    // it so the user can reply without clicking back in. Skipped on a compact
+    // viewport: there, focusing the textarea re-opens the on-screen keyboard
+    // after EVERY reply, covering the answer the user is trying to read.
+    if (!isCompact()) focus();
   };
   const onComplete = (message: AgoMessage): void => {
     const idx = messages.findIndex(
@@ -789,6 +947,9 @@ export function mountChatWidget(
     onMessageSent?.(trimmed);
     isLoading = true;
     errorMessage = null;
+    // Sending is an explicit "show me the latest" gesture: re-attach the pane to
+    // the bottom even if the reader had scrolled up to re-read something.
+    stickToBottom = true;
 
     // If the streamed greeting is still typing, stop it and finalize what's there
     // so it doesn't interleave with the user's turn. An empty intro is dropped.
@@ -866,6 +1027,10 @@ export function mountChatWidget(
         err instanceof Error ? err.message : "Failed to send message";
       isLoading = false;
       messages = messages.filter((m) => !m.id.startsWith("temp-"));
+      // The composer was cleared the moment the message was submitted, and the
+      // optimistic bubble has just been dropped too. Without putting the text
+      // back, the user's message is gone for good and they have to retype it.
+      restoreDraft(trimmed, files);
       render();
     }
   }
@@ -935,6 +1100,10 @@ export function mountChatWidget(
     threads,
     refreshThreads,
     destroy() {
+      // Idempotent: a second destroy() must not re-run teardown (and must not
+      // hand the scroll lock a second release).
+      if (destroyed) return;
+      destroyed = true;
       if (introTimer) clearInterval(introTimer);
       client.off("message:start", onStart);
       client.off("message:chunk", onChunk);
@@ -952,17 +1121,16 @@ export function mountChatWidget(
       vtStyle?.remove();
       inlineSpacer?.remove();
       mobileMQ?.removeEventListener("change", onMobileMqChange);
-      if (inlineFullscreen) {
-        document.removeEventListener("keydown", onInlineKeydown);
-        removeViewportListeners();
-        // Drop the scroll lock if we're torn down while expanded.
-        if (inlineExpanded) unlockBackgroundScroll();
-      }
-      // Drop the side-panel scroll lock if torn down while open on mobile.
-      if (panelScrollLocked) {
-        panelScrollLocked = false;
-        unlockBackgroundScroll();
-      }
+      // Unconditional teardown. These used to be gated on `inlineFullscreen`,
+      // so a side-placement widget leaked a document keydown listener (which
+      // retains the whole widget closure) plus its two visualViewport listeners
+      // on every destroy. removeEventListener on a listener that was never added
+      // is a no-op, so gating buys nothing and costs a leak.
+      document.removeEventListener("keydown", onModalKeydown);
+      removeViewportListeners();
+      panelScrollLocked = false;
+      // Idempotent by construction: releases only if this widget still holds it.
+      unlockBackgroundScroll(lockOwner);
       // Only tear down the client if we created it.
       if (!options.client) client.destroy();
     },
@@ -990,19 +1158,50 @@ export function mountChatWidget(
     wrapper.style.transform = panelOpen ? "translateX(0)" : hidden;
     wrapper.setAttribute("aria-hidden", panelOpen ? "false" : "true");
     if (launcherBtn) launcherBtn.style.display = panelOpen ? "none" : "flex";
-    // Lock the background only while the panel fills the viewport (open + mobile).
-    // Reconciled here so open/close and breakpoint changes all keep it in sync.
-    const shouldLock = panelOpen && !!mobileMQ?.matches;
-    if (shouldLock !== panelScrollLocked) {
-      panelScrollLocked = shouldLock;
-      if (shouldLock) lockBackgroundScroll();
-      else unlockBackgroundScroll();
+    // Everything below is reconciled from `isModal()` rather than set at each
+    // call site, so open/close, breakpoint crossings and rotation all converge
+    // on the same state instead of each having to remember the full checklist.
+    const modal = isModal();
+    if (modal !== panelScrollLocked) {
+      panelScrollLocked = modal;
+      if (modal) {
+        // A full-screen panel is a dialog: announce it, and keep the on-screen
+        // keyboard from covering the composer (the layout viewport does not
+        // shrink on iOS, so `bottom: 0` would otherwise sit under the keyboard).
+        container.setAttribute("role", "dialog");
+        container.setAttribute("aria-modal", "true");
+        container.setAttribute("aria-label", title);
+        // Programmatically focusable (never a tab stop) so openPanel can put
+        // focus inside the dialog without opening the keyboard.
+        container.tabIndex = -1;
+        container.style.paddingBottom = "env(safe-area-inset-bottom)";
+        lockBackgroundScroll(lockOwner);
+        fullVh = viewportHeight();
+        applyVh();
+        addViewportListeners();
+      } else {
+        removeViewportListeners();
+        resetVh();
+        fullVh = 0;
+        container.removeAttribute("role");
+        container.removeAttribute("aria-modal");
+        container.removeAttribute("aria-label");
+        container.style.removeProperty("padding-bottom");
+        unlockBackgroundScroll(lockOwner);
+      }
     }
   }
   function openPanel(): void {
     panelOpen = true;
     applyOpenState();
-    focus();
+    // On a compact viewport, focusing the textarea would pop the on-screen
+    // keyboard immediately and eat half the panel before anything is read. Move
+    // focus into the dialog itself instead, so screen-reader and keyboard users
+    // still land inside it (the launcher they clicked is now display:none, so
+    // doing nothing would drop focus to <body> and restart Tab at the top of the
+    // host page). On desktop, keep focusing the input as before.
+    if (isCompact()) container.focus({ preventScroll: true });
+    else focus();
     onOpen?.();
   }
   function closePanel(): void {
@@ -1029,10 +1228,24 @@ export function mountChatWidget(
     else if (inlineExpanded) void collapseInline();
     else void expandInline();
   }
-  // Visible, tabbable elements inside the expanded dialog (skips display:none
+  // Whether the viewport is currently in the compact (phone-shaped) layout.
+  function isCompact(): boolean {
+    return !!mobileMQ?.matches;
+  }
+  // THE modality predicate. Everything that must only happen while the widget
+  // genuinely covers the viewport hangs off this one function: background scroll
+  // lock, `role="dialog"` + `aria-modal`, the Tab trap, and Escape.
+  //
+  // Deliberately NOT `isSide && panelOpen`: a DESKTOP side panel is not modal.
+  // The host page is still visible and usable beside it, so trapping Tab there
+  // would strand keyboard users and `aria-modal` would lie to assistive tech.
+  function isModal(): boolean {
+    return isCompact() && (isSide ? panelOpen : inlineExpanded);
+  }
+  // Visible, tabbable elements inside the modal surface (skips display:none
   // subtrees like the hidden in-card header; getClientRects covers fixed elements
   // such as the bar, which offsetParent would miss).
-  function inlineFocusables(): HTMLElement[] {
+  function modalFocusables(): HTMLElement[] {
     const sel =
       "a[href],button:not([disabled]),textarea:not([disabled])," +
       'input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
@@ -1040,16 +1253,17 @@ export function mountChatWidget(
       (el) => el.getClientRects().length > 0,
     );
   }
-  function onInlineKeydown(e: KeyboardEvent): void {
-    if (!inlineExpanded) return;
+  function onModalKeydown(e: KeyboardEvent): void {
+    if (!isModal()) return;
     if (e.key === "Escape") {
-      void collapseInline();
+      if (isSide) closePanel();
+      else void collapseInline();
       return;
     }
     // Trap Tab within the modal sheet (aria-modal alone does not stop keyboard
     // focus from leaving into the scroll-locked background).
     if (e.key !== "Tab") return;
-    const focusables = inlineFocusables();
+    const focusables = modalFocusables();
     if (focusables.length === 0) {
       e.preventDefault();
       return;
@@ -1087,10 +1301,31 @@ export function mountChatWidget(
   // only shift it up by the keyboard overlap via a negative `top`. `top` (unlike
   // `transform`) doesn't make the sheet a containing block, so the fixed top bar
   // stays put. One property, read from one snapshot, so there's no flashing frame.
+  //
+  // The side panel needs the same protection but a DIFFERENT write. Its
+  // positioned element is `wrapper` (`position: fixed; top: 0; bottom: 0`);
+  // `container` is a plain static flex child of it, so writing `top` on
+  // `container` (the inline path's move) has no effect at all there. The side
+  // panel instead raises the wrapper's `bottom` by the keyboard overlap, which
+  // shrinks it clear of the keyboard, and sets `top` to the visible-viewport
+  // offset so it stays put when the page scrolls under it. Two writes rather
+  // than the inline path's one, but both come from the same snapshot in the
+  // same synchronous block, so they still land in a single repaint and the
+  // flashing-frame problem the coalescing exists to prevent does not return.
   function applyVh(): void {
     const vv = window.visualViewport;
     const top = vv?.offsetTop ?? 0;
     const h = vv?.height ?? fullVh;
+    if (isSide) {
+      if (!wrapper) return;
+      // Layout viewport height: unchanged by the iOS keyboard, which is exactly
+      // why `bottom: 0` ends up underneath it and has to be corrected here.
+      const layoutH = window.innerHeight || fullVh;
+      const overlap = Math.max(0, layoutH - (top + h));
+      wrapper.style.bottom = `${overlap}px`;
+      wrapper.style.top = `${top}px`;
+      return;
+    }
     // How far the keyboard covers the bottom of the full-height sheet. Clamped to
     // <= 0 so a keyboardless viewport leaves the sheet flush at the top.
     const shift = Math.min(0, top + h - fullVh);
@@ -1099,12 +1334,22 @@ export function mountChatWidget(
     // itself scrolls under the sheet (offsetTop > 0).
     if (mobileBar) mobileBar.style.top = `${top}px`;
   }
+  /** Undo `applyVh`'s side-panel writes so a desktop panel keeps its CSS geometry. */
+  function resetVh(): void {
+    if (isSide && wrapper) {
+      wrapper.style.removeProperty("bottom");
+      wrapper.style.removeProperty("top");
+    }
+  }
   // The keyboard opening fires a burst of resize + scroll events. Coalesce them
   // into one rAF so `applyVh` reads a single settled snapshot and writes once.
   function syncVh(): void {
     if (vhRaf) return;
     vhRaf = requestAnimationFrame(() => {
       vhRaf = 0;
+      // A widget torn down between the event and the frame must not write
+      // geometry (or, for the side panel, resurrect styles on a detached node).
+      if (destroyed) return;
       applyVh();
     });
   }
@@ -1121,8 +1366,10 @@ export function mountChatWidget(
       vhRaf = 0;
     }
   }
+  /** Force the pane to the bottom and re-attach it (used when the sheet opens). */
   function scrollMessagesToEnd(): void {
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+    stickToBottom = true;
+    autoScroll();
   }
 
   // The slim top bar (optional logo + close) shown only while expanded.
@@ -1173,13 +1420,22 @@ export function mountChatWidget(
     closeBtn.setAttribute("aria-label", "Close");
     closeBtn.textContent = "×";
     css(closeBtn, {
+      // Full 44px hit area; margin keeps the glyph optically at the bar edge so
+      // the bar height is unchanged.
+      flexShrink: "0",
+      width: `${TOUCH_TARGET}px`,
+      height: `${TOUCH_TARGET}px`,
+      marginRight: "-10px",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
       border: "none",
       background: "transparent",
       fontSize: "26px",
       lineHeight: "1",
       color: TEXT_COLOR,
       cursor: "pointer",
-      padding: "4px 8px",
+      padding: "0",
     });
     closeBtn.addEventListener("click", () => void collapseInline());
     bar.appendChild(closeBtn);
@@ -1236,7 +1492,12 @@ export function mountChatWidget(
       container.setAttribute("role", "dialog");
       container.setAttribute("aria-modal", "true");
       container.setAttribute("aria-label", title);
-      lockBackgroundScroll();
+      // NB: the scroll lock is deliberately NOT taken here. This function is
+      // handed to `startViewTransition`, which the browser calls back
+      // asynchronously — so a `destroy()` landing in that window would release
+      // the lock first and this callback would then re-take it on a dead
+      // widget, pinning the host's <body> forever with no owner left to free
+      // it. It is taken and released synchronously in expandInline/collapseInline.
       // The bar is the full-screen header, so hide the in-card header to avoid a
       // duplicate logo/title row right beneath it.
       if (header) header.style.display = "none";
@@ -1263,7 +1524,8 @@ export function mountChatWidget(
       container.removeAttribute("role");
       container.removeAttribute("aria-modal");
       container.removeAttribute("aria-label");
-      unlockBackgroundScroll();
+      // See the note on the expand branch: the lock is released synchronously
+      // by collapseInline, never from inside the transition callback.
       // Restore the in-card header hidden on expand (it is always flex).
       if (header) header.style.display = "flex";
       if (mobileBar) mobileBar.style.display = "none";
@@ -1271,7 +1533,9 @@ export function mountChatWidget(
   }
 
   function expandInline(): Promise<void> {
-    if (inlineExpanded || !mobileMQ?.matches) return Promise.resolve();
+    if (destroyed || inlineExpanded || !mobileMQ?.matches) {
+      return Promise.resolve();
+    }
     // Skip the morph when the card already fills the viewport (a dedicated
     // full-page chat): there is nothing to promote, and a sheet would just
     // duplicate what is already on screen.
@@ -1291,8 +1555,14 @@ export function mountChatWidget(
     container.style.setProperty("--ago-vh", `${fullVh}px`);
     applyVh(); // geometry set synchronously before the transition snapshots
     addViewportListeners();
+    // Taken here, synchronously, rather than inside applyInlineState: that
+    // function runs as a view-transition callback, and an interleaved destroy()
+    // would otherwise leave the host <body> pinned with no owner to release it.
+    lockBackgroundScroll(lockOwner);
     const done = runInlineTransition(() => applyInlineState(true));
     void done.then(() => {
+      // The widget may have been destroyed while the transition was running.
+      if (destroyed) return;
       scrollMessagesToEnd();
       focus();
     });
@@ -1304,10 +1574,15 @@ export function mountChatWidget(
     if (!inlineExpanded) return Promise.resolve();
     inlineExpanded = false;
     removeViewportListeners();
+    // Released synchronously, mirroring expandInline.
+    unlockBackgroundScroll(lockOwner);
     // Blur so dismissing doesn't immediately re-trigger the focus expand.
     container.querySelector<HTMLTextAreaElement>("textarea")?.blur();
     const done = runInlineTransition(() => applyInlineState(false));
-    void done.then(() => container.style.removeProperty("--ago-vh"));
+    void done.then(() => {
+      if (destroyed) return;
+      container.style.removeProperty("--ago-vh");
+    });
     fullVh = 0;
     onClose?.();
     return done;

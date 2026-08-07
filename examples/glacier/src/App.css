@@ -1205,9 +1205,16 @@ button { font-family: var(--font-body); }
   line-height: 1.35;
 }
 
+/* Flex, not a plain block: the widget asks for `height: 100%`, and a percentage
+   height only resolves against a parent with a definite height. This shell's
+   own height comes from `flex: 1 1 auto`, which is not definite at resolution
+   time, so the widget fell back to its content height and left a gap between the
+   composer and the footnote. Stretching it as a flex child sizes it properly. */
 .gl-chat-widget-shell {
   min-height: 0;
   flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .gl-chat-footnote {
@@ -1236,7 +1243,15 @@ button { font-family: var(--font-body); }
   border: none !important;
   border-radius: 0 !important;
   background: transparent !important;
-  height: 100% !important;
+  /* No !important on height: the widget sets its own height inline when it goes
+     full-screen on a phone (to hold a captured viewport height while the
+     keyboard slides in). A stylesheet !important beats an inline style, so
+     forcing it here silently disabled that whole mechanism. */
+  height: 100%;
+  /* Fill the shell for real. See the note on .gl-chat-widget-shell: the inline
+     `height: 100%` alone resolves to auto here. */
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .ago-chat-widget__header {
@@ -1344,7 +1359,10 @@ button { font-family: var(--font-body); }
   border-radius: 0 !important;
   color: var(--ink-800) !important;
   font-family: var(--font-body) !important;
-  font-size: 14px !important;
+  /* 16px, not 14. Safari on iOS zooms the whole page in when you tap a field
+     whose RENDERED text is under 16px, and then leaves you zoomed. The SDK ships
+     16px for exactly that reason; overriding it down re-introduced the zoom. */
+  font-size: 16px !important;
   line-height: 1.45 !important;
 }
 
@@ -1355,9 +1373,11 @@ button { font-family: var(--font-body); }
 .ago-chat-input > div:last-child > :is(button[type='submit'], button[aria-label='Stop generating']) {
   position: relative !important;
   display: block !important;
-  width: 40px !important;
-  height: 40px !important;
-  flex: 0 0 40px !important;
+  /* Matches the SDK's 44px minimum touch target. Pinning this to 40 here meant
+     the host stylesheet silently reverted an accessibility fix in the SDK. */
+  width: 44px !important;
+  height: 44px !important;
+  flex: 0 0 44px !important;
   padding: 0 !important;
   background: var(--accent) !important;
   border-radius: 50% !important;
@@ -1440,7 +1460,11 @@ button { font-family: var(--font-body); }
   }
 
   .gl-order-cart {
-    position: static;
+    /* `relative`, not `static`: this rule only wants to drop the stickiness, but
+       going fully static also removes the containing block for the torn-ticket
+       ::after, which is absolutely positioned. It then escaped to the initial
+       containing block and painted its zigzag straight across the page. */
+    position: relative;
     min-height: 0;
     max-height: none;
   }
@@ -1514,10 +1538,65 @@ button { font-family: var(--font-body); }
     padding: var(--sp-8) var(--sp-6) var(--sp-16);
   }
 
+  /* One column, and the boutique comes FIRST.
+     In source order the chat precedes the stage (on desktop it is the left
+     column). Stacked, that put a 540px chat card above the fold on a phone: you
+     landed on the assistant, had to scroll past it to reach the shop, and when
+     the agent added a scoop the result was off-screen behind you. Grid `order`
+     flips the visual order without touching the DOM, so the reading order for
+     assistive tech is unchanged. */
+  .gl-stage { order: 1; }
+
+  /* Under this breakpoint the widget lifts out of the flow as a bottom sheet
+     (see `sheet={{ breakpoint: 1180 }}` in App.tsx), so the card that framed it
+     on desktop has nothing left to frame. Strip the chrome rather than hiding
+     .gl-chat outright: `display: none` on an ancestor would take the fixed
+     sheet down with it. */
   .gl-chat {
+    order: 2;
     position: static;
     height: auto;
-    min-height: 540px;
+    min-height: 0;
+    background: none;
+    border: none;
+    box-shadow: none;
+    overflow: visible;
+  }
+
+  .gl-chat-identity,
+  .gl-chat-footnote {
+    display: none;
+  }
+
+  /* Room for the collapsed sheet, taken from the height the widget publishes
+     rather than a number guessed here: the bar's height depends on this very
+     stylesheet's composer padding, so any constant would drift. Applied to the
+     shell, not .gl-main, because the footer is .gl-main's sibling and was the
+     part actually left stranded under the bar. */
+  .gl-shell {
+    padding-bottom: var(--ago-sheet-height, 0px);
+  }
+
+  /* As a sheet the widget floats over the boutique, so it needs its own opaque
+     ground — the base rule above makes it transparent, which is right inside the
+     dark card on desktop and wrong once it is airborne. Keyed on the state
+     attribute the SDK exposes, so it only applies when a sheet is actually up. */
+  .ago-chat-widget[data-ago-sheet-state] {
+    background: var(--ink-900) !important;
+    border-top: 1px solid rgba(181, 140, 78, 0.5) !important;
+    box-shadow: 0 -12px 40px rgba(30, 23, 18, 0.32) !important;
+  }
+
+  .ago-chat-widget[data-ago-sheet-state='full'] {
+    border-top: none !important;
+  }
+
+  /* The composer is the densest part of the bar; give it room to breathe now
+     that it shares the sheet with a header and a preview line. */
+  .ago-chat-widget[data-ago-sheet-state] .ago-chat-input {
+    padding: 10px 18px 14px !important;
+    border-top: none !important;
+    background: transparent !important;
   }
 }
 

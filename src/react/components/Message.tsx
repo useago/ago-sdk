@@ -176,7 +176,7 @@ const SourceCard: React.FC<{
   return <div style={containerStyle}>{card}</div>;
 };
 
-const StreamingDots: React.FC = () => (
+export const StreamingDots: React.FC = () => (
   <div style={{ display: "flex", gap: "4px", padding: "4px 0" }}>
     {[0, 1, 2].map((i) => (
       <div
@@ -185,7 +185,10 @@ const StreamingDots: React.FC = () => (
           width: "6px",
           height: "6px",
           borderRadius: "50%",
-          backgroundColor: "#b5bfc8",
+          // currentColor, not a fixed grey: the dots are the one thing that has
+          // to stay legible on a light panel AND on a dark sheet.
+          backgroundColor: "currentColor",
+          opacity: 0.55,
           animation: "ago-pulse 1.2s ease-in-out infinite",
           animationDelay: `${i * 0.2}s`,
         }}
@@ -349,7 +352,9 @@ export const Message: React.FC<MessageProps> = ({
                   onFollowUpClick ? () => onFollowUpClick(reply) : undefined
                 }
                 style={{
-                  minHeight: "36px",
+                  // Suggested replies are the primary tap target of the
+                  // suggestion pattern; 36px was under the 44px minimum.
+                  minHeight: "44px",
                   padding: "6px 14px",
                   fontSize: "13px",
                   borderRadius: "16px",

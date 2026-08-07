@@ -33,6 +33,7 @@ export function buildInput(args: BuildInputArgs): {
   getValueAndClear: () => { content: string; files: File[] };
   setDisabled: (disabled: boolean) => void;
   focus: () => void;
+  restoreDraft: (content: string, files?: File[]) => void;
 } {
   let files: File[] = [];
 
@@ -111,8 +112,10 @@ export function buildInput(args: BuildInputArgs): {
   sendBtn.innerHTML = ARROW_ICON;
   css(sendBtn, {
     flexShrink: "0",
-    width: "40px",
-    height: "40px",
+    // 44px is Apple's HIG minimum touch target. At 40 this was the single most
+    // tapped control in the widget sitting under the threshold.
+    width: "44px",
+    height: "44px",
     padding: "0",
     border: "none",
     borderRadius: "50%",
@@ -163,7 +166,13 @@ export function buildInput(args: BuildInputArgs): {
     attachBtn.setAttribute("aria-label", "Attach file");
     attachBtn.textContent = "📎";
     css(attachBtn, {
-      padding: "10px 12px",
+      flexShrink: "0",
+      minWidth: "44px",
+      minHeight: "44px",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: "0 12px",
       border: `1px solid ${BORDER_COLOR}`,
       borderRadius: "12px",
       backgroundColor: PANEL_BACKGROUND,
@@ -197,6 +206,15 @@ export function buildInput(args: BuildInputArgs): {
       remove.setAttribute("aria-label", `Remove ${file.name}`);
       remove.textContent = "×";
       css(remove, {
+        // The chip stays visually small; only the hit area grows to 44px, with
+        // negative margins so the layout is unchanged.
+        flexShrink: "0",
+        width: "44px",
+        height: "44px",
+        margin: "-14px -12px -14px -4px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
         border: "none",
         background: "transparent",
         cursor: "pointer",
@@ -260,5 +278,27 @@ export function buildInput(args: BuildInputArgs): {
       refreshSendBtn();
     },
     focus: () => textarea.focus(),
+    /**
+     * Put a failed send back into the composer.
+     *
+     * `submit` clears the field before the request goes out so the UI feels
+     * instant. The cost is that a rejected send would otherwise destroy the
+     * user's text with no way to get it back — on a phone, on a flaky
+     * connection, that means retyping the whole message from scratch.
+     *
+     * Skipped when the user has already started typing something new, so
+     * restoring can never clobber live input.
+     */
+    restoreDraft: (content: string, restored?: File[]) => {
+      if (content && !textarea.value.trim()) {
+        textarea.value = content;
+        autoResize();
+      }
+      if (restored?.length) {
+        files = [...restored, ...files];
+        renderFiles();
+      }
+      refreshSendBtn();
+    },
   };
 }

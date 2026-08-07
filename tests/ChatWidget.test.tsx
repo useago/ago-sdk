@@ -3,7 +3,11 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { AgoClient } from "../src/client/AgoClient";
 import { AgoProvider } from "../src/react/context/AgoContext";
-import { ChatWidget } from "../src/react/components/ChatWidget";
+import {
+  ChatWidget,
+  type ChatWidgetHandle,
+} from "../src/react/components/ChatWidget";
+import { createRef, StrictMode } from "react";
 import type { CreateFormCollectorOptions } from "../src/forms/createFormCollector";
 import type { AgoMessage } from "../src/client/types";
 
@@ -367,5 +371,529 @@ describe("ChatWidget stop button", () => {
       root.unmount();
     });
     container.remove();
+  });
+});
+
+describe("ChatWidget touch targets", () => {
+  it("gives the React composer controls at least 44px", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <AgoProvider client={client}>
+          <ChatWidget allowFiles />
+        </AgoProvider>,
+      );
+    });
+
+    // Glacier (and every other host) drives the React widget, so the 44px
+    // minimum has to hold on this tree too, not just the vanilla one.
+    const send = container.querySelector<HTMLElement>('button[type="submit"]')!;
+    expect(send.style.minHeight).toBe("44px");
+
+    const attach = container.querySelector<HTMLElement>(
+      'button[aria-label="Attach file"]',
+    )!;
+    expect(attach.style.minWidth).toBe("44px");
+    expect(attach.style.minHeight).toBe("44px");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+    client.destroy();
+  });
+});
+
+describe("ChatWidget streaming + follow-the-bottom (React parity)", () => {
+  function sizePane(pane: HTMLElement, scrollHeight = 600, clientHeight = 200) {
+    Object.defineProperty(pane, "scrollHeight", {
+      configurable: true,
+      get: () => scrollHeight,
+    });
+    Object.defineProperty(pane, "clientHeight", {
+      configurable: true,
+      get: () => clientHeight,
+    });
+  }
+
+  it("puts the user's text back in the composer when the send fails", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    vi.spyOn(client, "sendMessage").mockRejectedValue(new Error("offline"));
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <AgoProvider client={client}>
+          <ChatWidget />
+        </AgoProvider>,
+      );
+    });
+
+    const textarea = container.querySelector<HTMLTextAreaElement>("textarea")!;
+    const form = container.querySelector<HTMLFormElement>("form")!;
+
+    // The textarea is a controlled component: assigning `.value` does not reach
+    // React state. Go through the native setter so React's synthetic onChange
+    // actually fires, otherwise the submit below is a no-op and the test would
+    // pass whether or not the draft is restored.
+    const setValue = (el: HTMLTextAreaElement, value: string) => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value",
+      )!.set!;
+      setter.call(el, value);
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+
+    await act(async () => {
+      setValue(textarea, "deux boules pistache");
+    });
+    expect(textarea.value).toBe("deux boules pistache");
+    await act(async () => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+
+    // The composer clears on submit and the optimistic bubble is dropped on
+    // failure, so without restoring it the message is gone for good.
+    expect(textarea.value).toBe("deux boules pistache");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+    client.destroy();
+  });
+
+  it("offers a way back once the reader scrolls away from the bottom", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <AgoProvider client={client}>
+          <ChatWidget />
+        </AgoProvider>,
+      );
+    });
+
+    const pane = container.querySelector<HTMLElement>(
+      ".ago-chat-widget__messages",
+    )!;
+    sizePane(pane);
+
+    expect(container.querySelector(".ago-chat-widget__jump")).toBeNull();
+
+    // Scroll up to re-read something: 600 - 100 - 200 = 300 > 48.
+    await act(async () => {
+      pane.scrollTop = 100;
+      pane.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+
+    const jump = container.querySelector<HTMLElement>(".ago-chat-widget__jump")!;
+    expect(jump).not.toBeNull();
+
+    await act(async () => {
+      jump.click();
+    });
+    expect(pane.scrollTop).toBe(600);
+    expect(container.querySelector(".ago-chat-widget__jump")).toBeNull();
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+    client.destroy();
+  });
+});
+
+describe("ChatWidget sheet", () => {
+  function stubCompact(compact: boolean) {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: query.includes("prefers-reduced-motion") ? false : compact,
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => true,
+      })),
+    );
+  }
+
+  async function mount(node: React.ReactElement) {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(node);
+    });
+    return {
+      container,
+      unmount: async () => {
+        await act(async () => root.unmount());
+        container.remove();
+        vi.unstubAllGlobals();
+        document.body.removeAttribute("style");
+      },
+    };
+  }
+
+  it("is off unless asked for: no fixed overlay on the host page", async () => {
+    stubCompact(true);
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const { container, unmount } = await mount(
+      <AgoProvider client={client}>
+        <ChatWidget />
+      </AgoProvider>,
+    );
+
+    const widget = container.querySelector<HTMLElement>(".ago-chat-widget")!;
+    // Turning the widget into a permanent fixed bar on someone else's page has
+    // to be opt-in.
+    expect(widget.style.position).not.toBe("fixed");
+    expect(container.querySelector(".ago-chat-widget__peek")).toBeNull();
+
+    await unmount();
+    client.destroy();
+  });
+
+  it("rests in peek on a compact viewport and expands on tap", async () => {
+    stubCompact(true);
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const { container, unmount } = await mount(
+      <AgoProvider client={client}>
+        <ChatWidget sheet={{}} />
+      </AgoProvider>,
+    );
+
+    const widget = container.querySelector<HTMLElement>(".ago-chat-widget")!;
+    expect(widget.dataset.agoSheetState).toBe("peek");
+    expect(widget.style.position).toBe("fixed");
+    // Peek is not modal: the page behind it stays scrollable.
+    expect(widget.getAttribute("aria-modal")).toBeNull();
+    expect(document.body.style.position).toBe("");
+
+    const peek = container.querySelector<HTMLElement>(".ago-chat-widget__peek")!;
+    await act(async () => {
+      peek.click();
+    });
+
+    expect(widget.dataset.agoSheetState).toBe("full");
+    expect(widget.getAttribute("role")).toBe("dialog");
+    expect(widget.getAttribute("aria-modal")).toBe("true");
+    // Full covers the viewport, so the page behind it is pinned.
+    expect(document.body.style.position).toBe("fixed");
+
+    await unmount();
+    client.destroy();
+  });
+
+  it("collapses on Escape and releases the host page", async () => {
+    stubCompact(true);
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const ref = createRef<ChatWidgetHandle>();
+    const { container, unmount } = await mount(
+      <AgoProvider client={client}>
+        <ChatWidget ref={ref} sheet={{ initialState: "full" }} />
+      </AgoProvider>,
+    );
+
+    const widget = container.querySelector<HTMLElement>(".ago-chat-widget")!;
+    expect(widget.dataset.agoSheetState).toBe("full");
+    expect(document.body.style.position).toBe("fixed");
+
+    await act(async () => {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+    });
+
+    expect(widget.dataset.agoSheetState).toBe("peek");
+    expect(document.body.style.position).toBe("");
+
+    await unmount();
+    client.destroy();
+  });
+
+  it("exposes expand/collapse through a ref", async () => {
+    stubCompact(true);
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const ref = createRef<ChatWidgetHandle>();
+    const { container, unmount } = await mount(
+      <AgoProvider client={client}>
+        <ChatWidget ref={ref} sheet={{}} />
+      </AgoProvider>,
+    );
+    const widget = container.querySelector<HTMLElement>(".ago-chat-widget")!;
+
+    expect(ref.current?.state).toBe("peek");
+    await act(async () => ref.current!.expand());
+    expect(widget.dataset.agoSheetState).toBe("full");
+    await act(async () => ref.current!.collapse());
+    expect(widget.dataset.agoSheetState).toBe("peek");
+
+    await unmount();
+    client.destroy();
+  });
+
+  it("stays a normal panel on a desktop viewport, never modal", async () => {
+    stubCompact(false);
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const ref = createRef<ChatWidgetHandle>();
+    const { container, unmount } = await mount(
+      <AgoProvider client={client}>
+        <ChatWidget ref={ref} sheet={{}} />
+      </AgoProvider>,
+    );
+    const widget = container.querySelector<HTMLElement>(".ago-chat-widget")!;
+
+    await act(async () => ref.current!.expand());
+    // The host page beside the widget is still usable, so it must not be pinned
+    // or announced as modal.
+    expect(widget.getAttribute("aria-modal")).toBeNull();
+    expect(widget.style.position).not.toBe("fixed");
+    expect(document.body.style.position).toBe("");
+
+    await unmount();
+    client.destroy();
+  });
+
+  it("survives StrictMode's mount / cleanup / remount cycle", async () => {
+    stubCompact(true);
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const ref = createRef<ChatWidgetHandle>();
+    // StrictMode runs effect cleanups between two mounts while keeping memoized
+    // values. A controller torn down from such a cleanup stays dead, and every
+    // command silently no-ops — which is exactly what shipped before this test.
+    const { container, unmount } = await mount(
+      <StrictMode>
+        <AgoProvider client={client}>
+          <ChatWidget ref={ref} sheet={{}} />
+        </AgoProvider>
+      </StrictMode>,
+    );
+    const widget = container.querySelector<HTMLElement>(".ago-chat-widget")!;
+
+    const peek = container.querySelector<HTMLElement>(".ago-chat-widget__peek")!;
+    await act(async () => {
+      peek.click();
+    });
+    expect(widget.dataset.agoSheetState).toBe("full");
+
+    await act(async () => ref.current!.collapse());
+    expect(widget.dataset.agoSheetState).toBe("peek");
+
+    await unmount();
+    client.destroy();
+  });
+
+  it("gives the expanded sheet an explicit way back", async () => {
+    stubCompact(true);
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const { container, unmount } = await mount(
+      <AgoProvider client={client}>
+        <ChatWidget sheet={{ initialState: "full" }} />
+      </AgoProvider>,
+    );
+    const widget = container.querySelector<HTMLElement>(".ago-chat-widget")!;
+
+    // Escape is not an exit on a touch device, so a visible control is the only
+    // way out of a full-screen sheet on the surface it is designed for.
+    const back = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Collapse the conversation"]',
+    )!;
+    expect(back).not.toBeNull();
+    expect(back.style.width).toBe("44px");
+    expect(back.style.height).toBe("44px");
+
+    await act(async () => {
+      back.click();
+    });
+    expect(widget.dataset.agoSheetState).toBe("peek");
+
+    await unmount();
+    client.destroy();
+  });
+
+  it("shows a thinking state in peek instead of stale text", async () => {
+    stubCompact(true);
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    // Never settles: the widget stays in its answering state.
+    vi.spyOn(client, "sendMessage").mockReturnValue(
+      new Promise<AgoMessage>(() => {}),
+    );
+    const { container, unmount } = await mount(
+      <AgoProvider client={client}>
+        <ChatWidget sheet={{}} welcomeMessage="Bonjour" thinkingLabel="Reflexion..." />
+      </AgoProvider>,
+    );
+
+    const peek = container.querySelector<HTMLElement>(".ago-chat-widget__peek")!;
+    expect(peek.textContent).toContain("Bonjour");
+
+    const textarea = container.querySelector<HTMLTextAreaElement>("textarea")!;
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value",
+    )!.set!;
+    await act(async () => {
+      setter.call(textarea, "deux boules");
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      container
+        .querySelector<HTMLFormElement>("form")!
+        .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+
+    // Before the first token there is nothing to preview. Falling back to the
+    // greeting showed stale text exactly when the user wants to know that
+    // something is happening.
+    expect(peek.textContent).toContain("Reflexion...");
+    expect(peek.textContent).not.toContain("Bonjour");
+
+    await unmount();
+    client.destroy();
+  });
+
+  it("publishes its footprint so the host can reserve room for it", async () => {
+    stubCompact(true);
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const { container, unmount } = await mount(
+      <AgoProvider client={client}>
+        <ChatWidget sheet={{}} />
+      </AgoProvider>,
+    );
+    const widget = container.querySelector<HTMLElement>(".ago-chat-widget")!;
+    Object.defineProperty(widget, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ height: 176 }) as DOMRect,
+    });
+    // Force a re-measure the way a resize would.
+    await act(async () => {
+      window.dispatchEvent(new Event("resize"));
+    });
+
+    // A fixed bar covers the end of the host page. Without publishing its
+    // height, the host's footer stays unreachable no matter how far you scroll,
+    // and any constant the host hardcodes drifts from the real bar.
+    const published =
+      document.documentElement.style.getPropertyValue("--ago-sheet-height");
+    expect(published).not.toBe("");
+
+    await unmount();
+    // The reservation must not outlive the widget.
+    expect(
+      document.documentElement.style.getPropertyValue("--ago-sheet-height"),
+    ).toBe("");
+    client.destroy();
+  });
+
+  it("does not stack a second title row while the sheet owns the chrome", async () => {
+    stubCompact(true);
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const { container, unmount } = await mount(
+      <AgoProvider client={client}>
+        <ChatWidget title="Comptoir" sheet={{}} />
+      </AgoProvider>,
+    );
+
+    // peek renders its own title, so the in-card header must step aside;
+    // otherwise every consumer without Glacier's `display: none` override gets
+    // two headers stacked.
+    expect(container.querySelector(".ago-chat-widget__header")).toBeNull();
+    const peek = container.querySelector<HTMLElement>(".ago-chat-widget__peek")!;
+    expect(peek.textContent).toContain("Comptoir");
+
+    await act(async () => {
+      peek.click();
+    });
+    expect(container.querySelector(".ago-chat-widget__header")).toBeNull();
+    expect(
+      container.querySelector(".ago-chat-widget__sheet-header")!.textContent,
+    ).toContain("Comptoir");
+
+    await unmount();
+    client.destroy();
+  });
+
+  it("traps Tab inside the expanded sheet", async () => {
+    stubCompact(true);
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const { container, unmount } = await mount(
+      <AgoProvider client={client}>
+        <ChatWidget sheet={{ initialState: "full" }} allowFiles />
+      </AgoProvider>,
+    );
+
+    // jsdom gives every element a zero-size rect, so the visibility filter would
+    // drop everything. Report a real box for the focusables.
+    for (const el of Array.from(container.querySelectorAll("*"))) {
+      Object.defineProperty(el, "getClientRects", {
+        configurable: true,
+        value: () => [{ width: 10, height: 10 }],
+      });
+    }
+    const focusables = Array.from(
+      container.querySelectorAll<HTMLElement>(
+        'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter((el) => el.getClientRects().length > 0);
+    expect(focusables.length).toBeGreaterThan(1);
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+
+    // `aria-modal` alone does not stop focus walking out into the background we
+    // just scroll-locked, which would strand the user off-screen.
+    last.focus();
+    const fwd = new KeyboardEvent("keydown", {
+      key: "Tab",
+      bubbles: true,
+      cancelable: true,
+    });
+    await act(async () => {
+      document.dispatchEvent(fwd);
+    });
+    expect(fwd.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(first);
+
+    first.focus();
+    const back = new KeyboardEvent("keydown", {
+      key: "Tab",
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    await act(async () => {
+      document.dispatchEvent(back);
+    });
+    expect(back.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(last);
+
+    await unmount();
+    client.destroy();
+  });
+
+  it("leaves room for a host bottom nav via bottomOffset", async () => {
+    stubCompact(true);
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const { container, unmount } = await mount(
+      <AgoProvider client={client}>
+        <ChatWidget sheet={{ bottomOffset: 64 }} />
+      </AgoProvider>,
+    );
+    const widget = container.querySelector<HTMLElement>(".ago-chat-widget")!;
+    expect(widget.style.bottom).toBe("64px");
+
+    await unmount();
+    client.destroy();
   });
 });

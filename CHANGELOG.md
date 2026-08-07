@@ -5,6 +5,82 @@ All notable changes to `@useago/sdk` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.2] - 2026-08-06
+
+### Fixed
+
+- Side-placement panels (`placement: "left" | "right"`) now get the mobile
+  treatment the inline card already had. On a small viewport the open panel
+  tracks the visible viewport, so the on-screen keyboard no longer covers the
+  composer, and it is exposed as a real dialog (`role="dialog"`, `aria-modal`,
+  Tab trap, Escape to close). Opening it moves focus into the panel rather than
+  the text field, so the keyboard no longer opens unprompted.
+- A desktop side panel is explicitly **not** modal: it no longer traps Tab or
+  locks the page behind it, so the host page stays usable beside it.
+- The background scroll lock now restores the host page's own inline `<body>` /
+  `<html>` styles instead of deleting them. A host that had already pinned its
+  own body (for its own modal) is left exactly as it was found.
+- The scroll lock is tracked per owner instead of by a counter, so overlapping
+  open / close / destroy paths can no longer release a lock they don't hold,
+  and `destroy()` is idempotent.
+- `destroy()` during an opening animation no longer re-pins the page after
+  teardown, which could leave `<body>` fixed with no owner left to release it.
+- `destroy()` now drops its keydown and `visualViewport` listeners for every
+  placement; side-placement widgets previously leaked them.
+- A phone in landscape (short viewport, e.g. 844x390) now counts as mobile, so
+  it keeps the full-screen sheet and the keyboard handling instead of falling
+  back to the desktop layout mid-conversation.
+- A streamed answer no longer rebuilds the whole thread on every token. Screen
+  readers announced the entire conversation per chunk, and the rebuild collapsed
+  the pane's scroll height, which is what made a "follow the bottom" check latch
+  off after the first token.
+- The message pane now follows new content only while you are already at the
+  bottom. Scroll up to re-read something and the stream stops yanking you back;
+  a "jump to latest" button returns you. Sending always re-attaches.
+- On a compact viewport the composer is no longer re-focused after every answer,
+  which was re-opening the on-screen keyboard over the reply you were reading.
+- A failed send no longer destroys the message: the text (and any attachments)
+  go back into the composer instead of being lost.
+- Touch targets are at least 44px across both the vanilla widget and the React
+  components: send, stop, attach, remove-attachment, suggested replies, and both
+  close buttons.
+
+### Added
+
+- Bottom-sheet presentation for compact viewports, opt-in via the new `sheet`
+  option on the React `<ChatWidget>`. It rests as a `peek` bar pinned to the
+  bottom edge (named header, two-line preview of the last reply, composer) and
+  expands to a `full` screen with `role="dialog"`, a background scroll lock and
+  Escape to collapse. `peek` is deliberately never modal: the page behind it
+  stays scrollable and keyboard-reachable.
+- `createSheetController` (`@useago/sdk/widget`): the framework-agnostic state
+  machine behind it. It returns a **props bag** rather than touching the DOM, so
+  the React binding, the vanilla widget and any Vue or Angular binding drive the
+  same implementation.
+- `useSheet` (`@useago/sdk/react`), which reads that controller through
+  `useSyncExternalStore` with a non-compact server snapshot, so `matchMedia`
+  never runs during render and hydration matches.
+- `<ChatWidget>` now forwards a ref exposing `expand()`, `collapse()`,
+  `toggle()` and the current `state`.
+- `sheet.bottomOffset` leaves room for a host page that already owns the bottom
+  edge (a bottom nav, a sticky checkout bar). `sheet: false` (the default) keeps
+  the widget out of the host's fixed layers entirely.
+- `thinkingLabel` on `<ChatWidget>`: what the collapsed sheet says next to the
+  animated dots while the agent is working and has produced no text yet.
+- `--ago-sheet-height`: the collapsed sheet measures itself and publishes its
+  footprint as a custom property on the host document. A fixed bar covers the end
+  of the page, so hosts need to reserve that space, and a constant in their CSS
+  would drift from the real height (which depends on their own composer styling).
+  Use it as `padding-bottom: var(--ago-sheet-height, 0px)`.
+
+### Changed
+
+- The streaming dots now paint in `currentColor` instead of a fixed grey, so
+  they stay legible on a dark surface as well as a light one.
+- React `<ChatInput>`'s `onSend` may now return a boolean (or a promise of one).
+  Returning `false` tells the composer the send failed so it can restore the
+  draft. Existing handlers that return nothing keep working unchanged.
+
 ## [1.6.1] - 2026-08-05
 
 ### Added

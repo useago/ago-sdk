@@ -42,3 +42,52 @@ review (plan: fix DX audit findings).
 - **Where to start:** `src/testing/createMockClient.ts` (track registered
   definitions in a map; return live schemas).
 - **Effort:** S.
+
+## Glacier: the "agent acts, the sheet yields" differentiator (P2)
+
+- **What:** the one behavior no competitor can copy, because Intercom, Crisp and
+  assistant-ui do not drive the host page: the chat gets out of the way when the
+  agent changes the page.
+- **Why:** on mobile the result of an agent action can land behind the sheet.
+  Minimum viable version is example-side only, no SDK API: on `useAgoActivity`
+  action-done, `scrollIntoView({block:'center'})` on the changed element plus a
+  short highlight. Roughly 15 lines.
+- **Not blocked by anything.** The sheet itself shipped; this is the part that
+  makes it worth having.
+- **Effort:** S.
+
+## Playwright smoke suite for the widget (P2)
+
+- **What:** ~6 real-browser cases. Vitest is jsdom-only (`vitest.config.ts`),
+  which structurally cannot see: real layout, `env(safe-area-inset-*)`, host
+  `!important` beating widget inline styles, `<dialog>` top layer, View
+  Transitions, `getClientRects()` (the focus trap depends on it,
+  `createChatWidget.ts:1039`), or computed theme tokens.
+- **Why:** the host-page-freeze bug (widget locks `body` from inside a View
+  Transition callback) is invisible in jsdom, because jsdom has no
+  `startViewTransition` so the callback runs synchronously.
+- **Cases:** input row inside `visualViewport` at 390x844 side placement;
+  scroll lock/restore; expand-then-destroy leaves no `position: fixed` on body;
+  rotation mid-stream; 44x44 targets *with Glacier's stylesheet loaded*;
+  `prefers-reduced-motion`.
+- **Also:** rewrite the `matchMedia` test stub to be keyed by query string
+  (`tests/createChatWidget.test.ts:576-582` collapses every query to one
+  boolean, so a landscape media query would pass whatever the code asks for).
+- **Note:** no engine simulates an on-screen keyboard. iOS keyboard geometry
+  stays a manual device checklist; say so in the docs rather than implying
+  tests cover it.
+- **Effort:** M.
+
+## Widget diagnostics story (P3)
+
+- **What:** `data-ago-sheet-state` / `data-ago-modal` /
+  `data-ago-scroll-lock-owner` attributes, one-shot dev warnings when a host
+  `!important` rule defeats the expected geometry or the composer stays outside
+  `visualViewport`, and a read-only `widget.getDiagnostics()`.
+- **Why:** an integrator whose widget misbehaves inside their page has no way
+  to find out why. "expected bottom=64px, computed bottom=0px; overridden by
+  `.host-chat{bottom:0!important}`" turns hours of CSS hunting into a fix.
+- **Also:** the dev panel paints at `z-index: 1000`
+  (`src/devtools/initDevPanel.ts:304`) while the widget uses `2147483000`, so
+  the diagnostic tool is hidden behind the thing it should diagnose.
+- **Effort:** M.

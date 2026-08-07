@@ -4,7 +4,19 @@ export type { AgoProviderProps, AgoDeclarativeConfig } from "./context/AgoContex
 
 // React components
 export { ChatWidget } from "./components/ChatWidget";
-export type { ChatWidgetProps } from "./components/ChatWidget";
+export type {
+  ChatWidgetProps,
+  ChatWidgetHandle,
+} from "./components/ChatWidget";
+
+export { useSheet } from "./hooks/useSheet";
+export type { UseSheetResult } from "./hooks/useSheet";
+export type {
+  SheetOptions,
+  SheetState,
+  SheetChangeCause,
+  SheetSnapshot,
+} from "../widget/sheetController";
 
 export { Message } from "./components/Message";
 export type { MessageProps } from "./components/Message";
