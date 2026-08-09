@@ -40,8 +40,9 @@ describe("registerPageStateFunction", () => {
 
     const props = schema!.parameters.properties;
     expect(Object.keys(props)).toEqual(["statusFilter", "tags"]);
-    // No control is required.
-    expect(schema!.parameters.required).toBeUndefined();
+    // No control is required, and the wire schema says so explicitly: an
+    // absent `required` can be read as "all properties required" downstream.
+    expect(schema!.parameters.required).toEqual([]);
     // Enum and per-field schema are propagated, description injected.
     expect(props.statusFilter).toMatchObject({
       type: "string",
