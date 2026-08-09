@@ -1552,7 +1552,10 @@ export class AgoClient {
               { ...c.schema, description: c.description },
             ])
           ),
-          // All optional: the agent sets only what the user asked for.
+          // Explicitly empty, not omitted: an absent `required` can be read as
+          // "every property is required", forcing the agent to set all
+          // controls. The agent must set only what the user asked for.
+          required: [],
         },
         requiresApproval: opts?.requiresApproval,
         // Only pin a ceiling when the page asked for one; otherwise the
