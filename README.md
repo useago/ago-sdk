@@ -64,8 +64,10 @@ export default function App() {
 ```
 
 Start your dev server. A chat panel renders on the page; type a message and
-watch the reply stream in. That's a complete integration. (`generic-guide` is a
-public demo agent; swap `baseUrl` and `agent` for your own once you have a tenant.)
+watch the reply stream in. That's a complete integration. (This is the public
+demo account: `https://playground.api.useago.com` with agent `generic-guide`. It
+needs no signup and no API key. Swap `baseUrl` and `agent` for your own once you
+have a tenant.)
 
 `ChatWidget` is the high-level component to get started in minutes. Everything it
 does is also exposed through hooks and APIs (`useChat`, `useMessages`, the raw
@@ -313,7 +315,7 @@ cd examples/simple-react
 npm install && npm run dev
 ```
 
-The examples ship pre-configured against the demo backend, so they answer
+The examples ship pre-configured against the demo account, so they answer
 immediately. [`examples/`](examples/) has one per stack: React (with
 react-router navigation), Vue, Angular, plain TypeScript, and no-build HTML.
 

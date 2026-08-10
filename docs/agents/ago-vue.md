@@ -6,7 +6,7 @@ navigate your app's routes. This file is everything you need. Follow it exactly.
 
 ## Endpoints
 
-Use the live demo for anything runnable so it answers with zero setup:
+Use the public demo account for anything runnable so it answers with zero setup:
 
 ```
 baseUrl: https://playground.api.useago.com

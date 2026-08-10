@@ -14,7 +14,7 @@ import { defineFunction } from '@useago/sdk';
 
 // ─── Create the service (in Angular, this would be provided via DI) ───
 const ago = new AgoService({
-  baseUrl: 'https://ago.api.useago.com',
+  baseUrl: 'https://playground.api.useago.com',
   agent: 'generic-guide',
   debug: true,
 });

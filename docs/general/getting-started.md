@@ -5,8 +5,8 @@ you'll: **(1)** send a message and stream a real reply, **(2)** plug the agent
 into your existing routes so it can change pages, and **(3)** understand what
 else the SDK can do.
 
-Every snippet below points at a live, ready-to-use endpoint and demo agent so
-you can copy, paste, and run without setting anything up:
+Every snippet below points at the public demo account, so you can copy, paste,
+and run without setting anything up. No signup, no API key:
 
 ```
 baseUrl: https://playground.api.useago.com
@@ -195,7 +195,7 @@ or navigate. `useAgoNavigation` auto-registers on mount and cleans up on unmount
 
 ### Or clone a running example
 
-The repo ships runnable examples pre-configured against the demo backend
+The repo ships runnable examples pre-configured against the same demo account
 (`https://playground.api.useago.com`, agent `generic-guide`), so they answer
 immediately:
 

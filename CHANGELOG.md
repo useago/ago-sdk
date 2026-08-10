@@ -5,6 +5,20 @@ All notable changes to `@useago/sdk` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.2] - 2026-08-10
+
+### Changed
+
+- Every "try the SDK" instruction now points at the same public demo account
+  (`https://playground.api.useago.com`, agent `generic-guide`). The examples
+  under `examples/` still pointed at a second backend, so a reader following the
+  README and a reader cloning an example were testing against different
+  tenants. Docs, README, and examples now agree, and the wording is "demo
+  account" everywhere instead of a mix of "live demo", "demo backend", and
+  "demo endpoint".
+- The `config_missing_base_url` error hint names the demo account and its agent
+  slug, so the message is copy-pasteable on its own.
+
 ## [1.7.1] - 2026-08-10
 
 ### Fixed
