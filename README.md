@@ -24,8 +24,11 @@ resolve customer needs, without rebuilding the full customer-facing agent platfo
 > this into your agent and let it do the integration:
 >
 > ```text
-> Read https://raw.githubusercontent.com/useago/ago-sdk/refs/heads/main/llms-full.txt
-> and integrate the AGO chat SDK into this app.
+> Install the AGO chat SDK in this app: npm install @useago/sdk
+> Then read https://raw.githubusercontent.com/useago/ago-sdk/refs/heads/main/llms-full.txt
+> and wire up a working chat against the public demo agent:
+> baseUrl https://playground.api.useago.com, agent generic-guide.
+> It answers straight away, with no signup and no API key.
 > ```
 
 In two minutes you'll have a working chat on your page and an agent that can

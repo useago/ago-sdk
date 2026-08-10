@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "demo endpoint".
 - The `config_missing_base_url` error hint names the demo account and its agent
   slug, so the message is copy-pasteable on its own.
+- The copy-paste prompt for coding agents in the README now installs the SDK and
+  names the demo agent to wire up (`https://playground.api.useago.com`, agent
+  `generic-guide`). It only told the agent to read `llms-full.txt` and
+  integrate, so the install was implicit and the agent had to pick a `baseUrl`
+  and slug on its own. Pasting the prompt now ends on a chat that answers.
 
 ## [1.7.1] - 2026-08-10
 
