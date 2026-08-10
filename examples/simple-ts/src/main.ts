@@ -3,8 +3,8 @@ import {
   type CreateFormCollectorOptions,
 } from '@useago/sdk/widget';
 
-// Public demo backend. Swap for your own https://YOUR-DOMAIN.api.useago.com.
-const BASE_URL = 'https://ago.api.useago.com';
+// Public demo account. Swap for your own https://YOUR-DOMAIN.api.useago.com.
+const BASE_URL = 'https://playground.api.useago.com';
 
 // Conversational form the agent fills while chatting, then submits.
 const demoRequest: CreateFormCollectorOptions = {

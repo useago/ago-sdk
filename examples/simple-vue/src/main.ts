@@ -20,7 +20,7 @@ const app = createApp(App);
 app.use(router);
 
 app.use(AgoPlugin, {
-  baseUrl: 'https://ago.api.useago.com',
+  baseUrl: 'https://playground.api.useago.com',
   agent: 'generic-guide',
   debug: true,
 });

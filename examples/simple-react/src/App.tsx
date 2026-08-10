@@ -195,7 +195,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <AgoProvider
-        baseUrl="https://ago.api.useago.com"
+        baseUrl="https://playground.api.useago.com"
         agent="generic-guide"
         debug
       >

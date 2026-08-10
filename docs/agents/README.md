@@ -34,7 +34,7 @@ Or just copy the file's contents straight into your prompt.
 
 ## Notes
 
-- Runnable snippets point at the live demo (`https://playground.api.useago.com`,
+- Runnable snippets point at the public demo account (`https://playground.api.useago.com`,
   agent `generic-guide`) so they answer with zero setup. Swap in
   `https://YOUR-DOMAIN.api.useago.com` and your own agent slug for your tenant.
 - These skills are condensed for an agent. The human-readable guides live in

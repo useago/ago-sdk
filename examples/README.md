@@ -12,9 +12,16 @@ Runnable example apps for `@useago/sdk`, one per stack.
 | `simple-html/` | Plain HTML (no build) | open the `.html` file |
 | `vue-widget/` | Embeddable widget in Vue | open `index.html` |
 
-The examples default to the public demo backend (`https://ago.api.useago.com`,
-agent `generic-guide`), so they answer out of the box. Point `baseUrl` at your
-own domain (e.g. `https://YOUR-DOMAIN.api.useago.com`) to chat with your agents.
+The examples default to the public demo account, so they answer out of the box
+with no signup and no API key:
+
+```
+baseUrl: https://playground.api.useago.com
+agent:   generic-guide
+```
+
+Point `baseUrl` at your own domain (e.g. `https://YOUR-DOMAIN.api.useago.com`)
+and set `agent` to your own slug to chat with your agents.
 
 ## How they depend on the SDK
 
