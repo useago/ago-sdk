@@ -196,6 +196,45 @@ export interface StopMessageResult {
   messageStatus?: MessageStatus;
 }
 
+/** Thumbs up / thumbs down on an answer. */
+export type FeedbackRating = "positive" | "negative";
+
+/**
+ * What went wrong with an answer. These are the four buckets the AGO feedback
+ * dashboard filters and charts on.
+ */
+export type FeedbackReason =
+  /** The answer states something false. */
+  | "inaccurate"
+  /** The answer is right but stops short. */
+  | "incomplete"
+  /** The agent could not find the information. */
+  | "information_not_found"
+  /** Something broke: the widget, a tool call, the stream. */
+  | "technical_issue";
+
+/** The four values of {@link FeedbackReason}, in dashboard order. */
+export const FEEDBACK_REASONS: readonly FeedbackReason[] = [
+  "inaccurate",
+  "incomplete",
+  "information_not_found",
+  "technical_issue",
+];
+
+/**
+ * Why the user is reporting a message (see `AgoClient.submitFeedback`).
+ *
+ * A rating on its own is a reaction (the thumbs count). Add a reason or a
+ * comment and the report also lands in the feedback dashboard, the analytics
+ * and the CSV export, where someone can act on it.
+ */
+export interface FeedbackDetails {
+  /** What went wrong. Several can apply at once. */
+  reasons?: FeedbackReason[];
+  /** The user's own words. Trimmed server-side; 5000 characters max. */
+  comment?: string;
+}
+
 /**
  * Agent information
  */

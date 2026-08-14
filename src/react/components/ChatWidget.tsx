@@ -27,6 +27,7 @@ import { ActivityLine } from "./ActivityLine";
 import { renderInlineMarkdown } from "./inlineMarkdown";
 import { ChatInput } from "./ChatInput";
 import { Message, StreamingDots } from "./Message";
+import { MessageFeedback, type MessageFeedbackProps } from "./MessageFeedback";
 
 export interface ChatWidgetProps {
   /** The AGO client instance. If omitted, reads from AgoProvider context. */
@@ -61,6 +62,17 @@ export interface ChatWidgetProps {
    * fetch the definition from the backend ({@link loadFormCollector}).
    */
   forms?: Array<CreateFormCollectorOptions | LoadFormCollectorOptions>;
+  /**
+   * Let the user report an answer that did not work: thumbs under each finished
+   * answer, and after a thumbs-down a panel to say what went wrong. Off by
+   * default. `true` uses the English labels; pass the `<MessageFeedback>` props
+   * to translate the strings or observe what was sent.
+   *
+   * ```tsx
+   * <ChatWidget feedback />
+   * ```
+   */
+  feedback?: boolean | Omit<MessageFeedbackProps, "messageId" | "client">;
   /**
    * How clicking a suggested follow-up reply behaves. Defaults to sending the
    * reply as a new user message. Pass a handler to override, or `false` to
@@ -147,6 +159,7 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
   logoUrl,
   showAgentName = false,
   forms,
+  feedback = false,
   onFollowUpClick,
   className = "",
   onMessageSent,
@@ -706,6 +719,19 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
               isLast={index === messages.length - 1}
               onFollowUpClick={handleFollowUpClick}
               showStreamingDots={!showingActivity}
+              feedback={
+                // Only a finished answer can be judged.
+                feedback &&
+                message.role === "assistant" &&
+                message.status === "DONE" &&
+                message.content ? (
+                  <MessageFeedback
+                    messageId={message.id}
+                    client={client}
+                    {...(feedback === true ? {} : feedback)}
+                  />
+                ) : undefined
+              }
             />
           ))
         )}

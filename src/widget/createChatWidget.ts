@@ -5,6 +5,8 @@ import type {
   AgoConfig,
   AgoMessage,
   Conversation,
+  FeedbackRating,
+  FeedbackReason,
 } from "../client/types";
 import {
   createFormCollector,
@@ -17,6 +19,13 @@ import { createConversationSession } from "../state/createConversationSession";
 import { attachmentsFromFiles } from "../utils/attachments";
 import { buildInput } from "./buildInput";
 import { renderMarkdown } from "./renderMarkdown";
+import {
+  createFeedbackState,
+  DEFAULT_FEEDBACK_LABELS,
+  renderFeedbackRow,
+  type FeedbackLabels,
+  type MessageFeedbackState,
+} from "./renderFeedback";
 import {
   buildChatIcon,
   renderFormNotice,
@@ -158,6 +167,7 @@ export function mountChatWidget(
     loadThreads = false,
     forms,
     formSubmittedMessage = DEFAULT_FORM_SUBMITTED_MESSAGE,
+    feedback = false,
     onFollowUpClick,
     onMessageSent,
     onMessageReceived,
@@ -658,6 +668,72 @@ export function mountChatWidget(
   const followUpHandler =
     onFollowUpClick === false ? undefined : (onFollowUpClick ?? sendFollowUp);
 
+  // ── Feedback ───────────────────────────────────────────────────────
+  const feedbackOptions = feedback === true ? {} : feedback || null;
+  const feedbackLabels: FeedbackLabels = {
+    ...DEFAULT_FEEDBACK_LABELS,
+    ...feedbackOptions?.labels,
+    reasons: {
+      ...DEFAULT_FEEDBACK_LABELS.reasons,
+      ...feedbackOptions?.labels?.reasons,
+    },
+  };
+  // Every update re-renders the thread, so the row's state (picked thumb, open
+  // panel, half-typed comment) lives here, keyed by message id.
+  const feedbackStates = new Map<string, MessageFeedbackState>();
+
+  function buildFeedback(message: AgoMessage): HTMLElement | null {
+    if (!feedbackOptions) return null;
+    // Only a finished answer can be judged. An empty `conversationId` means the
+    // bubble is local (the streamed greeting), so there is nothing to report on.
+    if (
+      !message.id ||
+      !message.conversationId ||
+      message.status !== "DONE" ||
+      !message.content
+    ) {
+      return null;
+    }
+
+    let state = feedbackStates.get(message.id);
+    if (!state) {
+      state = createFeedbackState();
+      feedbackStates.set(message.id, state);
+    }
+
+    /** Resolves true once the API accepted the report. */
+    const report = async (
+      rating: FeedbackRating,
+      details?: { reasons: FeedbackReason[]; comment: string },
+    ): Promise<boolean> => {
+      try {
+        await client.submitFeedback(message.id, rating, details);
+        feedbackOptions.onSubmit?.({
+          messageId: message.id,
+          rating,
+          reasons: details?.reasons ?? [],
+          comment: details?.comment || undefined,
+        });
+        return true;
+      } catch (error) {
+        feedbackOptions.onError?.(
+          error instanceof Error ? error : new Error(String(error)),
+        );
+        return false;
+      }
+    };
+
+    return renderFeedbackRow({
+      state,
+      labels: feedbackLabels,
+      askWhy: feedbackOptions.askWhy ?? true,
+      // The thumb goes out on its own so the signal survives a visitor who
+      // never fills the panel; the panel then files the detailed report.
+      onRate: (rating) => void report(rating),
+      onReport: (rating, details) => report(rating, details),
+    });
+  }
+
   /** Presentation options for the bubble at `index`. Shared by both render paths. */
   function messageOpts(index: number): Parameters<typeof renderMessage>[1] {
     const last = messages.length - 1;
@@ -673,6 +749,9 @@ export function mountChatWidget(
       followUpHandler,
       // On a small viewport let bubbles run wider to reclaim horizontal space.
       isMobile: !!mobileMQ?.matches,
+      // Built here, not inside renderMessage: the row is bound to state this
+      // closure owns, and the view builders must stay free of it.
+      feedbackRow: buildFeedback(messages[index]),
     };
   }
 

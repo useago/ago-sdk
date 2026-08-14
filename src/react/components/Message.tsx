@@ -227,6 +227,11 @@ export interface MessageProps {
    * bubble is then dropped entirely rather than left as a blank box.
    */
   showStreamingDots?: boolean;
+  /**
+   * Rendered under an assistant bubble, above the suggested replies. Meant for
+   * `<MessageFeedback messageId={message.id} />`, but takes any node.
+   */
+  feedback?: React.ReactNode;
 }
 
 export const Message: React.FC<MessageProps> = ({
@@ -236,6 +241,7 @@ export const Message: React.FC<MessageProps> = ({
   isLast = false,
   onFollowUpClick,
   showStreamingDots = true,
+  feedback,
 }) => {
   const isUser = message.role === "user";
   // WAITING_CLIENT = paused on client function results mid-turn: still streaming
@@ -337,6 +343,9 @@ export const Message: React.FC<MessageProps> = ({
           )}
         </div>
       )}
+
+      {/* Thumbs sit right under the answer they judge. */}
+      {!isUser && feedback}
 
       {/* Follow-up replies — only on the last message, so stale suggestions
           disappear once the user sends their next message. */}

@@ -262,6 +262,43 @@ with that partial message instead of rejecting. Vue and Angular have the same
 `stop`, and the vanilla `mountChatWidget` handle gained `stop()`. Details in
 [Stop the answer](docs/general/core.md#stop-the-answer).
 
+## Let the user say "this answer doesn't work"
+
+Pass `feedback` and every finished answer gets a thumbs up / thumbs down. On a
+thumbs-down, a panel asks what went wrong: four reason chips
+(inaccurate, incomplete, information not found, technical issue) and a comment
+box.
+
+```tsx
+<ChatWidget feedback />
+```
+
+```ts
+// vanilla widget
+mountChatWidget("#chat", { config, feedback: true });
+```
+
+The thumb is sent the moment it is clicked, so the signal survives a user who
+ignores the panel. A bare rating is a reaction; a report with a reason or a
+comment also lands in the AGO feedback dashboard, the analytics and the CSV
+export, where someone can act on it.
+
+Driving it yourself, from any framework:
+
+```ts
+await ago.submitFeedback(messageId, "negative", {
+  reasons: ["inaccurate"],
+  comment: "The price it quoted is from last year.",
+});
+
+// the whole chat, not one answer (attached to its last answer)
+await ago.submitConversationFeedback(conversationId, "negative");
+```
+
+React and Vue have a `useFeedback()` hook/composable; React also exports the
+`<MessageFeedback messageId={...} />` row for a custom message list. Details in
+[Feedback](docs/general/widget.md#feedback).
+
 ## Show the source docs the agent retrieved
 
 Each assistant message carries the knowledge sources it used in `m.sources`

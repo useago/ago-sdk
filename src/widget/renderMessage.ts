@@ -50,6 +50,13 @@ export interface RenderMessageOptions {
   followUpHandler?: (reply: string) => void;
   /** Small viewport: widen bubbles to reclaim horizontal space. */
   isMobile?: boolean;
+  /**
+   * The feedback row to show under this answer (thumbs, then the "what went
+   * wrong?" panel), already built by the caller. It is passed in rather than
+   * built here because it is bound to state the widget owns, and building it
+   * from inside this module would make rendering a message mutate that state.
+   */
+  feedbackRow?: HTMLElement | null;
 }
 
 export function renderMessage(
@@ -65,6 +72,7 @@ export function renderMessage(
     followUpEnabled,
     followUpHandler,
     isMobile,
+    feedbackRow,
   } = opts;
   const isUser = message.role === "user";
   const imessage = bubbleStyle === "imessage";
@@ -327,6 +335,9 @@ export function renderMessage(
     bubble.appendChild(buildStreamingDots());
   }
   if (hasBubble) wrap.appendChild(bubble);
+
+  // Thumbs sit right under the answer they judge, above any suggested replies.
+  if (!isUser && feedbackRow) wrap.appendChild(feedbackRow);
 
   // Only on the last message, so stale suggestions disappear once the user
   // sends their next message.

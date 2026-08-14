@@ -128,6 +128,17 @@ each `{ id, title, url? }`):
 ))}
 ```
 
+Let the user report an answer that did not work with `<ChatWidget feedback />`,
+or place the row yourself with `<MessageFeedback messageId={m.id} />`. The hook
+behind both is `useFeedback()`:
+
+```tsx
+const { submitFeedback, submitConversationFeedback } = useFeedback();
+// reasons: inaccurate | incomplete | information_not_found | technical_issue
+await submitFeedback(m.id, "negative", { reasons: ["inaccurate"], comment: "..." });
+await submitConversationFeedback(conversationId, "negative");
+```
+
 Finer-grained hooks: `useMessages({ conversationId? })`,
 `useConversation({ autoLoad? })`. All hooks read the client from context; pass
 `{ client }` to override. Get the raw client with `useAgoClient()` (throws
@@ -296,9 +307,10 @@ Key events: `message:start`, `message:chunk` (`{ content }` per token),
 ## Exports cheat-sheet (`@useago/sdk/react`)
 
 - Provider/context: `AgoProvider`, `useAgoClient`, `useOptionalAgoClient`
-- Hooks: `useAgo`, `useChat`, `useMessages`, `useConversation`, `useAgoFunction`,
-  `useAgoNavigation`, `useAgoPageState`, `useAgoContext`, `useAgoStore`, `useFormCollector`
-- Components: `ChatWidget`, `Message`, `ChatInput`, `Markdown`
+- Hooks: `useAgo`, `useChat`, `useMessages`, `useConversation`, `useFeedback`,
+  `useAgoFunction`, `useAgoNavigation`, `useAgoPageState`, `useAgoContext`,
+  `useAgoStore`, `useFormCollector`
+- Components: `ChatWidget`, `Message`, `ChatInput`, `Markdown`, `MessageFeedback`
 - Forms: `createFormCollector`
 - Testing: `createMockClient`
 - Types: `AgoConfig`, `AgoMessage`, `Conversation`, `AgoAgent`, `AgoSource`,

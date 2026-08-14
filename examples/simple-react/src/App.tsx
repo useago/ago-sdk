@@ -114,6 +114,13 @@ function ChatWithFunctions({ onLog }: { onLog: (type: FunctionLog['type'], name:
       allowFiles={false}
       // Conversational form: the agent fills it as you chat and submits when ready.
       forms={DEMO_FORMS}
+      // Thumbs under each answer. A thumbs-down asks what went wrong, and the
+      // report lands in the AGO feedback dashboard.
+      feedback={{
+        onSubmit: ({ rating, reasons, comment }) =>
+          onLog('result', `feedback:${rating}`, [...reasons, comment].filter(Boolean).join(', ') || 'rating only'),
+        onError: (error) => onLog('result', 'feedback:error', error.message),
+      }}
       // Suggested replies are clickable by default (they send the reply).
       // onFollowUpClick={(reply) => console.log('Suggested reply clicked:', reply)}
       onMessageSent={(content) => console.log('Message sent:', content)}

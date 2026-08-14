@@ -146,7 +146,8 @@ ago.registerPageStateFunction(controls, opts?) / ago.unregisterPageStateFunction
 ago.submitToolCallForm(toolCallId, formData)
 ago.confirmToolCall(toolCallId)
 ago.rejectToolCall(toolCallId)
-ago.submitFeedback(messageId, "positive" | "negative")
+ago.submitFeedback(messageId, "positive" | "negative", { reasons?, comment? })
+ago.submitConversationFeedback(conversationId, rating, details?)  // → the reported message id
 
 ago.on(event, handler) / ago.off(event, handler)
 ago.updateConfig(partialConfig)

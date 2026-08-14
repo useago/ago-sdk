@@ -13,9 +13,13 @@ export type {
   AgoConfig,
   AgoMessage,
   Conversation,
+  FeedbackDetails,
+  FeedbackRating,
+  FeedbackReason,
   AgoAgent,
   AgoSource,
   ToolCallData,
   AgoClientEvents,
   AgoEventName,
 } from "../client/types";
+export { FEEDBACK_REASONS } from "../client/types";

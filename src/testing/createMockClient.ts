@@ -83,6 +83,8 @@ export function createMockClient(
     confirmToolCall: async () => undefined,
     rejectToolCall: async () => undefined,
     submitFeedback: async () => undefined,
+    // Mirrors the real return: the message id the report landed on.
+    submitConversationFeedback: async () => noopMessage.id,
     registerFunction: () => undefined,
     unregisterFunction: () => true,
     getRegisteredFunctions: () => [] as ClientFunctionSchema[],

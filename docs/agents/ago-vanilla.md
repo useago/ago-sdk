@@ -199,7 +199,8 @@ While the agent answers, the send button becomes a Stop button that interrupts
 the turn; pass `allowStop: false` to keep a disabled spinner instead.
 Set `placement: "left"` or `"right"` for a fixed full-height side panel with a
 launcher button. Set `persistConversation: true` to resume the visitor's last
-thread across reloads. Theme it with the `theme` option or `--ago-*` CSS variables
+thread across reloads. Set `feedback: true` to put thumbs under each answer,
+with a "what went wrong?" panel on a thumbs-down. Theme it with the `theme` option or `--ago-*` CSS variables
 on `.ago-chat-widget`. Message text renders as GitHub-flavored markdown and is
 HTML-escaped before it touches the DOM.
 
@@ -214,6 +215,14 @@ await ago.submitToolCallForm(toolCallId, { quantity: 3 });
 await ago.confirmToolCall(toolCallId);
 await ago.rejectToolCall(toolCallId);
 await ago.submitFeedback(messageId, "positive");
+// "this answer doesn't work": reasons/comment land in the feedback dashboard
+await ago.submitFeedback(messageId, "negative", {
+  reasons: ["inaccurate"],            // inaccurate | incomplete | information_not_found | technical_issue
+  comment: "The price is from last year.",
+});
+// "this conversation doesn't work": attached to its last answer
+await ago.submitConversationFeedback(conversationId, "negative");
+// or let the widget render the thumbs: mountChatWidget(el, { ..., feedback: true })
 ago.updateConfig({ userJwt: token });   // e.g. after login
 ago.destroy();                           // clean up listeners, functions, context
 ```

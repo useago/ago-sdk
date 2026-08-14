@@ -14,7 +14,13 @@
  */
 
 import type { AgoClient } from "../client/AgoClient";
-import type { AgoConfig, Conversation } from "../client/types";
+import type {
+  AgoConfig,
+  Conversation,
+  FeedbackRating,
+  FeedbackReason,
+} from "../client/types";
+import type { FeedbackLabels } from "./renderFeedback";
 import type {
   CreateFormCollectorOptions,
   LoadFormCollectorOptions,
@@ -127,6 +133,35 @@ export type WelcomeMessage =
        */
       followUpReplies?: string[];
     };
+
+/** Fine-tuning for {@link MountChatWidgetOptions.feedback}. */
+export interface WidgetFeedbackOptions {
+  /**
+   * After a thumbs-down, open the panel asking what went wrong. Default `true`;
+   * set `false` to collect thumbs only.
+   */
+  askWhy?: boolean;
+  /**
+   * Override any of the row's strings (all English by default). Reason labels
+   * can be overridden one by one.
+   */
+  labels?: Partial<Omit<FeedbackLabels, "reasons">> & {
+    reasons?: Partial<Record<FeedbackReason, string>>;
+  };
+  /**
+   * Called after a report was accepted by the API. Fires once per accepted
+   * report, so a thumbs-down followed by the panel calls it twice: first for
+   * the bare thumb, then for the detailed report.
+   */
+  onSubmit?: (report: {
+    messageId: string;
+    rating: FeedbackRating;
+    reasons: FeedbackReason[];
+    comment?: string;
+  }) => void;
+  /** Called when a report could not be sent. The row keeps its state. */
+  onError?: (error: Error) => void;
+}
 
 /**
  * Options for `mountChatWidget` — the framework-agnostic (pure TS/JS)
@@ -279,6 +314,25 @@ export interface MountChatWidgetOptions {
   formSubmittedMessage?:
     | string
     | ((result: unknown) => string | null | undefined);
+  /**
+   * Let the visitor report an answer that did not work: a thumbs up/down row
+   * under each finished answer, and after a thumbs-down a small panel to say
+   * what went wrong (reason chips plus a free-text comment).
+   *
+   * `true` turns it on with English labels. Pass an object to translate the
+   * strings, skip the "why" panel, or observe what was sent. Off by default.
+   *
+   * ```ts
+   * mountChatWidget("#chat", {
+   *   config: { baseUrl: "https://playground.api.useago.com", agent: "generic-guide" },
+   *   feedback: true,
+   * });
+   * ```
+   *
+   * The thumb is sent as soon as it is clicked, so the signal is never lost if
+   * the visitor ignores the panel; the panel then files the detailed report.
+   */
+  feedback?: boolean | WidgetFeedbackOptions;
   /**
    * How clicking a suggested follow-up reply behaves. Defaults to sending the
    * reply as a new user message. Pass a handler to override, or `false` to

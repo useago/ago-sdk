@@ -94,8 +94,20 @@ generating. See [Stop the answer](../general/core.md#stop-the-answer).
 | `useMessages({ conversationId? })` | `messages`, `isLoading`, `error`, `conversationId`, `sendMessage`, `stop`, `clearMessages` |
 | `useConversation({ autoLoad? })` | `conversations`, `currentConversation`, `isLoading`, `error`, `selectConversation`, `startNewConversation`, `refreshConversations` |
 | `useChat(options)` | both combined |
+| `useFeedback()` | `ratings`, `isSubmitting`, `error`, `submitFeedback`, `submitConversationFeedback` |
 
 Each composable accepts `{ client }` to override the injected client.
+
+Reporting an answer that did not work:
+
+```ts
+const { submitFeedback } = useFeedback();
+
+await submitFeedback(message.id, "negative", {
+  reasons: ["inaccurate"],
+  comment: "The price it quoted is from last year.",
+});
+```
 
 ---
 
@@ -253,7 +265,7 @@ A runnable Vue example lives in [`examples/simple-vue`](../examples/simple-vue)
 ## Exports cheat-sheet (`@useago/sdk/vue`)
 
 - **Setup:** `AgoPlugin`, `useAgo`, `AGO_CLIENT_KEY`
-- **Composables:** `useChat`, `useMessages`, `useConversation`,
+- **Composables:** `useChat`, `useMessages`, `useConversation`, `useFeedback`,
   `useAgoFunction`, `useAgoNavigation`, `useAgoEvents`, `useAgoStore`
 - **Types:** `AgoConfig`, `AgoMessage`, `Conversation`, `AgoAgent`,
   `AgoSource`, `ToolCallData`, `AgoPluginOptions`

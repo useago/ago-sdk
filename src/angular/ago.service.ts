@@ -7,6 +7,8 @@ import type {
   Conversation,
   AgoClientEvents,
   AgoEventName,
+  FeedbackDetails,
+  FeedbackRating,
   SendMessageOptions,
   StopMessageResult,
   SubmitToolCallResult,
@@ -144,9 +146,18 @@ export class AgoService {
     return this.client.rejectToolCall(toolCallId);
   }
 
-  /** Submit feedback for a message */
-  submitFeedback(messageId: string, rating: "positive" | "negative"): Promise<void> {
-    return this.client.submitFeedback(messageId, rating);
+  /** Report an answer: thumbs up/down, optionally with what went wrong */
+  submitFeedback(messageId: string, rating: FeedbackRating, details?: FeedbackDetails): Promise<void> {
+    return this.client.submitFeedback(messageId, rating, details);
+  }
+
+  /** Report a whole conversation; lands on its last answer, whose id is returned */
+  submitConversationFeedback(
+    conversationId: string,
+    rating: FeedbackRating,
+    details?: FeedbackDetails & { lastMessageId?: string }
+  ): Promise<string> {
+    return this.client.submitConversationFeedback(conversationId, rating, details);
   }
 
   /** Register a client-side function */

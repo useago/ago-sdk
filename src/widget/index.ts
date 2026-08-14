@@ -7,8 +7,14 @@ export type {
   ChatWidgetHandle,
   MountChatWidgetOptions,
   WelcomeMessage,
+  WidgetFeedbackOptions,
   WidgetTheme,
 } from "./types";
+
+// The feedback row's strings, so `feedback: { labels }` can be typed (and the
+// defaults reused) without reaching into the widget internals.
+export { DEFAULT_FEEDBACK_LABELS } from "./renderFeedback";
+export type { FeedbackLabels } from "./renderFeedback";
 
 // Dependency-free markdown → DOM renderer used for message content; exported so
 // consumers building a custom vanilla UI can render assistant content the same way.

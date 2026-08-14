@@ -21,6 +21,9 @@ export type {
 export { Message } from "./components/Message";
 export type { MessageProps } from "./components/Message";
 
+export { MessageFeedback, DEFAULT_MESSAGE_FEEDBACK_LABELS } from "./components/MessageFeedback";
+export type { MessageFeedbackProps, MessageFeedbackLabels } from "./components/MessageFeedback";
+
 export { Markdown } from "./components/Markdown";
 export type { MarkdownProps } from "./components/Markdown";
 
@@ -42,6 +45,9 @@ export type { UseConversationOptions, UseConversationResult } from "./hooks/useC
 
 export { useChat } from "./hooks/useChat";
 export type { UseChatOptions, UseChatResult } from "./hooks/useChat";
+
+export { useFeedback } from "./hooks/useFeedback";
+export type { UseFeedbackOptions, UseFeedbackResult } from "./hooks/useFeedback";
 
 export { useAgoFunction, useAgoNavigation, useAgoPageState } from "./hooks/useAgoFunction";
 export type { UseAgoFunctionOptions, AgoRoute } from "./hooks/useAgoFunction";
@@ -108,11 +114,15 @@ export type {
   AgoConfig,
   AgoMessage,
   Conversation,
+  FeedbackDetails,
+  FeedbackRating,
+  FeedbackReason,
   PaginatedResult,
   AgoAgent,
   AgoSource,
   ToolCallData,
 } from "../client/types";
+export { FEEDBACK_REASONS } from "../client/types";
 export type {
   NudgeAction,
   ProactiveController,
