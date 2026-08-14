@@ -184,6 +184,8 @@ may be reworded in any release.
 | `stream_error` | `AgoStreamError` | the stream failed mid-flight | Usually a dropped connection; retry the message |
 | `function_invalid_registration` | `AgoError` | `registerFunction` called without a handler or schema | Use `registerFunction({ name, parameters, handler })` |
 | `function_error` | `AgoFunctionError` | a registered client function threw | Inspect `functionName` and `originalError` |
+| `feedback_no_message` | `AgoError` | `submitConversationFeedback` on a conversation with no answer to attach the report to | Send a message first, or pass `details.lastMessageId` |
+| `missing_client` | `AgoError` | a React hook was used without a client | Pass `options.client` or wrap the app in `<AgoProvider>` |
 
 Server-supplied errors (`AgoApiError` with a structured body) keep the
 backend's own `code` and, when provided, link their docs in the message

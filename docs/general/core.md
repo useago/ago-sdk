@@ -370,6 +370,19 @@ await ago.rejectToolCall(toolCallId);
 // Thumbs up / down on an assistant message
 await ago.submitFeedback(messageId, "positive");
 
+// "This answer doesn't work": the reasons and comment land in the AGO
+// feedback dashboard, where someone can act on them
+await ago.submitFeedback(messageId, "negative", {
+  reasons: ["inaccurate"],
+  comment: "The price it quoted is from last year.",
+});
+
+// "This whole conversation doesn't work": attached to its last answer,
+// whose id is returned
+await ago.submitConversationFeedback(conversationId, "negative", {
+  reasons: ["information_not_found"],
+});
+
 // Change config at runtime (e.g. after login)
 ago.updateConfig({ userJwt: token });
 
@@ -456,7 +469,20 @@ Prefer callbacks over raw events? See the
   values through the backend, which resolves the destination from the named
   form's stored definition (used by `createFormCollector` in
   `{ via: "backend" }` mode)
-- `submitFeedback(messageId, "positive" | "negative")`
+- `submitFeedback(messageId, "positive" | "negative", details?)`
+  - `details.reasons?: FeedbackReason[]` · `details.comment?: string`
+- `submitConversationFeedback(conversationId, rating, details?)` →
+  `Promise<string>`: the id of the answer it was attached to. Pass
+  `details.lastMessageId` when you already have it to skip the lookup.
+
+A rating on its own is a reaction (the thumbs counted in the dashboard). Add a
+reason or a comment and the report also lands in the feedback list, the
+analytics and the CSV export. `reasons` accepts any of `"inaccurate"`,
+`"incomplete"`, `"information_not_found"`, `"technical_issue"` (exported as
+`FEEDBACK_REASONS`); an unknown value is refused with a `422`, as is a list
+longer than the four reasons. The SDK de-duplicates the list before sending, so
+repeating one never trips that limit. A `comment` is trimmed and capped at 5000
+characters.
 
 ### Events
 

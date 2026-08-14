@@ -5,6 +5,38 @@ All notable changes to `@useago/sdk` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-08-11
+
+### Added
+
+- User feedback: a visitor can say that an answer, or a whole conversation, does
+  not work, and the report reaches the AGO feedback dashboard.
+  - `client.submitFeedback(messageId, rating, { reasons, comment })` now takes
+    what went wrong on top of the thumb. `reasons` is any of `"inaccurate"`,
+    `"incomplete"`, `"information_not_found"`, `"technical_issue"` (exported as
+    `FEEDBACK_REASONS`).
+  - `client.submitConversationFeedback(conversationId, rating, details?)` reports
+    a whole chat. Feedback is stored per message, so it attaches to the
+    conversation's last answer and returns that message id; pass
+    `details.lastMessageId` to skip the lookup.
+  - `feedback: true` on `mountChatWidget`, and `<ChatWidget feedback />`, render
+    a thumbs row under each finished answer with a "what went wrong?" panel on a
+    thumbs-down. Every string is overridable (`labels`), `askWhy: false` keeps
+    thumbs only, and `onSubmit` / `onError` report what went out.
+  - React: `useFeedback()` and `<MessageFeedback messageId={...} />`. Vue:
+    `useFeedback()`. Angular: `AgoService.submitFeedback` /
+    `submitConversationFeedback`.
+
+### Notes
+
+- The details need a backend that accepts them.
+  `POST /api/sdk/v1/messages/{id}/feedback` used to take `rating` only and
+  silently dropped everything else, so reasons and comments never reached the
+  dashboard. It now also takes `reasons` and `comment` and writes the same
+  feedback record the in-app modal creates. The demo account
+  (`https://playground.api.useago.com`) already runs it; a self-hosted tenant on
+  an older build still accepts the rating and ignores the details.
+
 ## [1.7.2] - 2026-08-10
 
 ### Changed

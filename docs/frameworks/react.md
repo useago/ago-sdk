@@ -186,6 +186,43 @@ buttons below the message. By default clicking one sends it as the next user
 message. Pass `onFollowUpClick` to handle clicks yourself, or
 `onFollowUpClick={false}` to render them non-interactive.
 
+### Feedback ("this answer doesn't work")
+
+`feedback` puts a thumbs up / thumbs down under every finished answer. On a
+thumbs-down, a panel asks what went wrong (four reason chips and a comment box).
+
+```tsx
+<ChatWidget feedback />
+```
+
+The thumb is sent the moment it is clicked, so the signal survives a user who
+ignores the panel; sending the panel then files the detailed report, which is
+what shows up in the AGO feedback dashboard. Pass the `<MessageFeedback>` props
+to translate the strings or watch what goes out:
+
+```tsx
+<ChatWidget
+  feedback={{
+    labels: { notHelpful: "Pas utile", reasons: { inaccurate: "Inexact" } },
+    onSubmit: ({ rating, reasons }) => track(rating, reasons),
+  }}
+/>
+```
+
+Building your own message list? Drop the row in yourself, or drive it by hand:
+
+```tsx
+import { MessageFeedback, useFeedback } from "@useago/sdk/react";
+
+<MessageFeedback messageId={message.id} />;
+
+const { ratings, submitFeedback, submitConversationFeedback } = useFeedback();
+await submitFeedback(message.id, "negative", { reasons: ["inaccurate"] });
+await submitConversationFeedback(conversationId, "negative", {
+  comment: "It never answered my question.",
+});
+```
+
 ### Conversational forms (form creator)
 
 Pass `forms` to let the agent collect and submit a structured form during the
@@ -331,6 +368,7 @@ function Chat() {
 | `useMessages({ conversationId? })` | `{ messages, isLoading, error, sendMessage, stop, clearMessages, conversationId }` |
 | `useConversation({ autoLoad? })` | `{ conversations, currentConversation, isLoading, error, selectConversation, startNewConversation, refreshConversations }` |
 | `useChat(options)` | both of the above combined |
+| `useFeedback()` | `{ ratings, submitFeedback, submitConversationFeedback, isSubmitting, error }` |
 
 All hooks read the client from context by default; pass `{ client }` to override.
 
@@ -719,8 +757,9 @@ A runnable React example lives in [`examples/simple-react`](../examples/simple-r
 - **Hooks:** `useAgo`, `useChat`, `useMessages`, `useConversation`,
   `useAgoFunction`, `useAgoNavigation`, `useAgoPageState`,
   `useAgoAutoContinueAfterNavigation`, `useAgoActivity`, `useAgoContext`,
-  `useAgoStore`, `useFormCollector`
-- **Components:** `ChatWidget`, `Message`, `ChatInput`, `Markdown`
+  `useAgoStore`, `useFormCollector`, `useFeedback`
+- **Components:** `ChatWidget`, `Message`, `ChatInput`, `Markdown`,
+  `MessageFeedback`
 - **Forms:** `createFormCollector` (+ `CreateFormCollectorOptions`, `SubmitConfig`, …)
 - **Testing:** `createMockClient`
 - **Types:** `AgoConfig`, `AgoMessage`, `Conversation`, `AgoAgent`, `AgoSource`,

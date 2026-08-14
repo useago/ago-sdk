@@ -383,7 +383,8 @@ While the agent answers, the send button becomes a Stop button that interrupts
 the turn; pass `allowStop: false` to keep a disabled spinner instead.
 Set `placement: "left"` or `"right"` for a fixed full-height side panel with a
 launcher button. Set `persistConversation: true` to resume the visitor's last
-thread across reloads. Theme it with the `theme` option or `--ago-*` CSS variables
+thread across reloads. Set `feedback: true` to put thumbs under each answer,
+with a "what went wrong?" panel on a thumbs-down. Theme it with the `theme` option or `--ago-*` CSS variables
 on `.ago-chat-widget`. Message text renders as GitHub-flavored markdown and is
 HTML-escaped before it touches the DOM.
 
@@ -398,6 +399,14 @@ await ago.submitToolCallForm(toolCallId, { quantity: 3 });
 await ago.confirmToolCall(toolCallId);
 await ago.rejectToolCall(toolCallId);
 await ago.submitFeedback(messageId, "positive");
+// "this answer doesn't work": reasons/comment land in the feedback dashboard
+await ago.submitFeedback(messageId, "negative", {
+  reasons: ["inaccurate"],            // inaccurate | incomplete | information_not_found | technical_issue
+  comment: "The price is from last year.",
+});
+// "this conversation doesn't work": attached to its last answer
+await ago.submitConversationFeedback(conversationId, "negative");
+// or let the widget render the thumbs: mountChatWidget(el, { ..., feedback: true })
 ago.updateConfig({ userJwt: token });   // e.g. after login
 ago.destroy();                           // clean up listeners, functions, context
 ```
@@ -571,6 +580,17 @@ each `{ id, title, url? }`):
 ))}
 ```
 
+Let the user report an answer that did not work with `<ChatWidget feedback />`,
+or place the row yourself with `<MessageFeedback messageId={m.id} />`. The hook
+behind both is `useFeedback()`:
+
+```tsx
+const { submitFeedback, submitConversationFeedback } = useFeedback();
+// reasons: inaccurate | incomplete | information_not_found | technical_issue
+await submitFeedback(m.id, "negative", { reasons: ["inaccurate"], comment: "..." });
+await submitConversationFeedback(conversationId, "negative");
+```
+
 Finer-grained hooks: `useMessages({ conversationId? })`,
 `useConversation({ autoLoad? })`. All hooks read the client from context; pass
 `{ client }` to override. Get the raw client with `useAgoClient()` (throws
@@ -739,9 +759,10 @@ Key events: `message:start`, `message:chunk` (`{ content }` per token),
 ## Exports cheat-sheet (`@useago/sdk/react`)
 
 - Provider/context: `AgoProvider`, `useAgoClient`, `useOptionalAgoClient`
-- Hooks: `useAgo`, `useChat`, `useMessages`, `useConversation`, `useAgoFunction`,
-  `useAgoNavigation`, `useAgoPageState`, `useAgoContext`, `useAgoStore`, `useFormCollector`
-- Components: `ChatWidget`, `Message`, `ChatInput`, `Markdown`
+- Hooks: `useAgo`, `useChat`, `useMessages`, `useConversation`, `useFeedback`,
+  `useAgoFunction`, `useAgoNavigation`, `useAgoPageState`, `useAgoContext`,
+  `useAgoStore`, `useFormCollector`
+- Components: `ChatWidget`, `Message`, `ChatInput`, `Markdown`, `MessageFeedback`
 - Forms: `createFormCollector`
 - Testing: `createMockClient`
 - Types: `AgoConfig`, `AgoMessage`, `Conversation`, `AgoAgent`, `AgoSource`,
@@ -860,6 +881,15 @@ Each assistant message carries the knowledge sources it used in `m.sources` (an
 Finer-grained composables: `useMessages({ conversationId? })`,
 `useConversation({ autoLoad? })`. Each accepts `{ client }` to override the
 injected client.
+
+Let the user report an answer that did not work with `useFeedback()`:
+
+```ts
+const { ratings, submitFeedback, submitConversationFeedback } = useFeedback();
+// reasons: inaccurate | incomplete | information_not_found | technical_issue
+await submitFeedback(m.id, "negative", { reasons: ["inaccurate"], comment: "..." });
+await submitConversationFeedback(conversationId, "negative");
+```
 
 ## 3. Let the agent call your code: `useAgoFunction`
 
@@ -990,8 +1020,9 @@ const state = useAgoStore(cart);
 ## Exports cheat-sheet (`@useago/sdk/vue`)
 
 - Setup: `AgoPlugin`, `useAgo`, `AGO_CLIENT_KEY`
-- Composables: `useChat`, `useMessages`, `useConversation`, `useAgoFunction`,
-  `useAgoNavigation`, `useAgoPageState`, `useAgoEvents`, `useAgoStore`
+- Composables: `useChat`, `useMessages`, `useConversation`, `useFeedback`,
+  `useAgoFunction`, `useAgoNavigation`, `useAgoPageState`, `useAgoEvents`,
+  `useAgoStore`
 - Types: `AgoConfig`, `AgoMessage`, `Conversation`, `AgoAgent`, `AgoSource`,
   `ToolCallData`, `AgoPluginOptions`
 
@@ -1155,7 +1186,8 @@ ago.registerPageStateFunction(controls, opts?) / ago.unregisterPageStateFunction
 ago.submitToolCallForm(toolCallId, formData)
 ago.confirmToolCall(toolCallId)
 ago.rejectToolCall(toolCallId)
-ago.submitFeedback(messageId, "positive" | "negative")
+ago.submitFeedback(messageId, "positive" | "negative", { reasons?, comment? })
+ago.submitConversationFeedback(conversationId, rating, details?)  // → the reported message id
 
 ago.on(event, handler) / ago.off(event, handler)
 ago.updateConfig(partialConfig)
@@ -2196,6 +2228,8 @@ may be reworded in any release.
 | `stream_error` | `AgoStreamError` | the stream failed mid-flight | Usually a dropped connection; retry the message |
 | `function_invalid_registration` | `AgoError` | `registerFunction` called without a handler or schema | Use `registerFunction({ name, parameters, handler })` |
 | `function_error` | `AgoFunctionError` | a registered client function threw | Inspect `functionName` and `originalError` |
+| `feedback_no_message` | `AgoError` | `submitConversationFeedback` on a conversation with no answer to attach the report to | Send a message first, or pass `details.lastMessageId` |
+| `missing_client` | `AgoError` | a React hook was used without a client | Pass `options.client` or wrap the app in `<AgoProvider>` |
 
 Server-supplied errors (`AgoApiError` with a structured body) keep the
 backend's own `code` and, when provided, link their docs in the message

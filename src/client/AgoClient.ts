@@ -47,6 +47,8 @@ import type {
   ClientFunctionInvocation,
   ClientFunctionsMode,
   Conversation,
+  FeedbackDetails,
+  FeedbackRating,
   PaginatedResult,
   SendMessageOptions,
   StopMessageResult,
@@ -1228,15 +1230,92 @@ export class AgoClient {
   // ─────────────────────────────────────────────────────────────────
 
   /**
-   * Submit feedback for a message
+   * Report an answer: thumbs up/down, optionally with what went wrong.
+   *
+   * ```ts
+   * await client.submitFeedback(message.id, "negative", {
+   *   reasons: ["inaccurate"],
+   *   comment: "The price it quoted is from last year.",
+   * });
+   * ```
+   *
+   * A bare rating is a reaction (the thumbs counted in the dashboard). Adding a
+   * reason or a comment also files it in the feedback list, the analytics and
+   * the CSV export, so someone can act on it.
    */
   async submitFeedback(
     messageId: string,
-    rating: "positive" | "negative"
+    rating: FeedbackRating,
+    details?: FeedbackDetails
   ): Promise<void> {
+    const comment = details?.comment?.trim();
+    // De-duplicated because the backend bounds the list before it looks at what
+    // is in it: more entries than there are reasons is a 422, so a caller that
+    // sent the same reason twice would have its report refused rather than
+    // recorded.
+    const reasons = details?.reasons?.length
+      ? [...new Set(details.reasons)]
+      : [];
+
     await this.httpClient.post(`/api/sdk/v1/messages/${messageId}/feedback`, {
       rating,
+      ...(reasons.length ? { reasons } : {}),
+      ...(comment ? { comment } : {}),
     });
+  }
+
+  /**
+   * Report a whole conversation ("this chat is not working").
+   *
+   * ```ts
+   * await client.submitConversationFeedback(conversationId, "negative", {
+   *   reasons: ["information_not_found"],
+   *   comment: "It never answered my question.",
+   * });
+   * ```
+   *
+   * Feedback is stored per message, so this attaches the report to the last
+   * answer of the conversation, which is the one the user is reacting to.
+   * Returns the message id it landed on.
+   *
+   * Pass `lastMessageId` when you already have it (the widget does) to skip the
+   * lookup round-trip.
+   */
+  async submitConversationFeedback(
+    conversationId: string,
+    rating: FeedbackRating,
+    details?: FeedbackDetails & { lastMessageId?: string }
+  ): Promise<string> {
+    let messageId = details?.lastMessageId;
+
+    if (!messageId) {
+      const conversation = await this.getConversation(conversationId);
+      // The last answer the user has actually read: an in-flight turn is not
+      // something they can judge yet, and an empty bubble carries no answer to
+      // report. Both are what the widget's own thumbs wait for.
+      const lastAnswer = [...(conversation.messages ?? [])]
+        .reverse()
+        .find(
+          (message) =>
+            message.role === "assistant" &&
+            !message.hidden &&
+            !!message.content &&
+            message.status !== "IN_PROGRESS" &&
+            message.status !== "WAITING_CLIENT"
+        );
+
+      if (!lastAnswer) {
+        throw new AgoError(
+          `Conversation ${conversationId} has no finished answer to report feedback on. ` +
+            "Wait for the turn to complete, or pass `lastMessageId`.",
+          "feedback_no_message"
+        );
+      }
+      messageId = lastAnswer.id;
+    }
+
+    await this.submitFeedback(messageId, rating, details);
+    return messageId;
   }
 
   // ─────────────────────────────────────────────────────────────────

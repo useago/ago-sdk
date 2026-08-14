@@ -4,6 +4,8 @@ export { useAgo } from "./composables/useAgo";
 export { useChat } from "./composables/useChat";
 export { useMessages } from "./composables/useMessages";
 export { useConversation } from "./composables/useConversation";
+export { useFeedback } from "./composables/useFeedback";
+export type { UseFeedbackOptions } from "./composables/useFeedback";
 export { useAgoFunction, useAgoNavigation, useAgoPageState } from "./composables/useAgoFunction";
 export type {
   AgoStateControl,
@@ -21,10 +23,14 @@ export type {
   AgoConfig,
   AgoMessage,
   Conversation,
+  FeedbackDetails,
+  FeedbackRating,
+  FeedbackReason,
   AgoAgent,
   AgoSource,
   ToolCallData,
 } from "../client/types";
+export { FEEDBACK_REASONS } from "../client/types";
 export type {
   NudgeAction,
   ProactiveController,

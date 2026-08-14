@@ -100,6 +100,15 @@ Finer-grained composables: `useMessages({ conversationId? })`,
 `useConversation({ autoLoad? })`. Each accepts `{ client }` to override the
 injected client.
 
+Let the user report an answer that did not work with `useFeedback()`:
+
+```ts
+const { ratings, submitFeedback, submitConversationFeedback } = useFeedback();
+// reasons: inaccurate | incomplete | information_not_found | technical_issue
+await submitFeedback(m.id, "negative", { reasons: ["inaccurate"], comment: "..." });
+await submitConversationFeedback(conversationId, "negative");
+```
+
 ## 3. Let the agent call your code: `useAgoFunction`
 
 Registers on mount, unregisters on unmount.
@@ -229,8 +238,9 @@ const state = useAgoStore(cart);
 ## Exports cheat-sheet (`@useago/sdk/vue`)
 
 - Setup: `AgoPlugin`, `useAgo`, `AGO_CLIENT_KEY`
-- Composables: `useChat`, `useMessages`, `useConversation`, `useAgoFunction`,
-  `useAgoNavigation`, `useAgoPageState`, `useAgoEvents`, `useAgoStore`
+- Composables: `useChat`, `useMessages`, `useConversation`, `useFeedback`,
+  `useAgoFunction`, `useAgoNavigation`, `useAgoPageState`, `useAgoEvents`,
+  `useAgoStore`
 - Types: `AgoConfig`, `AgoMessage`, `Conversation`, `AgoAgent`, `AgoSource`,
   `ToolCallData`, `AgoPluginOptions`
 

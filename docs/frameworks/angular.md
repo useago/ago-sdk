@@ -150,7 +150,8 @@ ago.enableAutoContinueAfterNavigation(options?)  // returns a disable fn
 ago.submitToolCallForm(toolCallId, formData)
 ago.confirmToolCall(toolCallId)
 ago.rejectToolCall(toolCallId)
-ago.submitFeedback(messageId, "positive" | "negative")
+ago.submitFeedback(messageId, "positive" | "negative", details?)
+ago.submitConversationFeedback(conversationId, rating, details?)  // → the reported message id
 
 ago.on(event, handler)  /  ago.off(event, handler)
 ago.updateConfig(partialConfig)

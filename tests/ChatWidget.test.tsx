@@ -408,6 +408,61 @@ describe("ChatWidget touch targets", () => {
   });
 });
 
+describe("ChatWidget feedback", () => {
+  it("shows the feedback row under a finished answer", async () => {
+    const { client, emit, resolveSend } = createDrivableClient();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<ChatWidget client={client} feedback />);
+    });
+
+    const textarea = container.querySelector("textarea")!;
+    const form = container.querySelector("form")!;
+    await act(async () => {
+      setTextareaValue(textarea, "Hi");
+    });
+    await act(async () => {
+      form.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true }),
+      );
+    });
+
+    const answer: AgoMessage = {
+      id: "m1",
+      conversationId: "c1",
+      content: "Answer",
+      role: "assistant",
+      status: "DONE",
+      createdAt: new Date(),
+    };
+    await act(async () => {
+      emit("message:start", { conversationId: "c1", messageId: "m1" });
+    });
+    await act(async () => {
+      emit("message:answer-complete", answer);
+    });
+    await act(async () => {
+      emit("message:complete", answer);
+    });
+    await act(async () => {
+      resolveSend(answer);
+    });
+
+    expect(container.textContent).toContain("Answer");
+    expect(container.querySelectorAll(".ago-feedback__thumb")).toHaveLength(2);
+    // The user's own bubble takes no feedback.
+    expect(container.querySelectorAll(".ago-feedback")).toHaveLength(1);
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+});
+
 describe("ChatWidget streaming + follow-the-bottom (React parity)", () => {
   function sizePane(pane: HTMLElement, scrollHeight = 600, clientHeight = 200) {
     Object.defineProperty(pane, "scrollHeight", {

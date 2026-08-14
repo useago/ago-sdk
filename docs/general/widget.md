@@ -94,6 +94,7 @@ widget.destroy(); // removes listeners, uninstalls forms, clears the DOM
 | `theme?`                | `WidgetTheme`                                                                             | — (see [Theming](#theming))                                |
 | `forms?`                | `Array<CreateFormCollectorOptions \| LoadFormCollectorOptions>`                           | —                                                          |
 | `formSubmittedMessage?` | `string \| ((result) => string \| null)`                                                  | server `message`, else `"Form submitted."`                 |
+| `feedback?`             | `boolean \| WidgetFeedbackOptions`                                                        | `false` (see [Feedback](#feedback))                        |
 | `onFollowUpClick?`      | `((reply) => void) \| false`                                                              | sends the reply                                            |
 | `onOpen?`               | `() => void`                                                                              | — (side open / inline expand)                              |
 | `onClose?`              | `() => void`                                                                              | — (side close / inline collapse)                           |
@@ -101,6 +102,61 @@ widget.destroy(); // removes listeners, uninstalls forms, clears the DOM
 | `onMessageReceived?`    | `({ id, content }) => void`                                                               | —                                                          |
 | `onFormSubmitted?`      | `({ name, values, result }) => void`                                                      | —                                                          |
 | `onFormError?`          | `({ name, values, error }) => void`                                                       | —                                                          |
+
+### Feedback
+
+`feedback: true` puts a thumbs up / thumbs down under every finished answer. On
+a thumbs-down, a small panel asks what went wrong (four reason chips and a free
+-text box).
+
+```ts
+mountChatWidget("#ago-chat", {
+  config: { baseUrl: "https://playground.api.useago.com", agent: "generic-guide" },
+  feedback: true,
+});
+```
+
+The thumb is sent the moment it is clicked, so the signal survives a visitor who
+ignores the panel; sending the panel then files the detailed report. A bare
+rating is a reaction (the thumbs counted in the dashboard); a report with reasons
+or a comment also lands in the AGO feedback list, the analytics and the CSV
+export.
+
+Pass an object to translate the strings or watch what goes out:
+
+```ts
+mountChatWidget("#ago-chat", {
+  config: { baseUrl: "https://playground.api.useago.com", agent: "generic-guide" },
+  feedback: {
+    labels: {
+      helpful: "Utile",
+      notHelpful: "Pas utile",
+      whatWentWrong: "Qu'est-ce qui n'a pas marché ?",
+      send: "Envoyer",
+      thanks: "Merci, c'est remonté.",
+      commentPlaceholder: "Autre chose ? (facultatif)",
+      reasons: {
+        inaccurate: "Inexact",
+        incomplete: "Incomplet",
+        information_not_found: "Information introuvable",
+        technical_issue: "Problème technique",
+      },
+    },
+    onSubmit: ({ messageId, rating, reasons, comment }) => track(rating),
+  },
+});
+```
+
+| Option      | Type                                            | Default |
+| ----------- | ----------------------------------------------- | ------- |
+| `askWhy?`   | `boolean`                                       | `true` (set `false` for thumbs only) |
+| `labels?`   | `Partial<FeedbackLabels>`                       | English strings |
+| `onSubmit?` | `({ messageId, rating, reasons, comment }) => void` | — (fires per accepted report: once for the thumb, again for the detailed panel) |
+| `onError?`  | `(error: Error) => void`                        | — (the row keeps its state) |
+
+The row's elements carry `ago-feedback*` class names, so host CSS can restyle
+them; it ships no stylesheet of its own. The client-level API behind it is
+[`submitFeedback`](core.md#6-tool-calls-feedback-and-lifecycle).
 
 ### Stop button
 

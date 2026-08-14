@@ -26,7 +26,9 @@ idiomatic binding (hook / composable / service / component) is also provided.
 | Events (`on`/`off`/`once`/`waitFor`) | ✅ | ✅ (via client) | ✅ `useAgoEvents` | ✅ `messages$` Observables |
 | Streaming helpers / async generator | ✅ | ✅ | ✅ | ✅ |
 | Tool calls (form/confirm/reject) | ✅ | ✅ | ✅ | ✅ `AgoService` |
-| Message feedback | ✅ `submitFeedback` | ✅ | ✅ | ✅ `AgoService` |
+| Message feedback (thumbs + reasons + comment) | ✅ `submitFeedback` | ✅ `useFeedback` / `<MessageFeedback>` | ✅ `useFeedback` | ✅ `AgoService` |
+| Conversation feedback | ✅ `submitConversationFeedback` | ✅ `useFeedback` | ✅ `useFeedback` | ✅ `AgoService` |
+| Feedback UI in the chat | ✅ `feedback: true` (widget) | ✅ `<ChatWidget feedback />` | ➖ core API | ➖ core API |
 | Observable store | ✅ `createStore` | ✅ `useAgoStore` | ✅ `useAgoStore` | ➖ core API |
 | Dev panel / devtools | ✅ `initDevPanel` (`/devtools`) | ✅ | ✅ | ✅ |
 | Testing mock client | ✅ `createMockClient` | ✅ | ✅ | ✅ |

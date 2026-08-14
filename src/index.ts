@@ -20,6 +20,9 @@ export type {
   ClientFunctionInvocation,
   ClientFunctionsMode,
   Conversation,
+  FeedbackDetails,
+  FeedbackRating,
+  FeedbackReason,
   FormField,
   FormSchema,
   FunctionDefinition,
@@ -33,6 +36,9 @@ export type {
   ToolCallData,
   ToolCallType,
 } from "./client/types";
+
+// The four feedback reasons, for building a "what went wrong?" picker
+export { FEEDBACK_REASONS } from "./client/types";
 
 // Errors
 export {
