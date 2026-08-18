@@ -82,7 +82,7 @@ describe("registerPageStateFunction", () => {
     expect(result).toEqual({ success: true, applied: { statusFilter: "pending" } });
   });
 
-  it("ignores unknown control keys cleanly", async () => {
+  it("applies known controls and reports unknown ones instead of silently skipping", async () => {
     const client = new AgoClient({ baseUrl: "https://example.test" });
     const setStatus = vi.fn();
     client.registerPageStateFunction([
@@ -95,7 +95,62 @@ describe("registerPageStateFunction", () => {
     });
 
     expect(setStatus).toHaveBeenCalledWith("all");
-    expect(result).toEqual({ success: true, applied: { statusFilter: "all" } });
+    // The known control still lands, but `success` is false and the agent is
+    // told which name was wrong — reporting success here is what let the agent
+    // believe it had changed the page when it had not.
+    expect(result).toMatchObject({
+      success: false,
+      applied: { statusFilter: "all" },
+      unknownControls: ["bogus"],
+    });
+    expect((result as { hint: string }).hint).toContain("statusFilter");
+  });
+
+  it("reports a control whose setter throws without failing the whole call", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const setStatus = vi.fn();
+    client.registerPageStateFunction([
+      { name: "statusFilter", description: "Filter", schema: { type: "string" }, set: setStatus },
+      {
+        name: "sort",
+        description: "Sort",
+        schema: { type: "string" },
+        set: () => {
+          throw new Error("sort backend is down");
+        },
+      },
+    ]);
+
+    const result = await execute(client, "setPageState", {
+      statusFilter: "all",
+      sort: "price",
+    });
+
+    // Previously the throw rejected the handler, so the agent was told the call
+    // failed while statusFilter had already been applied — it then retried and
+    // double-applied it.
+    expect(setStatus).toHaveBeenCalledWith("all");
+    expect(result).toMatchObject({
+      success: false,
+      applied: { statusFilter: "all" },
+      failed: [{ control: "sort", error: "sort backend is down" }],
+    });
+  });
+
+  it("caps how many unknown control names it echoes back", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    client.registerPageStateFunction([
+      { name: "statusFilter", description: "Filter", schema: { type: "string" }, set: () => {} },
+    ]);
+
+    const args: Record<string, unknown> = {};
+    for (let i = 0; i < 30; i++) args[`bogus${i}`] = "x";
+    const result = (await execute(client, "setPageState", args)) as {
+      unknownControls: string[];
+    };
+
+    expect(result.unknownControls).toHaveLength(10);
+    expect(result.unknownControls.every((n) => n.length <= 64)).toBe(true);
   });
 
   it("skips undefined values", async () => {
@@ -187,5 +242,153 @@ describe("registerPageStateFunction", () => {
     client.unregisterPageStateFunction("applyView");
     expect(schemaOf(client, "applyView")).toBeUndefined();
     expect(client.getContextSnapshot()).toBeNull();
+  });
+
+  // A React route transition mounts the destination page before unmounting the
+  // one it replaces, so both hooks are alive under `setPageState` at once. The
+  // outgoing page's cleanup used to delete the incoming page's registration and
+  // its `readPageData` companion, leaving the agent with no page state at all.
+  describe("two pages mounted at once (route transition)", () => {
+    const ctl = (name: string, set = () => {}) => ({
+      name,
+      description: `${name} control`,
+      schema: { type: "string" as const },
+      get: () => "x",
+      set,
+    });
+
+    it("the outgoing page's disposer leaves the incoming page's controls in place", () => {
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+
+      const disposeA = client.registerPageStateFunction([ctl("sort")]); // page A
+      client.registerPageStateFunction([ctl("lactose")]); // page B mounts
+      disposeA(); // page A unmounts
+
+      const schema = schemaOf(client, "setPageState");
+      expect(schema).toBeDefined();
+      expect(Object.keys(schema!.parameters.properties)).toEqual(["lactose"]);
+    });
+
+    it("restores the previous page's controls if the newer page disposes first", () => {
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+
+      client.registerPageStateFunction([ctl("sort")]);
+      const disposeB = client.registerPageStateFunction([ctl("lactose")]);
+
+      disposeB();
+
+      const schema = schemaOf(client, "setPageState");
+      expect(Object.keys(schema!.parameters.properties)).toEqual(["sort"]);
+    });
+
+    it("the outgoing page's disposer keeps the incoming page's readPageData", () => {
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const source = (description: string) => ({
+        description,
+        get: () => [description],
+      });
+
+      const disposeA = client.registerPageStateFunction([ctl("sort")], {
+        data: source("rows"),
+      });
+      client.registerPageStateFunction([ctl("lactose")], { data: source("flavors") });
+      disposeA();
+
+      const companion = schemaOf(client, "readPageData");
+      expect(companion).toBeDefined();
+      expect(companion!.description).toContain("flavors");
+    });
+
+    it("clears everything once both pages have disposed", () => {
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+
+      const disposeA = client.registerPageStateFunction([ctl("sort")], {
+        data: { description: "rows", get: () => [] },
+      });
+      const disposeB = client.registerPageStateFunction([ctl("lactose")], {
+        data: { description: "flavors", get: () => [] },
+      });
+      disposeA();
+      disposeB();
+
+      expect(schemaOf(client, "setPageState")).toBeUndefined();
+      expect(schemaOf(client, "readPageData")).toBeUndefined();
+      expect(client.getContextSnapshot()).toBeNull();
+    });
+
+    // Regression: registering a page-state function WITHOUT a data source used
+    // to remove `readPageData` by name, which popped the companion belonging to
+    // a sibling that was still mounted (a modal over a page with page data).
+    it("registering without a data source leaves a live sibling's readPageData alone", () => {
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+
+      client.registerPageStateFunction([ctl("sort")], {
+        data: { description: "rows", get: () => [] },
+      });
+      // A second owner with no data source, mounted while the first is alive.
+      client.registerPageStateFunction([ctl("lactose")]);
+
+      expect(schemaOf(client, "readPageData")?.description).toContain("rows");
+    });
+
+    // Regression: `readPageData` is a name a host app can use for its own
+    // function. Cleanup must never remove it.
+    it("never removes a readPageData the host app registered itself", () => {
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+
+      client.registerFunction("readPageData", async () => ({ mine: true }), {
+        description: "host app's own reader",
+        parameters: { type: "object", properties: {} },
+      });
+
+      const dispose = client.registerPageStateFunction([ctl("sort")], {
+        data: { description: "rows", get: () => [] },
+      });
+      dispose();
+
+      // The SDK's companion is gone; the host's function is untouched.
+      expect(schemaOf(client, "readPageData")?.description).toBe(
+        "host app's own reader"
+      );
+
+      // And a later page-state registration without data must not touch it.
+      client.registerPageStateFunction([ctl("lactose")]);
+      expect(schemaOf(client, "readPageData")?.description).toBe(
+        "host app's own reader"
+      );
+
+      // Neither does the name-based teardown once our own stack is empty.
+      client.unregisterPageStateFunction();
+      client.unregisterPageStateFunction();
+      expect(schemaOf(client, "readPageData")?.description).toBe(
+        "host app's own reader"
+      );
+    });
+
+    it("a disposer is idempotent and never pops another page's registration", () => {
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+
+      const disposeA = client.registerPageStateFunction([ctl("sort")]);
+      client.registerPageStateFunction([ctl("lactose")]);
+
+      disposeA();
+      disposeA();
+
+      const schema = schemaOf(client, "setPageState");
+      expect(Object.keys(schema!.parameters.properties)).toEqual(["lactose"]);
+    });
+
+    // The name-keyed API cannot know which owner is calling it, so it stays
+    // last-writer-wins — same contract as `unregisterFunction(name)`.
+    it("unregisterPageStateFunction(name) removes the most recent registration", () => {
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+
+      client.registerPageStateFunction([ctl("sort")]);
+      client.registerPageStateFunction([ctl("lactose")]);
+      client.unregisterPageStateFunction();
+
+      const schema = schemaOf(client, "setPageState");
+      expect(Object.keys(schema!.parameters.properties)).toEqual(["sort"]);
+    });
   });
 });

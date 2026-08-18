@@ -24,7 +24,17 @@ export interface FunctionRegistryOptions {
  * Registry for client-side functions that AGO can call
  */
 export class FunctionRegistry {
-  private functions: Map<string, RegisteredFunction> = new Map();
+  /**
+   * One LIFO stack per name; the last entry is the active registration.
+   *
+   * A flat `Map<string, RegisteredFunction>` loses a registration whenever two
+   * owners are alive under the same name: A registers, B registers (overwrite),
+   * A unmounts and its cleanup deletes B's entry. With a stack, each owner's
+   * disposer removes only its own entry and the previous owner's registration
+   * is restored, so `setPageState` survives two pages being mounted at once
+   * during a route transition.
+   */
+  private functions: Map<string, RegisteredFunction[]> = new Map();
   private defaultMaxResultBytes: number;
 
   constructor(options?: FunctionRegistryOptions) {
@@ -49,18 +59,23 @@ export class FunctionRegistry {
   /**
    * Register a function that AGO can call.
    * Accepts either a single definition object or (name, handler, schema) args.
+   *
+   * Returns a disposer that removes *this* registration. Prefer it over
+   * {@link unregister} anywhere two components can be alive under the same
+   * name (React route transitions): the disposer never removes someone else's
+   * registration, and it is safe to call more than once.
    */
-  register(definition: ClientFunctionDefinition): void;
+  register(definition: ClientFunctionDefinition): () => void;
   register(
     name: string,
     handler: ClientFunctionHandler,
     schema: ClientFunctionRegisterOptions
-  ): void;
+  ): () => void;
   register(
     nameOrDef: string | ClientFunctionDefinition,
     handler?: ClientFunctionHandler,
     schema?: ClientFunctionRegisterOptions
-  ): void {
+  ): () => void {
     if (typeof nameOrDef === "object") {
       const {
         name,
@@ -87,53 +102,100 @@ export class FunctionRegistry {
         "function_invalid_registration"
       );
     }
-    if (this.functions.has(name)) {
+
+    const stack = this.functions.get(name);
+    if (stack && stack.length > 0) {
       logger.warn(`Function "${name}" is being overwritten`);
     }
 
     // maxResultBytes and requiresApproval are SDK-side settings: keep them out
     // of the schema sent to the backend.
     const { maxResultBytes, requiresApproval, ...schemaRest } = schema;
-    this.functions.set(name, {
+    const entry: RegisteredFunction = {
       schema: { ...schemaRest, name },
       handler,
       maxResultBytes,
       requiresApproval,
-    });
+    };
+
+    if (stack) {
+      stack.push(entry);
+    } else {
+      this.functions.set(name, [entry]);
+    }
 
     logger.log(`Registered function: ${name}`);
+
+    let disposed = false;
+    return () => {
+      if (disposed) return;
+      disposed = true;
+      this.removeEntry(name, entry);
+    };
+  }
+
+  /** Remove one specific registration, whatever its depth in the stack. */
+  private removeEntry(name: string, entry: RegisteredFunction): boolean {
+    const stack = this.functions.get(name);
+    if (!stack) return false;
+    const index = stack.lastIndexOf(entry);
+    if (index === -1) return false;
+    stack.splice(index, 1);
+    if (stack.length === 0) {
+      this.functions.delete(name);
+    }
+    logger.log(`Unregistered function: ${name}`);
+    return true;
+  }
+
+  /** The active registration for a name: the top of its stack. */
+  private active(name: string): RegisteredFunction | undefined {
+    const stack = this.functions.get(name);
+    return stack && stack.length > 0 ? stack[stack.length - 1] : undefined;
   }
 
   /**
-   * Unregister a function
+   * Unregister the ACTIVE registration for a name, restoring the one it
+   * overwrote (if any). Last-writer-wins by design, so imperative callers
+   * (vanilla, Vue, Angular) keep the behavior they have always had.
+   *
+   * When the caller owns a specific registration, use the disposer returned by
+   * {@link register} instead — it cannot pop an entry someone else pushed.
    */
   unregister(name: string): boolean {
-    const deleted = this.functions.delete(name);
-    if (deleted) {
-      logger.log(`Unregistered function: ${name}`);
+    const stack = this.functions.get(name);
+    if (!stack || stack.length === 0) return false;
+    stack.pop();
+    if (stack.length === 0) {
+      this.functions.delete(name);
     }
-    return deleted;
+    logger.log(`Unregistered function: ${name}`);
+    return true;
   }
 
   /**
    * Get a registered function
    */
   get(name: string): RegisteredFunction | undefined {
-    return this.functions.get(name);
+    return this.active(name);
   }
 
   /**
    * Check if a function is registered
    */
   has(name: string): boolean {
-    return this.functions.has(name);
+    return this.active(name) !== undefined;
   }
 
   /**
    * Get all registered function schemas (for sending to backend)
    */
   getSchemas(): ClientFunctionSchema[] {
-    return Array.from(this.functions.values()).map((f) => f.schema);
+    const schemas: ClientFunctionSchema[] = [];
+    for (const stack of this.functions.values()) {
+      if (stack.length > 0) schemas.push(stack[stack.length - 1].schema);
+    }
+    return schemas;
   }
 
   /**
@@ -143,7 +205,7 @@ export class FunctionRegistry {
     name: string,
     args: Record<string, unknown>
   ): Promise<unknown> {
-    const registration = this.functions.get(name);
+    const registration = this.active(name);
 
     if (!registration) {
       throw new AgoFunctionError(

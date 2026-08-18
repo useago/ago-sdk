@@ -84,16 +84,16 @@ export function useAgoFunction(
     const stableHandler: ClientFunctionHandler = (args) =>
       handlerRef.current(args);
 
-    client.registerFunction(name, stableHandler, {
+    // Dispose by identity, not by name: during a route transition two
+    // components are briefly alive under the same name, and
+    // `unregisterFunction(name)` would remove whichever registration is newest
+    // rather than this one.
+    return client.registerFunction(name, stableHandler, {
       description,
       parameters,
       maxResultBytes,
       requiresApproval,
     });
-
-    return () => {
-      client.unregisterFunction(name);
-    };
   }, [client, name, description, parameters, maxResultBytes, requiresApproval]);
 }
 
@@ -220,16 +220,15 @@ export function useAgoPageState(
         }
       : undefined;
 
-    client.registerPageStateFunction(stableControls, {
+    // Dispose by identity: a route transition mounts the next page's hook
+    // before this one's cleanup runs, so `unregisterPageStateFunction(fnName)`
+    // would tear down the incoming page instead of this one.
+    return client.registerPageStateFunction(stableControls, {
       functionName: fnName,
       requiresApproval,
       data,
       settleTimeoutMs,
     });
-
-    return () => {
-      client.unregisterPageStateFunction(fnName);
-    };
   }, [
     client,
     fnName,

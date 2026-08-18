@@ -250,4 +250,97 @@ describe("FunctionRegistry", () => {
       expect(registry.size).toBe(0);
     });
   });
+
+  // Two components can be alive under one name during a route transition:
+  // React mounts the next page before unmounting the previous one. With a flat
+  // map, the outgoing page's cleanup deleted the incoming page's registration
+  // and the agent silently lost the function.
+  describe("ownership (LIFO registration stack)", () => {
+    const schema = (description: string) => ({
+      description,
+      parameters: { type: "object" as const, properties: {} },
+    });
+
+    it("a disposer removes only its own registration", () => {
+      const disposeA = registry.register("setPageState", () => "A", schema("A"));
+      registry.register("setPageState", () => "B", schema("B"));
+
+      disposeA();
+
+      expect(registry.has("setPageState")).toBe(true);
+      expect(registry.get("setPageState")?.schema.description).toBe("B");
+    });
+
+    it("restores the previous owner when the newer one disposes", () => {
+      registry.register("setPageState", () => "A", schema("A"));
+      const disposeB = registry.register("setPageState", () => "B", schema("B"));
+
+      disposeB();
+
+      expect(registry.get("setPageState")?.schema.description).toBe("A");
+    });
+
+    it("survives three owners unmounting out of order", () => {
+      const dA = registry.register("fn", () => "A", schema("A"));
+      const dB = registry.register("fn", () => "B", schema("B"));
+      registry.register("fn", () => "C", schema("C"));
+
+      dB();
+      expect(registry.get("fn")?.schema.description).toBe("C");
+      dA();
+      expect(registry.get("fn")?.schema.description).toBe("C");
+      expect(registry.size).toBe(1);
+    });
+
+    it("is idempotent — calling a disposer twice does not pop someone else", () => {
+      const disposeA = registry.register("fn", () => "A", schema("A"));
+      registry.register("fn", () => "B", schema("B"));
+
+      disposeA();
+      disposeA();
+
+      expect(registry.get("fn")?.schema.description).toBe("B");
+    });
+
+    it("drops the name once every owner has disposed", () => {
+      const dA = registry.register("fn", () => "A", schema("A"));
+      const dB = registry.register("fn", () => "B", schema("B"));
+
+      dA();
+      dB();
+
+      expect(registry.has("fn")).toBe(false);
+      expect(registry.size).toBe(0);
+      expect(registry.getSchemas()).toEqual([]);
+    });
+
+    it("unregister(name) still pops the active entry, restoring the previous", () => {
+      registry.register("fn", () => "A", schema("A"));
+      registry.register("fn", () => "B", schema("B"));
+
+      expect(registry.unregister("fn")).toBe(true);
+      expect(registry.get("fn")?.schema.description).toBe("A");
+      expect(registry.unregister("fn")).toBe(true);
+      expect(registry.unregister("fn")).toBe(false);
+    });
+
+    it("getSchemas reports one entry per name, from the active registration", () => {
+      registry.register("fn", () => "A", schema("A"));
+      registry.register("fn", () => "B", schema("B"));
+      registry.register("other", () => "O", schema("O"));
+
+      const schemas = registry.getSchemas();
+      expect(schemas).toHaveLength(2);
+      expect(schemas.find((s) => s.name === "fn")?.description).toBe("B");
+    });
+
+    it("executes the active registration, not a stale one", async () => {
+      registry.register("fn", async () => "from A", schema("A"));
+      const disposeB = registry.register("fn", async () => "from B", schema("B"));
+
+      expect(await registry.execute("fn", {})).toBe("from B");
+      disposeB();
+      expect(await registry.execute("fn", {})).toBe("from A");
+    });
+  });
 });

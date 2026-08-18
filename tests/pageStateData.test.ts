@@ -588,7 +588,30 @@ describe("readPageData companion", () => {
     ]);
   });
 
-  it("drops a stale companion when re-registered without a data source", async () => {
+  it("drops the companion when the registration that created it is disposed", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const control: AgoStateControl = {
+      name: "query",
+      description: "Search text",
+      schema: { type: "string" },
+      set: () => {},
+    };
+
+    const dispose = client.registerPageStateFunction([control], {
+      data: { description: "Page A rows.", get: () => ["page-a-row"] },
+    });
+    // A vanilla/Vue app navigating to a page with no data source. Tear the old
+    // registration down first, then register the new one: the companion goes
+    // with the registration that created it, so it can't answer with page A.
+    dispose();
+    client.registerPageStateFunction([control]);
+
+    expect(client.getRegisteredFunctions().map((f) => f.name)).toEqual([
+      "setPageState",
+    ]);
+  });
+
+  it("layers rather than replaces when re-registered without disposing first", async () => {
     const client = new AgoClient({ baseUrl: "https://example.test" });
     const control: AgoStateControl = {
       name: "query",
@@ -600,11 +623,15 @@ describe("readPageData companion", () => {
     client.registerPageStateFunction([control], {
       data: { description: "Page A rows.", get: () => ["page-a-row"] },
     });
-    // A vanilla/Vue app navigating to a page with no data source, without
-    // unregistering first. The old companion would still answer with page A.
     client.registerPageStateFunction([control]);
 
-    expect(client.getRegisteredFunctions().map((f) => f.name)).toEqual([
+    // Page A's registration was never disposed, so it is still live and keeps
+    // its companion. Removing it by name here would be indistinguishable from
+    // a second owner (a modal, a side panel) mounting alongside page A, and
+    // would silently delete that owner's tool. Callers that mean "replace"
+    // dispose first, as the test above does and as the React hooks do.
+    expect(client.getRegisteredFunctions().map((f) => f.name).sort()).toEqual([
+      "readPageData",
       "setPageState",
     ]);
   });

@@ -175,3 +175,93 @@ describe("useAgoPageState", () => {
     expect(client.getRegisteredFunctions()).toHaveLength(0);
   });
 });
+
+// Two components alive under one `setPageState` at once. This is NOT a keyed
+// route swap (React destroys the old subtree before creating the new one, so
+// those never overlap) — it is an overlapping mount: an animated route
+// transition that keeps the outgoing page in the tree, a modal or drawer over a
+// page, or a layout with two panels. Before the LIFO stack, the first component
+// to unmount deleted whichever registration was newest, so the surviving
+// component silently lost its page state.
+describe("useAgoPageState with two overlapping owners", () => {
+  const control = (name: string) => ({
+    name,
+    description: `${name} control`,
+    schema: { type: "string" as const },
+    get: () => "x",
+    set: () => {},
+  });
+
+  function schemaOf(client: AgoClient, name: string) {
+    return client.getRegisteredFunctions().find((s) => s.name === name);
+  }
+
+  function Page({ name, data }: { name: string; data?: boolean }) {
+    useAgoPageState(
+      [control(name)],
+      data ? { data: { description: `${name} rows`, get: () => [name] } } : undefined
+    );
+    return <span>{name}</span>;
+  }
+
+  it("the outgoing owner unmounting leaves the incoming owner registered", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    // Both mounted: the incoming page overlaps the outgoing one.
+    await act(async () => {
+      root.render(
+        <AgoProvider client={client}>
+          <Page key="sort" name="sort" />
+          <Page key="lactose" name="lactose" />
+        </AgoProvider>
+      );
+    });
+
+    // The outgoing page leaves; the incoming one stays.
+    await act(async () => {
+      root.render(
+        <AgoProvider client={client}>
+          <Page key="lactose" name="lactose" />
+        </AgoProvider>
+      );
+    });
+
+    const after = schemaOf(client, "setPageState");
+    expect(after).toBeDefined();
+    expect(Object.keys(after!.parameters.properties)).toEqual(["lactose"]);
+
+    await act(async () => root.unmount());
+    expect(schemaOf(client, "setPageState")).toBeUndefined();
+  });
+
+  it("keeps the surviving owner's readPageData companion", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <AgoProvider client={client}>
+          <Page key="sort" name="sort" data />
+          <Page key="lactose" name="lactose" data />
+        </AgoProvider>
+      );
+    });
+    await act(async () => {
+      root.render(
+        <AgoProvider client={client}>
+          <Page key="lactose" name="lactose" data />
+        </AgoProvider>
+      );
+    });
+
+    expect(schemaOf(client, "readPageData")?.description).toContain("lactose rows");
+
+    await act(async () => root.unmount());
+    expect(schemaOf(client, "readPageData")).toBeUndefined();
+  });
+});

@@ -176,6 +176,14 @@ const ACTIVITY_CONTEXT_KEY = "activity:recent";
 const STATE_DELTA_CONTEXT_KEY = "state:delta";
 
 /**
+ * Bounds on the unknown-control names echoed back to the agent. The names come
+ * from model output, so they are neither short nor few by construction, and the
+ * result competes with page data for the same byte budget.
+ */
+const MAX_REPORTED_CONTROLS = 10;
+const MAX_REPORTED_CONTROL_CHARS = 64;
+
+/**
  * Name of the read-only companion to a page-state function: `readPageData` for
  * the default `setPageState`, `read<Fn>Data` for a custom name.
  */
@@ -203,7 +211,16 @@ export class AgoClient {
   private warnedPageDataPlaceholder = false;
 
   /** `readPageData` companions this SDK registered, so cleanup only removes its own. */
-  private pageDataCompanions = new Set<string>();
+  /**
+   * Per-registration teardown for `registerPageStateFunction`, keyed by name.
+   *
+   * A stack, so `unregisterPageStateFunction(name)` pops the newest registration
+   * while each disposer removes its own function, `readPageData` companion and
+   * context provider by identity. Ownership is never inferred from a name: a
+   * host app may register its own `readPageData`, and two page-state owners can
+   * be mounted at once under the same name.
+   */
+  private pageStateDisposers = new Map<string, Array<() => void>>();
 
   /** Paused turns awaiting auto-resume, keyed by assistant message id. */
   private pendingResumes = new Map<string, PendingResume>();
@@ -1338,23 +1355,27 @@ export class AgoClient {
    * // Classic 3-arg form
    * client.registerFunction("lookupOrder", handler, schema);
    * ```
+   *
+   * Returns a disposer that removes this specific registration. Prefer it to
+   * `unregisterFunction(name)` when two components can be alive under the same
+   * name (a React route transition mounts the next page before unmounting the
+   * previous one): the disposer only ever removes its own entry.
    */
-  registerFunction(definition: ClientFunctionDefinition): void;
+  registerFunction(definition: ClientFunctionDefinition): () => void;
   registerFunction(
     name: string,
     handler: ClientFunctionHandler,
     schema: ClientFunctionRegisterOptions
-  ): void;
+  ): () => void;
   registerFunction(
     nameOrDef: string | ClientFunctionDefinition,
     handler?: ClientFunctionHandler,
     schema?: ClientFunctionRegisterOptions
-  ): void {
+  ): () => void {
     if (typeof nameOrDef === "object") {
-      this.functionRegistry.register(nameOrDef);
-    } else {
-      this.functionRegistry.register(nameOrDef, handler!, schema!);
+      return this.functionRegistry.register(nameOrDef);
     }
+    return this.functionRegistry.register(nameOrDef, handler!, schema!);
   }
 
   /**
@@ -1364,21 +1385,25 @@ export class AgoClient {
    * client.register(lookupOrder);
    * client.register([lookupOrder, cancelOrder]);
    * ```
+   *
+   * Returns one disposer that removes every registration it made.
    */
   register(
     definition: ClientFunctionDefinition | ClientFunctionDefinition[]
-  ): void {
-    if (Array.isArray(definition)) {
-      for (const def of definition) {
-        this.functionRegistry.register(def);
-      }
-    } else {
-      this.functionRegistry.register(definition);
-    }
+  ): () => void {
+    const defs = Array.isArray(definition) ? definition : [definition];
+    const disposers = defs.map((def) => this.functionRegistry.register(def));
+    return () => {
+      for (const dispose of disposers) dispose();
+    };
   }
 
   /**
-   * Unregister a client-side function
+   * Unregister a client-side function by name.
+   *
+   * Removes the ACTIVE registration and restores the one it overwrote, if any.
+   * Last-writer-wins, unchanged from previous versions. When you own a specific
+   * registration, prefer the disposer returned by {@link registerFunction}.
    */
   unregisterFunction(name: string): boolean {
     return this.functionRegistry.unregister(name);
@@ -1578,11 +1603,18 @@ export class AgoClient {
    * as the result of its own call, instead of having to wait for the next
    * message's context. That also registers a read-only `readPageData`
    * companion. See {@link AgoPageDataSource}.
+   *
+   * Returns a disposer that tears down exactly this registration (the function,
+   * its `readPageData` companion, and its context provider). Prefer it to
+   * `unregisterPageStateFunction(name)` in any framework binding: a route
+   * transition mounts the destination page before unmounting the previous one,
+   * and a name-keyed teardown can only ever remove the most recent
+   * registration — which during a transition belongs to the incoming page.
    */
   registerPageStateFunction(
     controls: AgoStateControl[],
     opts?: AgoPageStateOptions
-  ): void {
+  ): () => void {
     const fnName = opts?.functionName ?? "setPageState";
     const byName = new Map(controls.map((c) => [c.name, c]));
     const dataSource = opts?.data;
@@ -1591,32 +1623,80 @@ export class AgoClient {
       .map((c) => `- "${c.name}": ${c.description}`)
       .join("\n");
 
-    this.registerFunction(
-      fnName,
-      async (args) => {
-        const applied: Record<string, unknown> = {};
-        for (const [key, value] of Object.entries(args)) {
-          if (value === undefined) continue;
-          const control = byName.get(key);
-          // Ignore unknown controls cleanly.
-          if (!control) continue;
-          await control.set(value);
-          applied[key] = value;
-        }
-        // No data source: the result stays byte-for-byte what it always was.
-        if (!dataSource) return { success: true, applied };
-        const data = await this.readPageData(fnName, dataSource, opts);
-        return {
-          success: true,
-          applied,
-          data: truncatePageData(
-            fnName,
-            data,
-            this.pageDataBudget(dataSource) -
-              this.envelopeBytes({ success: true, applied })
-          ),
-        };
-      },
+    const disposers: Array<() => void> = [];
+
+    disposers.push(
+      this.registerFunction(
+        fnName,
+        async (args) => {
+          const applied: Record<string, unknown> = {};
+          const failed: Array<{ control: string; error: string }> = [];
+          const unknown: string[] = [];
+
+          for (const [key, value] of Object.entries(args)) {
+            if (value === undefined) continue;
+            const control = byName.get(key);
+            if (!control) {
+              // Do NOT swallow this. Silently skipping an unknown control and
+              // still reporting success is how the agent ends up believing it
+              // changed the page when it changed nothing.
+              if (unknown.length < MAX_REPORTED_CONTROLS) {
+                unknown.push(key.slice(0, MAX_REPORTED_CONTROL_CHARS));
+              }
+              continue;
+            }
+            try {
+              await control.set(value);
+              applied[key] = value;
+            } catch (error) {
+              // Per control, not per call: one control throwing used to reject
+              // the whole handler, so the agent was told the call FAILED while
+              // earlier controls had already mutated the page. It then retried
+              // and double-applied them.
+              failed.push({
+                control: key,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
+
+          if (unknown.length > 0) {
+            logger.warn(
+              `"${fnName}" was called with ${unknown.length} control(s) that do not ` +
+                `exist on this page: ${unknown.join(", ")}. Available: ` +
+                `${controls.map((c) => c.name).join(", ")}. Check the control ` +
+                `names passed to useAgoPageState / registerPageStateFunction.`
+            );
+          }
+
+          const envelope: Record<string, unknown> = {
+            success: failed.length === 0 && unknown.length === 0,
+            applied,
+          };
+          if (failed.length > 0) envelope.failed = failed;
+          if (unknown.length > 0) {
+            envelope.unknownControls = unknown;
+            envelope.hint =
+              `These controls do not exist on this page: ${unknown.join(", ")}. ` +
+              `Available controls: ${controls.map((c) => c.name).join(", ")}. ` +
+              "Call again using only those names.";
+          }
+
+          if (!dataSource) return envelope;
+          const data = await this.readPageData(fnName, dataSource, opts);
+          return {
+            ...envelope,
+            data: truncatePageData(
+              fnName,
+              data,
+              // Measure the envelope actually being returned. Sizing against a
+              // narrower `{success, applied}` under-counts it, so the guard in
+              // guardResultSize replaces the whole carefully truncated result
+              // with a 2 000-char preview.
+              this.pageDataBudget(dataSource) - this.envelopeBytes(envelope)
+            ),
+          };
+        },
       {
         description:
           `Change the state of the current page. Set ONLY the controls the user explicitly asked for; leave the others unset. Available controls:\n${controlDescriptions}` +
@@ -1641,67 +1721,106 @@ export class AgoClient {
         // registry's live default applies, so `updateConfig` still moves it.
         maxResultBytes: dataSource?.maxResultBytes,
       }
+      )
     );
 
     const companion = readDataFunctionName(fnName);
     if (dataSource) {
       this.warnIfPlaceholderMode(fnName);
-      this.registerFunction(
-        companion,
-        async () => ({
-          data: truncatePageData(
-            fnName,
-            await this.readPageData(fnName, dataSource, opts),
-            this.pageDataBudget(dataSource) - this.envelopeBytes({})
-          ),
-        }),
-        {
-          description: `Read what the current page is displaying, without changing anything: ${dataSource.description}`,
-          parameters: { type: "object", properties: {} },
-          maxResultBytes: dataSource.maxResultBytes,
-        }
+      disposers.push(
+        this.registerFunction(
+          companion,
+          async () => ({
+            data: truncatePageData(
+              fnName,
+              await this.readPageData(fnName, dataSource, opts),
+              this.pageDataBudget(dataSource) - this.envelopeBytes({})
+            ),
+          }),
+          {
+            description: `Read what the current page is displaying, without changing anything: ${dataSource.description}`,
+            parameters: { type: "object", properties: {} },
+            maxResultBytes: dataSource.maxResultBytes,
+          }
+        )
       );
-      this.pageDataCompanions.add(companion);
-    } else if (this.pageDataCompanions.delete(companion)) {
-      // Re-registering the same page-state function without a data source:
-      // drop the companion this SDK created earlier, or it keeps answering
-      // with the previous page's rows.
-      this.unregisterFunction(companion);
     }
+    // No `else` that removes a companion by name. `readPageData` is a name a
+    // host app can use for its own function, and another page-state owner can
+    // be mounted at the same time under the same `fnName`, so a name-keyed
+    // removal here would delete someone else's live registration. Each
+    // companion is torn down by the disposer of the registration that created
+    // it, below. Registering twice without disposing layers the two rather than
+    // replacing: the newest `setPageState` is active while the older owner's
+    // `readPageData` stays live, which is what the LIFO model means everywhere
+    // else. Dispose the first registration if you meant to replace it (the
+    // React hooks do this for you).
 
     // Surface the current value of every control that can be read, so the agent
     // knows what to change. Re-evaluated on every message (like navigation is
     // static, this mirror is live).
-    this.addDynamicContext(`page-state:${fnName}`, () => {
-      const readable = controls.filter((c) => typeof c.get === "function");
-      if (readable.length === 0) return null;
-      const data: Record<string, unknown> = {};
-      for (const control of readable) {
-        data[control.name] = control.get!();
+    disposers.push(
+      // Through the client, not the registry: this also emits `context:changed`,
+      // which is the signal the pause-mode resume gate waits on.
+      this.addDynamicContext(`page-state:${fnName}`, () => {
+        const readable = controls.filter((c) => typeof c.get === "function");
+        if (readable.length === 0) return null;
+        const data: Record<string, unknown> = {};
+        for (const control of readable) {
+          data[control.name] = control.get!();
+        }
+        return {
+          name: "Page state",
+          description:
+            "Current, editable state of the page the user is viewing.",
+          data,
+        };
+      })
+    );
+
+    let disposed = false;
+    const dispose = () => {
+      if (disposed) return;
+      disposed = true;
+      for (const d of disposers) d();
+      const current = this.pageStateDisposers.get(fnName);
+      if (current) {
+        const index = current.lastIndexOf(dispose);
+        if (index !== -1) current.splice(index, 1);
+        if (current.length === 0) this.pageStateDisposers.delete(fnName);
       }
-      return {
-        name: "Page state",
-        description: "Current, editable state of the page the user is viewing.",
-        data,
-      };
-    });
+    };
+
+    const stack = this.pageStateDisposers.get(fnName);
+    if (stack) stack.push(dispose);
+    else this.pageStateDisposers.set(fnName, [dispose]);
+
+    return dispose;
   }
 
   /**
    * Unregister a page state function, its `readPageData` companion, and its
    * dynamic context provider. Mirror of unregistering `navigateToPage`.
+   *
+   * Removes the most recent registration for `functionName` and restores the
+   * one it overwrote, so a route transition that mounts the next page before
+   * unmounting the previous one does not leave the agent with no page state.
    */
   unregisterPageStateFunction(functionName?: string): void {
     const fnName = functionName ?? "setPageState";
-    this.unregisterFunction(fnName);
-    // Only remove the companion if this SDK created it. `readPageData` is a
-    // name a host app could plausibly use for its own function, and unmounting
-    // a page-state hook must not delete it.
-    const companion = readDataFunctionName(fnName);
-    if (this.pageDataCompanions.delete(companion)) {
-      this.unregisterFunction(companion);
+    const stack = this.pageStateDisposers.get(fnName);
+    if (stack && stack.length > 0) {
+      // The disposer removes this registration's own function, companion and
+      // context provider by identity, so nothing here touches a name the host
+      // app or another live owner may also hold.
+      stack.pop()!();
+      if (stack.length === 0) this.pageStateDisposers.delete(fnName);
+      return;
     }
-    this.removeDynamicContext(`page-state:${fnName}`);
+
+    // Nothing this SDK registered under that name is still standing. Leave the
+    // registry alone: a function called `setPageState` or `readPageData` at this
+    // point belongs to the host app, not to us.
   }
 
   /**
@@ -1806,9 +1925,16 @@ export class AgoClient {
    * }));
    * ```
    */
-  addDynamicContext(key: string, provider: DynamicContextProvider): void {
-    this.contextRegistry.addDynamicProvider(key, provider);
+  addDynamicContext(key: string, provider: DynamicContextProvider): () => void {
+    const dispose = this.contextRegistry.addDynamicProvider(key, provider);
     this.notifyContextChanged();
+    let disposed = false;
+    return () => {
+      if (disposed) return;
+      disposed = true;
+      dispose();
+      this.notifyContextChanged();
+    };
   }
 
   /**
@@ -2082,6 +2208,10 @@ export class AgoClient {
     this.eventEmitter.removeAllListeners();
     this.functionRegistry.clear();
     this.contextRegistry.clear();
+    // Both registries are now empty, so the page-state disposers point at
+    // entries that no longer exist. Dropping them keeps a revived client from
+    // popping a stale disposer over a fresh registration.
+    this.pageStateDisposers.clear();
     this.pendingResumes.clear();
     this.pendingApprovals.clear();
     this.resumeGate = null;
