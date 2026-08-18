@@ -551,6 +551,10 @@ On its own, `setPageState` returns `{ success, applied }`: the agent learns its
 arguments were accepted, not what appeared. Add a `data` source and the rows come
 back as the result of its own call, in the same turn.
 
+(When a control name doesn't exist on the page, or its `set()` throws, `success`
+is `false` and the result names the offending controls in `unknownControls` or
+`failed`. See [functions and context](../general/functions-and-context.md#page-state-shortcut).)
+
 ```tsx
 const { data: invoices, isFetching } = useQuery({
   queryKey: ["invoices", status, sort],
@@ -588,7 +592,8 @@ Note the poll only gives the flag ~100 ms to go up, so a debounced fetch needs
 the promise form. Over the size ceiling
 (`maxResultBytes`, default 50 000 bytes) the snapshot keeps the first whole rows
 that fit and adds a `truncation` field (`{ truncated, returnedItems, totalItems,
-hint }`) beside them. `success` and `applied` are never dropped. The round trip needs `clientFunctionsMode: "pause"`
+hint }`) beside them. `success` and `applied` are never dropped, and neither are
+`unknownControls` / `failed` when only part of the call landed. The round trip needs `clientFunctionsMode: "pause"`
 (the default). See
 [functions and context](../general/functions-and-context.md#return-what-the-page-displays).
 

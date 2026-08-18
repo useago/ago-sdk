@@ -48,7 +48,14 @@ export type DynamicContextProvider = () => ContextEntry | null | undefined;
  */
 export class ClientContextRegistry {
   private entries: Map<string, ContextEntry> = new Map();
-  private dynamicProviders: Map<string, DynamicContextProvider> = new Map();
+  /**
+   * One LIFO stack per key; the last provider is the active one. Keys like
+   * `current-page` and `page-state:<fn>` are shared by every consumer that
+   * registers them, so a flat map lets one unmounting hook delete a provider
+   * another hook is still relying on. See {@link FunctionRegistry} for the
+   * same reasoning on functions.
+   */
+  private dynamicProviders: Map<string, DynamicContextProvider[]> = new Map();
 
   /**
    * Register or update a static context entry.
@@ -76,20 +83,43 @@ export class ClientContextRegistry {
    * Use this for context that lives outside React state — global stores,
    * refs, or computed values that shouldn't trigger re-renders.
    */
-  addDynamicProvider(key: string, provider: DynamicContextProvider): void {
-    this.dynamicProviders.set(key, provider);
+  addDynamicProvider(key: string, provider: DynamicContextProvider): () => void {
+    const stack = this.dynamicProviders.get(key);
+    if (stack) {
+      stack.push(provider);
+    } else {
+      this.dynamicProviders.set(key, [provider]);
+    }
     logger.log(`DynamicContext provider added: ${key}`);
+
+    let disposed = false;
+    return () => {
+      if (disposed) return;
+      disposed = true;
+      const current = this.dynamicProviders.get(key);
+      if (!current) return;
+      const index = current.lastIndexOf(provider);
+      if (index === -1) return;
+      current.splice(index, 1);
+      if (current.length === 0) this.dynamicProviders.delete(key);
+      logger.log(`DynamicContext provider removed: ${key}`);
+    };
   }
 
   /**
-   * Remove a dynamic context provider.
+   * Remove the ACTIVE dynamic context provider for a key, restoring the one it
+   * overwrote (if any). Prefer the disposer returned by
+   * {@link addDynamicProvider} when you own a specific registration.
    */
   removeDynamicProvider(key: string): boolean {
-    const deleted = this.dynamicProviders.delete(key);
-    if (deleted) {
-      logger.log(`DynamicContext provider removed: ${key}`);
+    const stack = this.dynamicProviders.get(key);
+    if (!stack || stack.length === 0) return false;
+    stack.pop();
+    if (stack.length === 0) {
+      this.dynamicProviders.delete(key);
     }
-    return deleted;
+    logger.log(`DynamicContext provider removed: ${key}`);
+    return true;
   }
 
   /**
@@ -107,7 +137,9 @@ export class ClientContextRegistry {
       entries[key] = entry;
     }
 
-    for (const [key, provider] of this.dynamicProviders) {
+    for (const [key, stack] of this.dynamicProviders) {
+      if (stack.length === 0) continue;
+      const provider = stack[stack.length - 1];
       try {
         const entry = provider();
         if (entry) {

@@ -104,9 +104,22 @@ client.register([lookupOrder, cancelOrder]);
 // Classic 3-arg form
 client.registerFunction("lookupOrder", handler, { description, parameters });
 
-// Remove it
+// Remove it by name
 client.unregisterFunction("lookupOrder");
+
+// Or keep the disposer and remove exactly this registration
+const dispose = client.registerFunction(lookupOrder);
+dispose();
 ```
+
+Prefer the disposer when two parts of your app can register the same name at
+once: a route transition that keeps the outgoing page mounted, a modal over a
+page, or two panels side by side. `unregisterFunction(name)` removes whichever
+registration is newest, which during an overlap is the incoming one. The
+disposer only ever removes its own, and the registration it replaced comes back.
+`register`, `registerPageStateFunction` and `addDynamicContext` return disposers
+too. The React hooks use them, so `useAgoFunction` and `useAgoPageState` already
+behave this way.
 
 Per framework:
 
@@ -202,6 +215,17 @@ returns `{ success, applied }`. The new state reaches the agent through the
 context on the next message. React/Vue offer `useAgoPageState(controls, opts?)`
 with lifecycle cleanup; Angular exposes
 `agoService.registerPageStateFunction(...)`.
+
+`success` is `false` when part of the call did not land, and the result says
+which part:
+
+- A control name the page doesn't have comes back in `unknownControls`, with a
+  `hint` listing the names that do exist so the agent can retry correctly. The
+  SDK also logs a warning naming the function, so a typo in your control names
+  shows up in the browser console.
+- A control whose `set()` throws comes back in `failed` as
+  `{ control, error }`. The controls that did apply stay in `applied`, so a
+  partial change is reported as partial instead of as a total failure.
 
 ### Return what the page displays
 

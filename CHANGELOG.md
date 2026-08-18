@@ -5,6 +5,42 @@ All notable changes to `@useago/sdk` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `registerFunction`, `register`, `registerPageStateFunction` and
+  `addDynamicContext` now return a disposer that removes exactly that
+  registration. Prefer it over the name-based `unregisterFunction(name)` /
+  `unregisterPageStateFunction(name)` whenever two components can be alive under
+  one name: an animated route transition that keeps the outgoing page mounted, a
+  modal over a page, or a layout with two panels. The React hooks use the
+  disposers now.
+
+### Fixed
+
+- Registrations are tracked as a per-name LIFO stack instead of a flat map. Two
+  components registering the same function name no longer clobber each other:
+  the first to unmount removes only its own entry, and the registration it
+  overwrote is restored. Previously the surviving component silently lost its
+  function, and for `setPageState` that meant the agent lost the ability to
+  change the page. Same fix for `readPageData` companions and for dynamic
+  context providers keyed `current-page` / `page-state:<fn>`.
+- `setPageState` no longer reports success when it changed nothing. Unknown
+  control names come back as `unknownControls` plus a `hint` naming the controls
+  that do exist, with `success: false`, and a console warning tells the
+  integrator which name is wrong. Previously unknown controls were skipped
+  silently and the call returned `{ success: true, applied: {} }`.
+- `setPageState` no longer reports total failure after a partial change. A
+  control whose setter throws is reported in `failed` while the controls that
+  did apply stay in `applied`. Previously the throw rejected the whole call, so
+  the agent was told it failed while some controls had already changed the page,
+  and it retried and double-applied them.
+- `setPageState`'s page-data byte budget is measured against the envelope
+  actually returned. With the new fields it was under-counted, which could make
+  the result-size guard discard the truncated page data and return a preview
+  instead.
+
 ## [1.8.0] - 2026-08-11
 
 ### Added

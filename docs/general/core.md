@@ -443,19 +443,24 @@ Prefer callbacks over raw events? See the
 
 ### Functions
 
-- `registerFunction(definition)` / `registerFunction(name, handler, schema)`
-- `register(definitionOrArray)`: short alias, accepts an array
-- `unregisterFunction(name)` → `boolean`
+- `registerFunction(definition)` / `registerFunction(name, handler, schema)` → disposer
+- `register(definitionOrArray)`: short alias, accepts an array → disposer
+- `unregisterFunction(name)` → `boolean` (removes the newest registration for that name)
 - `getRegisteredFunctions()` → `ClientFunctionSchema[]`
 - `registerNavigationFunction(navigate, routes)` · `unregisterNavigationFunction()` (also publishes a "Current page" context entry)
-- `registerPageStateFunction(controls, opts?)` · `unregisterPageStateFunction(functionName?)`
+- `registerPageStateFunction(controls, opts?)` → disposer · `unregisterPageStateFunction(functionName?)`
 - `attachAutoContinueAfterNavigation(client, options?)` → detach fn (standalone
   export, see [Client functions & context](functions-and-context.md#navigate-then-change-the-page-in-one-go))
+
+The registration methods return a disposer that removes exactly that
+registration. Prefer it over the name-based `unregister*` calls when two parts of
+the app can register the same name at once. See
+[Client functions & context](functions-and-context.md#register-a-function).
 
 ### Context
 
 - `setContext(key, entry)` · `removeContext(key)`
-- `addDynamicContext(key, provider)` · `removeDynamicContext(key)`
+- `addDynamicContext(key, provider)` → disposer · `removeDynamicContext(key)`
 - `enableAutoPageContext()`
 - `getContextSnapshot()` → `ContextSnapshot | null`
 - `notifyContextChanged()`: re-emit `context:changed` with a fresh snapshot

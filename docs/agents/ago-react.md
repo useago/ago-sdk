@@ -254,6 +254,11 @@ useAgoPageState(controls, {
 false before reading, and truncates a long list by whole rows. Needs
 `clientFunctionsMode: "pause"` (the default).
 
+When a control name doesn't exist on the page, or its `set()` throws, `success`
+is `false` and the result names them in `unknownControls` (with a `hint` listing
+the valid names) or `failed`. Controls that did apply stay in `applied`, so a
+partial change is never reported as a total failure.
+
 ## 6. Give the agent context: `useAgoContext`
 
 Expose what the user is looking at, sent with every message.
