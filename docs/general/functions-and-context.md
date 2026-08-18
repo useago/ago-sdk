@@ -256,6 +256,11 @@ useAgoPageState(controls, {
 That one answers "what's on screen?" without touching the page. Both disappear
 when you unregister.
 
+Registering again without disposing the previous registration layers the two:
+the newest `setPageState` is active, and the older registration keeps its
+`readPageData`. Dispose the first one when you mean to replace it. The React and
+Vue hooks do this for you on unmount.
+
 #### Telling the SDK when the work is done
 
 A control change kicks off work, and the SDK has to wait for it. There are two

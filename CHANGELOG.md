@@ -17,6 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   modal over a page, or a layout with two panels. The React hooks use the
   disposers now.
 
+### Changed
+
+- Calling `registerPageStateFunction` again without disposing the previous
+  registration now layers the two instead of replacing: the newest
+  `setPageState` is active and the older registration keeps its `readPageData`.
+  Previously the second call removed the earlier companion by name, which is
+  indistinguishable from a second owner mounting alongside the first (a modal, a
+  side panel) and silently deleted that owner's tool. Dispose the first
+  registration when you mean to replace it. The React hooks already do.
+
 ### Fixed
 
 - Registrations are tracked as a per-name LIFO stack instead of a flat map. Two

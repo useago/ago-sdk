@@ -211,8 +211,15 @@ export class AgoClient {
   private warnedPageDataPlaceholder = false;
 
   /** `readPageData` companions this SDK registered, so cleanup only removes its own. */
-  private pageDataCompanions = new Set<string>();
-  /** Per-registration teardown for `registerPageStateFunction`, keyed by name. */
+  /**
+   * Per-registration teardown for `registerPageStateFunction`, keyed by name.
+   *
+   * A stack, so `unregisterPageStateFunction(name)` pops the newest registration
+   * while each disposer removes its own function, `readPageData` companion and
+   * context provider by identity. Ownership is never inferred from a name: a
+   * host app may register its own `readPageData`, and two page-state owners can
+   * be mounted at once under the same name.
+   */
   private pageStateDisposers = new Map<string, Array<() => void>>();
 
   /** Paused turns awaiting auto-resume, keyed by assistant message id. */
@@ -1737,16 +1744,17 @@ export class AgoClient {
           }
         )
       );
-      this.pageDataCompanions.add(companion);
-    } else if (this.pageDataCompanions.has(companion)) {
-      // Re-registering the same page-state function without a data source:
-      // drop the companion this SDK created earlier, or it keeps answering
-      // with the previous page's rows. The registry is a LIFO stack, so this
-      // pops one entry and restores any older owner's companion.
-      if (!this.unregisterFunction(companion)) {
-        this.pageDataCompanions.delete(companion);
-      }
     }
+    // No `else` that removes a companion by name. `readPageData` is a name a
+    // host app can use for its own function, and another page-state owner can
+    // be mounted at the same time under the same `fnName`, so a name-keyed
+    // removal here would delete someone else's live registration. Each
+    // companion is torn down by the disposer of the registration that created
+    // it, below. Registering twice without disposing layers the two rather than
+    // replacing: the newest `setPageState` is active while the older owner's
+    // `readPageData` stays live, which is what the LIFO model means everywhere
+    // else. Dispose the first registration if you meant to replace it (the
+    // React hooks do this for you).
 
     // Surface the current value of every control that can be read, so the agent
     // knows what to change. Re-evaluated on every message (like navigation is
@@ -1781,9 +1789,6 @@ export class AgoClient {
         if (index !== -1) current.splice(index, 1);
         if (current.length === 0) this.pageStateDisposers.delete(fnName);
       }
-      if (!this.functionRegistry.has(readDataFunctionName(fnName))) {
-        this.pageDataCompanions.delete(readDataFunctionName(fnName));
-      }
     };
 
     const stack = this.pageStateDisposers.get(fnName);
@@ -1805,21 +1810,17 @@ export class AgoClient {
     const fnName = functionName ?? "setPageState";
     const stack = this.pageStateDisposers.get(fnName);
     if (stack && stack.length > 0) {
+      // The disposer removes this registration's own function, companion and
+      // context provider by identity, so nothing here touches a name the host
+      // app or another live owner may also hold.
       stack.pop()!();
       if (stack.length === 0) this.pageStateDisposers.delete(fnName);
-      if (!this.functionRegistry.has(readDataFunctionName(fnName))) {
-        this.pageDataCompanions.delete(readDataFunctionName(fnName));
-      }
       return;
     }
 
-    // Registered before this SDK tracked disposers, or already torn down.
-    this.unregisterFunction(fnName);
-    const companion = readDataFunctionName(fnName);
-    if (this.pageDataCompanions.delete(companion)) {
-      this.unregisterFunction(companion);
-    }
-    this.removeDynamicContext(`page-state:${fnName}`);
+    // Nothing this SDK registered under that name is still standing. Leave the
+    // registry alone: a function called `setPageState` or `readPageData` at this
+    // point belongs to the host app, not to us.
   }
 
   /**
@@ -2207,6 +2208,10 @@ export class AgoClient {
     this.eventEmitter.removeAllListeners();
     this.functionRegistry.clear();
     this.contextRegistry.clear();
+    // Both registries are now empty, so the page-state disposers point at
+    // entries that no longer exist. Dropping them keeps a revived client from
+    // popping a stale disposer over a fresh registration.
+    this.pageStateDisposers.clear();
     this.pendingResumes.clear();
     this.pendingApprovals.clear();
     this.resumeGate = null;

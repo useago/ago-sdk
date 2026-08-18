@@ -316,6 +316,55 @@ describe("registerPageStateFunction", () => {
       expect(client.getContextSnapshot()).toBeNull();
     });
 
+    // Regression: registering a page-state function WITHOUT a data source used
+    // to remove `readPageData` by name, which popped the companion belonging to
+    // a sibling that was still mounted (a modal over a page with page data).
+    it("registering without a data source leaves a live sibling's readPageData alone", () => {
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+
+      client.registerPageStateFunction([ctl("sort")], {
+        data: { description: "rows", get: () => [] },
+      });
+      // A second owner with no data source, mounted while the first is alive.
+      client.registerPageStateFunction([ctl("lactose")]);
+
+      expect(schemaOf(client, "readPageData")?.description).toContain("rows");
+    });
+
+    // Regression: `readPageData` is a name a host app can use for its own
+    // function. Cleanup must never remove it.
+    it("never removes a readPageData the host app registered itself", () => {
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+
+      client.registerFunction("readPageData", async () => ({ mine: true }), {
+        description: "host app's own reader",
+        parameters: { type: "object", properties: {} },
+      });
+
+      const dispose = client.registerPageStateFunction([ctl("sort")], {
+        data: { description: "rows", get: () => [] },
+      });
+      dispose();
+
+      // The SDK's companion is gone; the host's function is untouched.
+      expect(schemaOf(client, "readPageData")?.description).toBe(
+        "host app's own reader"
+      );
+
+      // And a later page-state registration without data must not touch it.
+      client.registerPageStateFunction([ctl("lactose")]);
+      expect(schemaOf(client, "readPageData")?.description).toBe(
+        "host app's own reader"
+      );
+
+      // Neither does the name-based teardown once our own stack is empty.
+      client.unregisterPageStateFunction();
+      client.unregisterPageStateFunction();
+      expect(schemaOf(client, "readPageData")?.description).toBe(
+        "host app's own reader"
+      );
+    });
+
     it("a disposer is idempotent and never pops another page's registration", () => {
       const client = new AgoClient({ baseUrl: "https://example.test" });
 
