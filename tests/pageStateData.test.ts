@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { AgoClient } from "../src/client/AgoClient";
 import type { FunctionRegistry } from "../src/functions/FunctionRegistry";
-import type { AgoStateControl } from "../src/functions/types";
+import type { AgoPageStateResult, AgoStateControl } from "../src/functions/types";
 
 // The synthesized function's handler isn't public API, so reach the registry
 // the same way the SSE loop does internally.
@@ -49,7 +49,7 @@ afterEach(() => {
 });
 
 describe("registerPageStateFunction without a data source", () => {
-  it("returns exactly { success, applied } — unchanged from before", async () => {
+  it("returns exactly the result without data — unchanged from before", async () => {
     const client = new AgoClient({ baseUrl: "https://example.test" });
     client.registerPageStateFunction([
       {
@@ -64,8 +64,8 @@ describe("registerPageStateFunction without a data source", () => {
       statusFilter: "pending",
     });
 
-    expect(Object.keys(result as object).sort()).toEqual(["applied", "success"]);
-    expect(result).toEqual({ success: true, applied: { statusFilter: "pending" } });
+    expect(Object.keys(result as object).sort()).toEqual(["applied", "success", "unchanged"]);
+    expect(result).toEqual({ success: true, applied: ["statusFilter"], unchanged: [] });
   });
 
   it("registers no readPageData companion and says nothing about data", () => {
@@ -106,7 +106,7 @@ describe("registerPageStateFunction with a data source", () => {
     expect(page.rows).toEqual(["old-row"]);
 
     await vi.advanceTimersByTimeAsync(1_000);
-    const result = (await pending) as { data: unknown };
+    const result = (await pending) as Required<AgoPageStateResult>;
 
     // Reading without waiting would hand back ["old-row"], which is worse than
     // returning nothing: the agent would report the previous search's results.
@@ -141,7 +141,8 @@ describe("registerPageStateFunction with a data source", () => {
 
     expect(await pending).toEqual({
       success: true,
-      applied: { query: "x" },
+      applied: ["query"],
+      unchanged: [],
       data: ["stuck-row"],
     });
   });
@@ -170,9 +171,9 @@ describe("registerPageStateFunction with a data source", () => {
     const result = (await execute(client, "setPageState", {
       query: "dupont",
       sort: undefined,
-    })) as { applied: Record<string, unknown> };
+    })) as AgoPageStateResult;
 
-    expect(result.applied).toEqual({ query: "dupont" });
+    expect(result.applied).toEqual(["query"]);
     expect(sortSet).not.toHaveBeenCalled();
   });
 
@@ -248,7 +249,7 @@ describe("registerPageStateFunction with a data source", () => {
     source = { get: () => ["fresh"], isLoading: () => false };
     await vi.advanceTimersByTimeAsync(1_000);
 
-    expect((await pending) as { data: unknown }).toMatchObject({
+    expect((await pending) as Required<AgoPageStateResult>).toMatchObject({
       data: ["fresh"],
     });
   });
@@ -290,7 +291,7 @@ describe("page data truncation", () => {
     bio: "x".repeat(80),
   }));
 
-  it("trims the rows but never success or applied", async () => {
+  it("trims the rows but never success or applied or unchanged", async () => {
     const client = new AgoClient({ baseUrl: "https://example.test" });
     client.registerPageStateFunction(
       [
@@ -312,10 +313,8 @@ describe("page data truncation", () => {
 
     const result = (await execute(client, "setPageState", {
       query: "dupont",
-    })) as {
-      success: boolean;
-      applied: Record<string, unknown>;
-      data: {
+    })) as Required<
+      AgoPageStateResult<{
         truncation: {
           truncated: boolean;
           returnedItems: number;
@@ -323,12 +322,13 @@ describe("page data truncation", () => {
           hint: string;
         };
         items: unknown[];
-      };
-    };
+      }>
+    >;
 
     // The confirmation that the filter was applied always survives.
     expect(result.success).toBe(true);
-    expect(result.applied).toEqual({ query: "dupont" });
+    expect(result.applied).toEqual(["query"]);
+    expect(result.unchanged).toEqual([]);
 
     expect(result.data.truncation.truncated).toBe(true);
     expect(result.data.truncation.totalItems).toBe(400);
@@ -363,8 +363,8 @@ describe("page data truncation", () => {
       }
     );
 
-    const result = (await execute(client, "setPageState", { query: "d" })) as {
-      data: {
+    const result = (await execute(client, "setPageState", { query: "d" })) as Required<
+      AgoPageStateResult<{
         totalResults: number;
         users: unknown[];
         truncation: {
@@ -372,8 +372,8 @@ describe("page data truncation", () => {
           returnedItems: number;
           totalItems: number;
         };
-      };
-    };
+      }>
+    >;
 
     expect(result.data.totalResults).toBe(400);
     expect(result.data.truncation.truncated).toBe(true);
@@ -403,14 +403,14 @@ describe("page data truncation", () => {
       }
     );
 
-    const result = (await execute(client, "setPageState", { query: "d" })) as {
-      data: {
+    const result = (await execute(client, "setPageState", { query: "d" })) as Required<
+      AgoPageStateResult<{
         totalItems: number;
         truncated: boolean;
         rows: unknown[];
         truncation: { returnedItems: number; totalItems: number };
-      };
-    };
+      }>
+    >;
 
     // The page says 4820 results exist server-side. Reporting 400 (the rows it
     // happened to load) would make the agent tell the user the wrong count.
@@ -441,15 +441,14 @@ describe("page data truncation", () => {
       }
     );
 
-    const result = (await execute(client, "setPageState", { query: "d" })) as {
-      success: boolean;
-      applied: Record<string, unknown>;
-      data: { truncated: boolean };
-    };
+    const result = (await execute(client, "setPageState", { query: "d" })) as Required<
+      AgoPageStateResult<{ truncated: boolean }>
+    >;
 
     // The whole point: the agent still learns the filter was applied.
     expect(result.success).toBe(true);
-    expect(result.applied).toEqual({ query: "d" });
+    expect(result.applied).toEqual(["query"]);
+    expect(result.unchanged).toEqual([]);
     expect(result.data.truncated).toBe(true);
     expect(new TextEncoder().encode(JSON.stringify(result)).length).toBeLessThanOrEqual(
       4_000
@@ -476,10 +475,9 @@ describe("page data truncation", () => {
       }
     );
 
-    const result = (await execute(client, "setPageState", { query: "d" })) as {
-      success: boolean;
-      data: { truncated: boolean; preview: string };
-    };
+    const result = (await execute(client, "setPageState", { query: "d" })) as Required<
+      AgoPageStateResult<{ truncated: boolean; preview: string }>
+    >;
 
     expect(result.success).toBe(true);
     expect(result.data.truncated).toBe(true);
@@ -508,7 +506,8 @@ describe("page data truncation", () => {
 
     expect(await execute(client, "setPageState", { query: "dupont" })).toEqual({
       success: true,
-      applied: { query: "dupont" },
+      applied: ["query"],
+      unchanged: [],
       data: rows,
     });
   });
@@ -628,5 +627,226 @@ describe("readPageData companion", () => {
 
     expect(client.getRegisteredFunctions()).toHaveLength(0);
     expect(client.getContextSnapshot()?.entries["page-state:setPageState"]).toBeUndefined();
+  });
+});
+
+describe("page data with verdicts", () => {
+  it("all-rejected call still returns the data snapshot", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    client.registerPageStateFunction(
+      [{ name: "limit", description: "Limit.", schema: { type: "number" }, set: () => {} }],
+      { data: { description: "Rows.", get: () => ["row-a"] } }
+    );
+
+    const result = (await execute(client, "setPageState", { limit: "bad" })) as AgoPageStateResult;
+
+    expect(result.success).toBe(false);
+    expect(result.rejected).toHaveProperty("limit");
+    expect(result).toHaveProperty("data", ["row-a"]);
+  });
+
+  it("all-unchanged call still returns the data snapshot", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    client.registerPageStateFunction(
+      [{ name: "status", description: "Status.", schema: { type: "string" }, get: () => "draft", set: () => {} }],
+      { data: { description: "Rows.", get: () => ["row-a"] } }
+    );
+
+    const result = (await execute(client, "setPageState", { status: "draft" })) as AgoPageStateResult;
+
+    expect(result.success).toBe(true);
+    expect(result.unchanged).toContain("status");
+    expect(result.applied).toHaveLength(0);
+    expect(result).toHaveProperty("data", ["row-a"]);
+  });
+
+  it("all-dropped call still returns the data snapshot", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    client.registerPageStateFunction(
+      [{ name: "q", description: "Query.", schema: { type: "string" }, set: () => {} }],
+      { data: { description: "Rows.", get: () => ["row-a"] } }
+    );
+
+    const result = (await execute(client, "setPageState", { q: null })) as AgoPageStateResult;
+
+    expect(result.success).toBe(true);
+    expect(result.applied).toHaveLength(0);
+    expect(result).toHaveProperty("data", ["row-a"]);
+  });
+
+  it("empty-payload call still returns the data snapshot", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    client.registerPageStateFunction(
+      [{ name: "q", description: "Query.", schema: { type: "string" }, set: () => {} }],
+      { data: { description: "Rows.", get: () => ["row-a"] } }
+    );
+
+    const result = (await execute(client, "setPageState", {})) as AgoPageStateResult;
+
+    expect(result.success).toBe(true);
+    expect(result).toHaveProperty("data", ["row-a"]);
+  });
+
+  it("long rejection with page data stays within budget and preserves verdict", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const longNames = Array.from({ length: 105 }, (_, i) => `option-${"x".repeat(20)}-${i}`);
+    const rows = [{ id: 1 }, { id: 2 }, { id: 3 }];
+    client.registerPageStateFunction(
+      [
+        { name: "choice", description: "Pick.", schema: { type: "string", enum: longNames }, set: () => {} },
+        { name: "query", description: "Search.", schema: { type: "string" }, set: () => {} },
+      ],
+      { data: { description: "Rows.", get: () => rows, maxResultBytes: 2_000 } }
+    );
+
+    const result = (await execute(client, "setPageState", {
+      choice: "nope",
+      query: "dupont",
+    })) as AgoPageStateResult;
+
+    expect(result).not.toHaveProperty("preview");
+    expect(result.success).toBe(false);
+    expect(result.applied).toContain("query");
+    expect(result.rejected).toHaveProperty("choice");
+    expect(result).toHaveProperty("data");
+    expect(new TextEncoder().encode(JSON.stringify(result)).length).toBeLessThanOrEqual(2_000);
+  });
+
+  it("truncation budgets against the full envelope including rejected and unchanged", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const bigRows = Array.from({ length: 400 }, (_, i) => ({
+      id: i,
+      name: `user-${i}`,
+      bio: "x".repeat(80),
+    }));
+    client.registerPageStateFunction(
+      [
+        { name: "query", description: "Search.", schema: { type: "string" }, set: () => {} },
+        { name: "status", description: "Status.", schema: { type: "string" }, get: () => "draft", set: () => {} },
+        { name: "limit", description: "Limit.", schema: { type: "number" }, set: () => {} },
+      ],
+      { data: { description: "Rows.", get: () => bigRows, maxResultBytes: 4_000 } }
+    );
+
+    const result = (await execute(client, "setPageState", {
+      query: "dupont",
+      status: "draft",
+      limit: "bad",
+    })) as AgoPageStateResult;
+
+    expect(result.success).toBe(false);
+    expect(result.applied).toContain("query");
+    expect(result.unchanged).toContain("status");
+    expect(result.rejected).toHaveProperty("limit");
+    expect(result).toHaveProperty("data");
+    expect(new TextEncoder().encode(JSON.stringify(result)).length).toBeLessThanOrEqual(4_000);
+  });
+});
+
+describe("no-data-source result size", () => {
+  it("leaves an envelope exactly at the byte ceiling untouched", async () => {
+    const reason = 'Exact é "reason".';
+    const expected = {
+      success: false,
+      applied: [],
+      unchanged: [],
+      rejected: { choice: reason },
+    };
+    const exactBytes = new TextEncoder().encode(JSON.stringify(expected)).length;
+    const client = new AgoClient({
+      baseUrl: "https://example.test",
+      maxFunctionResultBytes: exactBytes,
+    });
+    client.registerPageStateFunction([
+      {
+        name: "choice",
+        description: "Pick.",
+        schema: { type: "string" },
+        set: () => ({ result: "rejected", reason }),
+      },
+    ]);
+
+    expect(await execute(client, "setPageState", { choice: "x" })).toEqual(expected);
+  });
+
+  it("long rejection alternatives do not let the registry replace success and rejected", async () => {
+    const client = new AgoClient({
+      baseUrl: "https://example.test",
+      maxFunctionResultBytes: 2_000,
+    });
+    const longNames = Array.from({ length: 105 }, (_, i) => `option-${"x".repeat(20)}-${i}`);
+    client.registerPageStateFunction([
+      { name: "choice", description: "Pick.", schema: { type: "string", enum: longNames }, set: () => {} },
+    ]);
+
+    const result = (await execute(client, "setPageState", { choice: "nope" })) as AgoPageStateResult;
+
+    expect(result).not.toHaveProperty("truncated");
+    expect(result.success).toBe(false);
+    expect(result.rejected).toHaveProperty("choice");
+    expect(result.rejected?.choice).toContain('"nope" is not an allowed value.');
+    expect(result.rejected?.choice).toContain("[truncated]");
+    expect(new TextEncoder().encode(JSON.stringify(result)).length).toBeLessThanOrEqual(2_000);
+  });
+
+  it("keeps leading reasons and truncates later ones by their serialized byte cost", async () => {
+    const client = new AgoClient({
+      baseUrl: "https://example.test",
+      maxFunctionResultBytes: 300,
+    });
+    const firstReason = "The first rejection stays useful.";
+    const longReason = `Escaped: ${'"\\é'.repeat(500)}`;
+    client.registerPageStateFunction([
+      {
+        name: "first",
+        description: "First.",
+        schema: { type: "string" },
+        set: () => ({ result: "rejected", reason: firstReason }),
+      },
+      {
+        name: "second",
+        description: "Second.",
+        schema: { type: "string" },
+        set: () => ({ result: "rejected", reason: longReason }),
+      },
+      {
+        name: "third",
+        description: "Third.",
+        schema: { type: "string" },
+        set: () => ({ result: "rejected", reason: longReason }),
+      },
+    ]);
+
+    const result = (await execute(client, "setPageState", {
+      first: "x",
+      second: "x",
+      third: "x",
+    })) as AgoPageStateResult;
+
+    expect(result).not.toHaveProperty("truncated");
+    expect(result.rejected?.first).toBe(firstReason);
+    expect(result.rejected?.second).toContain("Escaped:");
+    expect(result.rejected?.second).toContain("[truncated]");
+    expect(result.rejected?.third).toBe(" … [truncated]");
+    expect(new TextEncoder().encode(JSON.stringify(result)).length).toBeLessThanOrEqual(300);
+  });
+
+  it("falls back to the registry preview when the verdict structure alone is too large", async () => {
+    const client = new AgoClient({
+      baseUrl: "https://example.test",
+      maxFunctionResultBytes: 200,
+    });
+    client.registerPageStateFunction([]);
+    const args = Object.fromEntries(
+      Array.from({ length: 10 }, (_, i) => [`unknown-${i}`, "x"])
+    );
+
+    const result = (await execute(client, "setPageState", args)) as {
+      truncated: boolean;
+      maxBytes: number;
+    };
+
+    expect(result.truncated).toBe(true);
+    expect(result.maxBytes).toBe(200);
   });
 });

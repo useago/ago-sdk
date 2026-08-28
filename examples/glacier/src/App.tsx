@@ -90,12 +90,9 @@ export default function App() {
   const location = useLocation();
   const client = useAgoClient();
 
-  // Dev panel: lists the registered functions, shows the live context snapshot,
-  // and logs every function the agent calls. Open the app with ?dev to enable it.
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).has('dev')) {
-      initDevPanel({ client });
-    }
+    if (!new URLSearchParams(window.location.search).has('dev')) return;
+    return initDevPanel({ client, enableFunctionRunner: true });
   }, [client]);
 
   const chatRef = useRef<ChatWidgetHandle>(null);

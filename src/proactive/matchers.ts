@@ -1,3 +1,4 @@
+import { deepEqual } from "../utils/deepEqual";
 import type { SignalsSnapshot } from "../signals/types";
 import type { ProactiveTriggerWhen } from "./types";
 
@@ -55,26 +56,6 @@ export function partialDeepMatch(expected: unknown, actual: unknown): boolean {
   return false;
 }
 
-function deepEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (a === null || b === null || typeof a !== typeof b) return false;
-  if (Array.isArray(a)) {
-    if (!Array.isArray(b) || a.length !== b.length) return false;
-    return a.every((item, i) => deepEqual(item, b[i]));
-  }
-  if (typeof a === "object") {
-    const aKeys = Object.keys(a as Record<string, unknown>);
-    const bKeys = Object.keys(b as Record<string, unknown>);
-    if (aKeys.length !== bKeys.length) return false;
-    return aKeys.every((key) =>
-      deepEqual(
-        (a as Record<string, unknown>)[key],
-        (b as Record<string, unknown>)[key]
-      )
-    );
-  }
-  return false;
-}
 
 /**
  * Evaluate a trigger's `when` clause against a signals snapshot. Pure

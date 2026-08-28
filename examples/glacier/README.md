@@ -28,7 +28,10 @@ backend's pause/resume support and an agent with `reasoning_iterations >= 2`.
 
 Open the app with `?dev` (e.g. `http://localhost:5173/?dev`) to mount the dev
 panel: it lists the registered functions, shows the live context snapshot, and
-logs every function the agent calls. See [`initDevPanel`](../../docs/general/devtools.md).
+logs every function the agent calls. With `?dev` the panel also includes a
+**local function runner** that executes registered functions directly via
+`client.executeClientFunction`, without contacting the agent backend. See
+[`initDevPanel`](../../docs/general/devtools.md).
 
 ## What to try
 
@@ -114,3 +117,41 @@ The boutique styling is a small design system, not page-by-page CSS:
 
 Components style themselves inline and only ever reference `var(--…)`, so
 re-skinning the whole shop means editing the `:root` block in `App.css`.
+
+## Local contract exercises
+
+Open `/?dev` and use the local function runner to exercise `setPageState` with
+raw JSON arguments. These calls run in the browser and do not contact the agent
+backend. Each row below shows the arguments, the expected SDK verdict, and the
+visible page effect.
+
+### `/parfums`
+
+| Arguments | Expected |
+| --- | --- |
+| `{ "search": "chocolat" }` | APPLY: search applied, visible list filtered. Page data includes `search: "chocolat"`. |
+| `{ "search": "chocolat" }` again | generic SKIP: value matches `get()`. |
+| `{ "search": "" }` | APPLY (clearable): search cleared, full list restored. |
+| `{ "search": "" }` again from empty | generic SKIP: already empty. |
+| `{ "dietaryFilter": "keto" }` | SDK enum REJECT: `keto` is not in the allowed values. Visible filter unchanged. |
+| `{ "sortBy": "" }` | DROP: empty string on a non-clearable control. No bucket, no state change. |
+| `{ "sortBy": "nom" }` (from initial state) | generic SKIP: value matches `get()`. |
+| `{ "view": "liste", "sortBy": "nom", "dietaryFilter": "keto", "mystery": null }` | APPLY `view` + SKIP `sortBy` + REJECT `dietaryFilter` (enum) + REJECT `mystery` (unknown control). No rollback of applied fields. |
+| `{ "priceSource": "marche" }` | APPLY plus settled market-price page data in the result. |
+
+### `/` (shop)
+
+| Arguments | Expected |
+| --- | --- |
+| `{ "scoops": ["pistachio", "banana"] }` | SDK item-enum REJECT: `banana` is not in the allowed values. Composition unchanged. |
+| `{ "scoops": ["pistachio", "chocolate"] }` twice | APPLY, then generic SKIP on the second call. |
+| `{ "scoops": ["chocolate", "pistachio"] }` after `["pistachio", "chocolate"]` | APPLY: array order is significant. |
+| `{ "scoops": ["vanilla", "chocolate", "pistachio", "strawberry", "lemon", "mango"] }` | Page-owned tagged REJECT: max 5 scoops. Prior composition preserved. |
+| `{ "toppings": [] }` twice after a non-empty selection | APPLY, then generic SKIP. |
+| `{ "toppings": ["cherry", "cherry"] }` when `cherry` is already selected | Page-owned semantic UNCHANGED: duplicates are normalized, and the normalized set matches `get()`. No store write. |
+| `{ "toppings": ["cherry", "cherry"] }` from empty | APPLY: normalized set `["cherry"]` differs from `[]`. |
+
+The `search` control on `/parfums` is `clearable`: sending `""` clears the
+search and restores the full list. Glacier's enum controls use explicit neutral
+values (`"all"`, `"nom"`) and its collections clear with `[]`, so `search` is
+the only field that needs the clearable flag.

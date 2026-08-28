@@ -148,7 +148,12 @@ function InvoiceList() {
 Each control becomes one optional property of a single `setPageState` function,
 so the agent changes only what the user asked for. The current value from each
 `get()` is sent with every message, so the agent knows the state before it
-changes it. Vue and Angular have the same helper.
+changes it. The SDK validates type and enum before calling `set()`, skips values
+that match the current `get()`, and drops placeholders (`null`, `undefined`,
+`""`). The result reports each field in `applied`, `unchanged`, or `rejected`.
+Vue and Angular have the same helper. See
+[Page state shortcut](docs/general/functions-and-context.md#page-state-shortcut)
+for `clearable`, tagged setter outcomes, and the full result envelope.
 
 Add a `data` source and the agent also gets back **what the page now shows**, as
 the result of its own call, so it can answer "did you find dupont?" in the same

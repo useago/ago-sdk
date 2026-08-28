@@ -207,7 +207,11 @@ private stopAutoContinue = this.ago.enableAutoContinueAfterNavigation();
 ```
 
 Register page state, the mirror of navigation (change the current page's state
-and read it back):
+and read it back). The SDK validates type and enum before calling `set()`, skips
+values equal to the current `get()`, drops placeholders, and reports each field
+in `applied`, `unchanged`, or `rejected`. See
+[Page state shortcut](../general/functions-and-context.md#page-state-shortcut)
+for the full contract:
 
 ```ts
 this.ago.registerPageStateFunction([

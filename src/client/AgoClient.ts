@@ -8,13 +8,14 @@ import type {
 } from "../forms/createFormCollector";
 import { FunctionRegistry } from "../functions/FunctionRegistry";
 import {
-  byteLength as pageDataByteLength,
   DEFAULT_SETTLE_TIMEOUT_MS,
   readWhenSettled,
   truncatePageData,
 } from "../functions/pageData";
+import { createPageStateFunction } from "../functions/pageState";
 import type {
   AgoPageDataSource,
+  AgoPageStateEnvelope,
   AgoPageStateOptions,
   AgoStateControl,
   ClientFunctionDefinition,
@@ -22,6 +23,7 @@ import type {
   ClientFunctionRegisterOptions,
   ClientFunctionSchema,
 } from "../functions/types";
+import { byteLength } from "../utils/jsonBytes";
 import { createAgoProactive } from "../proactive/createAgoProactive";
 import type { ProactiveController } from "../proactive/types";
 import { ClientContextRegistry } from "../state/ClientContextRegistry";
@@ -1584,63 +1586,30 @@ export class AgoClient {
     opts?: AgoPageStateOptions
   ): void {
     const fnName = opts?.functionName ?? "setPageState";
-    const byName = new Map(controls.map((c) => [c.name, c]));
     const dataSource = opts?.data;
 
-    const controlDescriptions = controls
-      .map((c) => `- "${c.name}": ${c.description}`)
-      .join("\n");
-
     this.registerFunction(
-      fnName,
-      async (args) => {
-        const applied: Record<string, unknown> = {};
-        for (const [key, value] of Object.entries(args)) {
-          if (value === undefined) continue;
-          const control = byName.get(key);
-          // Ignore unknown controls cleanly.
-          if (!control) continue;
-          await control.set(value);
-          applied[key] = value;
-        }
-        // No data source: the result stays byte-for-byte what it always was.
-        if (!dataSource) return { success: true, applied };
-        const data = await this.readPageData(fnName, dataSource, opts);
-        return {
-          success: true,
-          applied,
-          data: truncatePageData(
-            fnName,
-            data,
-            this.pageDataBudget(dataSource) -
-              this.envelopeBytes({ success: true, applied })
-          ),
-        };
-      },
-      {
-        description:
-          `Change the state of the current page. Set ONLY the controls the user explicitly asked for; leave the others unset. Available controls:\n${controlDescriptions}` +
-          (dataSource
-            ? `\nReturns the resulting page data once it has loaded: ${dataSource.description}`
-            : ""),
-        parameters: {
-          type: "object",
-          properties: Object.fromEntries(
-            controls.map((c) => [
-              c.name,
-              { ...c.schema, description: c.description },
-            ])
-          ),
-          // Explicitly empty, not omitted: an absent `required` can be read as
-          // "every property is required", forcing the agent to set all
-          // controls. The agent must set only what the user asked for.
-          required: [],
-        },
+      createPageStateFunction(controls, {
+        name: fnName,
         requiresApproval: opts?.requiresApproval,
-        // Only pin a ceiling when the page asked for one; otherwise the
-        // registry's live default applies, so `updateConfig` still moves it.
-        maxResultBytes: dataSource?.maxResultBytes,
-      }
+        getResultBudget: () =>
+          dataSource
+            ? this.pageDataBudget(dataSource)
+            : this.functionRegistry.getDefaultMaxResultBytes(),
+        data: dataSource
+          ? {
+              description: dataSource.description,
+              maxResultBytes: dataSource.maxResultBytes,
+              read: async (envelope) =>
+                truncatePageData(
+                  fnName,
+                  await this.readPageData(fnName, dataSource, opts),
+                  this.pageDataBudget(dataSource) -
+                    this.envelopeBytes(envelope)
+                ),
+            }
+          : undefined,
+      })
     );
 
     const companion = readDataFunctionName(fnName);
@@ -1715,8 +1684,8 @@ export class AgoClient {
   }
 
   /** Bytes the non-`data` part of the result costs, `data` included as `null`. */
-  private envelopeBytes(rest: Record<string, unknown>): number {
-    return pageDataByteLength(JSON.stringify({ ...rest, data: null })) - 4; // "null"
+  private envelopeBytes(rest: Partial<AgoPageStateEnvelope>): number {
+    return byteLength(JSON.stringify({ ...rest, data: null })) - 4; // "null"
   }
 
   /**

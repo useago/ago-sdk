@@ -180,7 +180,11 @@ useAgoPageState([
 </script>
 ```
 
-Pass `{ functionName }` to rename the synthesized function.
+Pass `{ functionName }` to rename the synthesized function. The SDK validates
+type and enum before calling `set()`, skips unchanged values, and drops
+placeholders. See
+[Page state shortcut](../general/functions-and-context.md#page-state-shortcut)
+for `clearable`, tagged setter outcomes, and the full result envelope.
 
 ---
 

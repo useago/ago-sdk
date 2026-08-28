@@ -130,7 +130,11 @@ ago.registerNavigationFunction((path) => (window.location.href = path), [
 
 Page state is the mirror: let the agent change the current page's state
 (filters, sort, view mode…) and read it back via each control's `get()`. One
-synthesized `setPageState` function, one optional property per control.
+synthesized `setPageState` function, one optional property per control. The SDK
+validates type and enum, skips unchanged values, drops placeholders, and reports
+each field in `applied`, `unchanged`, or `rejected`. See
+[Page state shortcut](../general/functions-and-context.md#page-state-shortcut)
+for `clearable`, tagged setter outcomes, and the full envelope.
 
 ```ts
 ago.registerPageStateFunction([

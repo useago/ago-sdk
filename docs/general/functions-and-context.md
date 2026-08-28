@@ -197,17 +197,77 @@ This does two things:
   current `get()` value, so the agent knows what to change. Controls without a
   `get()` are write-only and don't appear in context.
 
-By default it's fire-and-forget: the handler applies each `set()` locally and
-returns `{ success, applied }`. The new state reaches the agent through the
-context on the next message. React/Vue offer `useAgoPageState(controls, opts?)`
-with lifecycle cleanup; Angular exposes
-`agoService.registerPageStateFunction(...)`.
+By default, the handler validates each field, applies it via `set()`, and
+returns the result as an envelope:
+
+```jsonc
+{
+  "success": false,
+  "applied":   ["temperature"],   // field names that were changed
+  "unchanged": ["status"],        // fields already holding that value
+  "rejected":  { "model": "\"gpt-5\" is not an allowed value. Allowed values: ..." }
+}
+```
+
+`applied` and `unchanged` are always present (as arrays of field names).
+`rejected` is omitted when empty. `success` is `false` when any field is
+rejected, `true` otherwise. Placeholders (`null`, `undefined`, and `""` on
+non-clearable controls) are silently dropped and appear in no bucket.
+
+Before calling `set()`, the SDK validates the declared type and enum. Unknown
+control names are rejected with the list of available controls. A value that
+matches the current `get()` value is skipped without calling `set()` and
+reported as `unchanged`.
+
+React/Vue offer `useAgoPageState(controls, opts?)` with lifecycle cleanup;
+Angular exposes `agoService.registerPageStateFunction(...)`.
+
+#### Clearing a string field
+
+By default, `""` is treated as filler and dropped. To let the agent clear a
+string field, mark it `clearable`:
+
+```ts
+{
+  name: "searchQuery",
+  description: "Free-text search filter",
+  schema: { type: "string" },
+  clearable: true,
+  get: () => query,
+  set: (v) => setQuery(v as string),
+}
+```
+
+The SDK adds `Pass "" to clear it.` to the control's description for the agent,
+and on enum controls adds `""` to the allowed values. `clearable` only affects
+string controls; on other types it has no effect.
+
+#### Tagged setter outcomes
+
+A `set()` function can return a tagged result to reject a value or signal that
+the field is already in the requested state:
+
+```ts
+set: (v) => {
+  const match = availableModels.find((m) => m.name === v);
+  if (!match) return { result: "rejected", reason: `No model named "${v}".` };
+  if (match.id === currentModelId) return { result: "unchanged" };
+  setModelId(match.id);
+},
+```
+
+`{ result: "rejected", reason }` puts the field in `rejected` with the given
+reason. `{ result: "unchanged" }` puts it in `unchanged` without calling the
+React state setter. Returning nothing (void) means the value was applied. A
+thrown or rejected promise remains a function execution error; it is not
+converted into a per-field rejection.
 
 ### Return what the page displays
 
-`{ success, applied }` only tells the agent its own arguments were accepted. Ask
-it to "find the user dupont" and it applies the filter but cannot say who it
-found: the rows only reach it on the next message, as context.
+The envelope on its own tells the agent what happened to its arguments, not what
+appeared on screen. Ask it to "find the user dupont" and it applies the filter
+but cannot say who it found: the rows only reach it on the next message, as
+context.
 
 Add a `data` source and the rows come back as the result of the agent's own
 call, in the same turn:
@@ -227,7 +287,7 @@ useAgoPageState(controls, {
 });
 ```
 
-`setPageState` now returns `{ success, applied, data }`, and a second function
+`setPageState` now returns `{ success, applied, unchanged, rejected?, data }`, and a second function
 `readPageData` is registered: no parameters, changes nothing, returns `{ data }`.
 That one answers "what's on screen?" without touching the page. Both disappear
 when you unregister.
@@ -277,9 +337,9 @@ Two things to keep in mind:
   the SDK keeps the first whole items that fit and adds a `truncation` field
   (`{ truncated, returnedItems, totalItems, hint }`) next to them. The counts
   are nested rather than merged into your snapshot so they can never overwrite
-  a field of your own called `totalItems`. `success` and `applied` always
-  survive intact. Return the columns the agent needs, not your whole row
-  objects.
+  a field of your own called `totalItems`. The verdict fields (`success`,
+  `applied`, `unchanged`, `rejected`) always survive intact. Return the columns
+  the agent needs, not your whole row objects.
 - **Pause mode only.** The result travels back inside the turn only when
   `clientFunctionsMode` is `"pause"` (the default). In `"placeholder"` mode the
   turn is already over by then, so the agent will not see the data during the

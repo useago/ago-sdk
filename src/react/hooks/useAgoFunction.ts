@@ -192,9 +192,20 @@ export function useAgoPageState(
   const optsRef = useRef(opts);
   optsRef.current = opts;
 
+  // Re-register when model-visible fields change (e.g. an enum populated after
+  // an async load), but not on get/set closure churn.
+  const controlSignature = JSON.stringify(
+    controls.map((c) => ({
+      name: c.name,
+      description: c.description,
+      schema: c.schema,
+      clearable: c.clearable,
+    }))
+  );
+
   useEffect(() => {
-    // Stable wrappers: name/description/schema are read once (at register
-    // time), while get/set always resolve against the freshest controls.
+    // Stable wrappers: name/description/schema are read from the current
+    // render, while get/set always resolve against the freshest controls.
     const stableControls: AgoStateControl[] = controlsRef.current.map((c) => {
       const findLatest = () =>
         controlsRef.current.find((next) => next.name === c.name) ?? c;
@@ -202,6 +213,7 @@ export function useAgoPageState(
         name: c.name,
         description: c.description,
         schema: c.schema,
+        clearable: c.clearable,
         get: c.get ? () => findLatest().get?.() : undefined,
         set: (value) => findLatest().set(value),
       };
@@ -238,5 +250,6 @@ export function useAgoPageState(
     dataDescription,
     dataMaxResultBytes,
     settleTimeoutMs,
+    controlSignature,
   ]);
 }

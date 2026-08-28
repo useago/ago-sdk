@@ -53,18 +53,25 @@ function priceOf(
   return flavor.pricePerScoop;
 }
 
+function normalize(text: string): string {
+  return text.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
 export default function FlavorsPage() {
   const [dietaryFilter, setDietaryFilter] = useState<DietaryFilter>('all');
   const [sortBy, setSortBy] = useState<SortBy>('nom');
   const [view, setView] = useState<ViewMode>('grille');
   const [priceSource, setPriceSource] = useState<PriceSource>('maison');
+  const [search, setSearch] = useState('');
 
   // Le cours du jour n'est chargé que si on l'affiche. `isFetching` couvre
   // chaque rechargement, pas seulement le premier.
   const { prices, isFetching, error, ensure } = useMarketPrices(priceSource === 'marche');
 
+  const needle = normalize(search);
   const flavors = Object.values(FLAVORS)
     .filter((f) => matchesDiet(f.allergens, dietaryFilter))
+    .filter((f) => !needle || normalize(f.name).includes(needle))
     .map((f) => ({ ...f, marketPrice: marketPriceOf(f.id, prices) }))
     .sort((a, b) =>
       sortBy === 'prix'
@@ -77,9 +84,17 @@ export default function FlavorsPage() {
   useAgoPageState(
     [
       {
+        name: 'search',
+        description: 'Recherche textuelle sur le nom des parfums.',
+        schema: { type: 'string' },
+        clearable: true,
+        get: () => search,
+        set: (v) => setSearch(String(v)),
+      },
+      {
         name: 'dietaryFilter',
         description:
-          'Filtre les parfums par régime alimentaire. "all" = tous ; "sans-lactose", "sans-fruits-a-coque", "sans-gluten" = masque les parfums contenant l’allergène correspondant.',
+          'Filtre les parfums par régime alimentaire. "all" = tous ; "sans-lactose", "sans-fruits-a-coque", "sans-gluten" = masque les parfums contenant l\'allergène correspondant.',
         schema: { type: 'string', enum: ['all', 'sans-lactose', 'sans-fruits-a-coque', 'sans-gluten'] },
         get: () => dietaryFilter,
         set: (v) => setDietaryFilter(v as DietaryFilter),
@@ -93,7 +108,7 @@ export default function FlavorsPage() {
       },
       {
         name: 'view',
-        description: 'Mode d’affichage : "grille" (cartes) ou "liste" (compact).',
+        description: 'Mode d\'affichage : "grille" (cartes) ou "liste" (compact).',
         schema: { type: 'string', enum: ['grille', 'liste'] },
         get: () => view,
         set: (v) => setView(v as ViewMode),
@@ -113,19 +128,22 @@ export default function FlavorsPage() {
       // demanderait deux tours : un pour changer la source, un pour lire les prix.
       data: {
         description:
-          'Les parfums actuellement affichés, dans l’ordre affiché, avec le prix maison et (si la source est "marche") le cours du jour en euros.',
+          'Les parfums actuellement affichés, dans l\'ordre affiché, avec le prix maison et (si la source est "marche") le cours du jour en euros.',
         // `get` retourne une PROMESSE : le SDK l'attend, donc il sait
         // exactement quand le travail déclenché par le changement est fini. Pas
         // de sondage, pas d'hypothèse de timing. `ensure()` partage la requête
         // déjà en vol pour l'UI, donc un seul appel réseau.
         get: async () => {
           const live = priceSource === 'marche' ? await ensure() : null;
+          const q = normalize(search);
           return {
+            search: search || null,
             priceSource,
             dietaryFilter,
             sortBy,
             parfums: Object.values(FLAVORS)
               .filter((f) => matchesDiet(f.allergens, dietaryFilter))
+              .filter((f) => !q || normalize(f.name).includes(q))
               .map((f) => ({
                 id: f.id,
                 nom: f.name,
@@ -154,6 +172,49 @@ export default function FlavorsPage() {
         lede="Dix créations à la carte — crèmes glacées et sorbets plein fruit. Filtrez selon votre régime."
       />
 
+      {/* Search */}
+      <div style={{ position: 'relative', maxWidth: '320px', margin: '40px 0 16px' }}>
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Rechercher un parfum…"
+          style={{
+            width: '100%',
+            boxSizing: 'border-box',
+            fontFamily: 'var(--font-body)',
+            fontSize: '14px',
+            padding: '10px 36px 10px 14px',
+            border: '1px solid var(--border-strong)',
+            borderRadius: 'var(--r-md)',
+            background: 'var(--surface)',
+            color: 'var(--text-body)',
+          }}
+        />
+        {search && (
+          <button
+            type="button"
+            onClick={() => setSearch('')}
+            aria-label="Effacer la recherche"
+            style={{
+              position: 'absolute',
+              right: '8px',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: '16px',
+              color: 'var(--text-muted)',
+              lineHeight: 1,
+              padding: '4px',
+            }}
+          >
+            &times;
+          </button>
+        )}
+      </div>
+
       {/* Filter bar */}
       <div
         style={{
@@ -162,7 +223,7 @@ export default function FlavorsPage() {
           justifyContent: 'space-between',
           flexWrap: 'wrap',
           gap: '16px',
-          margin: '40px 0 24px',
+          marginBottom: '24px',
           paddingBottom: '20px',
           borderBottom: '1px solid var(--border-hairline)',
         }}
@@ -231,6 +292,7 @@ export default function FlavorsPage() {
         }}
       >
         {flavors.length} parfum{flavors.length > 1 ? 's' : ''}
+        {search && <Badge>recherche : {search}</Badge>}
         {dietaryFilter !== 'all' && <Badge tone="safe">{FILTER_LABELS[dietaryFilter].toLowerCase()}</Badge>}
         {priceSource === 'marche' && isFetching && <Badge>cours du jour…</Badge>}
         {priceSource === 'marche' && !isFetching && !error && <Badge tone="safe">cours du jour</Badge>}

@@ -1,5 +1,5 @@
 import { defineFunction } from '@useago/sdk';
-import type { AgoStateControl } from '@useago/sdk';
+import type { AgoStateControl, AgoStateSetResult } from '@useago/sdk';
 import { CONES, type ConeType, FLAVORS, FLAVOR_IDS, TOPPINGS, TOPPING_IDS } from './flavors';
 import {
   fetchMarketPrices,
@@ -64,10 +64,15 @@ export function buildIceCreamControls(store: OrderStore): AgoStateControl[] {
       description: `The scoops on the ice cream currently being composed, listed bottom-to-top. Set the full list. Available flavors: ${FLAVOR_IDS.join(', ')}. Max ${MAX_SCOOPS} scoops.`,
       schema: { type: 'array', items: { type: 'string', enum: FLAVOR_IDS } },
       get: () => store.get().current.scoops,
-      set: (value) => {
+      set: (value): AgoStateSetResult | void => {
         const ids = Array.isArray(value) ? value.map(String) : [];
-        const cleaned = ids.filter((f) => FLAVORS[f]).slice(0, MAX_SCOOPS);
-        store.setCurrent({ ...store.get().current, scoops: cleaned });
+        if (ids.length > MAX_SCOOPS) {
+          return {
+            result: 'rejected',
+            reason: `Une glace peut contenir au maximum ${MAX_SCOOPS} boules. Choisissez au plus ${MAX_SCOOPS} parfums.`,
+          };
+        }
+        store.setCurrent({ ...store.get().current, scoops: [...ids] });
       },
     },
     {
@@ -75,10 +80,17 @@ export function buildIceCreamControls(store: OrderStore): AgoStateControl[] {
       description: `The toppings on the ice cream currently being composed. Set the full list. Available: ${TOPPING_IDS.join(', ')}.`,
       schema: { type: 'array', items: { type: 'string', enum: TOPPING_IDS } },
       get: () => store.get().current.toppings,
-      set: (value) => {
+      set: (value): AgoStateSetResult | void => {
         const ids = Array.isArray(value) ? value.map(String) : [];
-        const cleaned = Array.from(new Set(ids.filter((t) => TOPPINGS[t])));
-        store.setCurrent({ ...store.get().current, toppings: cleaned });
+        const normalized = Array.from(new Set(ids.filter((t) => TOPPINGS[t])));
+        const current = store.get().current.toppings;
+        if (
+          normalized.length === current.length &&
+          normalized.every((v, i) => v === current[i])
+        ) {
+          return { result: 'unchanged' };
+        }
+        store.setCurrent({ ...store.get().current, toppings: normalized });
       },
     },
   ];

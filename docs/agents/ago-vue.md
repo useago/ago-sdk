@@ -160,7 +160,13 @@ explain the page to a colleague.
 The mirror of navigation. Let the agent change the current page's state
 (filters, sort, view mode…) and read it back. Each control becomes one optional
 property of a single synthesized `setPageState` function, and every control's
-`get()` value is sent as context.
+`get()` value is sent as context. The SDK validates type and enum before calling
+`set()`, skips values equal to the current `get()`, and drops placeholders
+(`null`, `undefined`, `""`). The result reports each field in `applied`,
+`unchanged`, or `rejected`. Mark a string control `clearable: true` to let `""`
+clear it instead of being dropped. A `set()` that returns
+`{ result: "rejected", reason }` or `{ result: "unchanged" }` feeds the same
+envelope.
 
 ```vue
 <script setup lang="ts">

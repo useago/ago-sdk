@@ -5,6 +5,45 @@ All notable changes to `@useago/sdk` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-08-28
+
+### Changed
+
+- **`setPageState` result shape.** `applied` is now an array of field names
+  (was a value map). The result also includes `unchanged: string[]` (always
+  present) and `rejected?: Record<string, string>` (present when any field was
+  refused). `success` is `false` when `rejected` is non-empty, `true` otherwise.
+
+### Added
+
+- **Per-field validation.** `setPageState` validates each field's type and enum
+  against the declared schema before calling `set()`. Unknown control names are
+  rejected with the list of available controls. A value equal to the current
+  `get()` is skipped without calling `set()`.
+- **Placeholder dropping.** `null`, `undefined`, and `""` are silently dropped
+  instead of being applied. They appear in no result bucket.
+- **`clearable` option on string controls.** When set, `""` means "clear the
+  field" and is applied instead of dropped. The SDK adds `""` to the enum (if
+  one exists) and appends a clearing hint to the description.
+- **Tagged setter outcomes.** `set()` can return `{ result: "rejected", reason }`
+  to refuse a value, or `{ result: "unchanged" }` to signal the field already
+  holds the requested state. Returning nothing (void) means applied.
+- **Result budget preservation.** When the result exceeds `maxResultBytes`, the
+  SDK preserves `success`, `applied`, `unchanged`, and `rejected` keys before
+  truncating `data`. Without a data source, oversized rejection reasons are
+  shortened in order rather than replaced wholesale.
+- **React `useAgoPageState` re-registration.** The hook re-registers when a
+  control's model-visible signature changes (name, description, schema,
+  `clearable`), so an enum populated by an async fetch updates the advertised
+  schema and runtime validation.
+- **Dev panel local function runner.** `initDevPanel({ enableFunctionRunner: true })`
+  adds a runner that executes registered functions locally via
+  `executeClientFunction`. The function list tracks route changes and the
+  diagnostic sections are collapsible.
+- **Dev panel disposal.** `initDevPanel` now returns an idempotent disposer that
+  removes its panels and unsubscribes all event handlers. Return it from a React
+  effect to keep one connected panel under Strict Mode.
+
 ## [1.8.0] - 2026-08-11
 
 ### Added

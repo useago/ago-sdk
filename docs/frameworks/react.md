@@ -540,16 +540,26 @@ function InvoiceList() {
 Each control becomes one optional property of a single synthesized
 `setPageState` function, so the agent sets only what the user asked for. Every
 control's current `get()` value is sent as context, so the agent knows the
-state before it changes it. Pass `{ functionName }` to rename the function, and
-it re-registers only when the client or that name changes (`set`/`get` closures
-can change every render without churn). The glacier example dogfoods this: the
-ice cream's cone, scoops and toppings are page-state controls.
+state before it changes it. Pass `{ functionName }` to rename the function.
+The hook re-registers when the client, function name, or a control's
+model-visible signature changes (name, description, schema, `clearable`).
+`set`/`get` closures can change every render without churn. The glacier
+example dogfoods this: the ice cream's cone, scoops and toppings are
+page-state controls.
+
+The SDK validates each field before calling `set()`: type and enum mismatches
+are rejected, unknown control names are rejected, and a value equal to the
+current `get()` is skipped. `null`, `undefined`, and `""` are silently dropped
+(unless the control is a `clearable` string). The result envelope reports each
+field in `applied`, `unchanged`, or `rejected`. See
+[Page state shortcut](../general/functions-and-context.md#page-state-shortcut)
+for the full envelope shape, `clearable`, and tagged setter outcomes.
 
 #### Give the agent back what the page shows
 
-On its own, `setPageState` returns `{ success, applied }`: the agent learns its
-arguments were accepted, not what appeared. Add a `data` source and the rows come
-back as the result of its own call, in the same turn.
+On its own, `setPageState` tells the agent what happened to its arguments, not
+what appeared on screen. Add a `data` source and the rows come back as the result
+of its own call, in the same turn.
 
 ```tsx
 const { data: invoices, isFetching } = useQuery({
@@ -566,7 +576,7 @@ useAgoPageState(controls, {
 });
 ```
 
-`setPageState` then returns `{ success, applied, data }`, and a read-only
+`setPageState` then returns `{ success, applied, unchanged, rejected?, data }`, and a read-only
 `readPageData` function is registered alongside it for "what's on screen?"
 questions.
 
@@ -588,7 +598,8 @@ Note the poll only gives the flag ~100 ms to go up, so a debounced fetch needs
 the promise form. Over the size ceiling
 (`maxResultBytes`, default 50 000 bytes) the snapshot keeps the first whole rows
 that fit and adds a `truncation` field (`{ truncated, returnedItems, totalItems,
-hint }`) beside them. `success` and `applied` are never dropped. The round trip needs `clientFunctionsMode: "pause"`
+hint }`) beside them. The verdict fields (`success`, `applied`, `unchanged`,
+`rejected`) are never dropped. The round trip needs `clientFunctionsMode: "pause"`
 (the default). See
 [functions and context](../general/functions-and-context.md#return-what-the-page-displays).
 
