@@ -47,10 +47,41 @@ export interface AgoStateControl<T = unknown> {
     enum?: (string | number)[];
     items?: { type: string; enum?: (string | number)[] };
   };
+  /** String-only: `""` means "clear" instead of being dropped as filler. */
+  clearable?: boolean;
   /** Current value → pushed as dynamic context so the agent knows what to change. */
   get?: () => T;
   /** Apply the state change on the page. May be async. */
-  set: (value: T) => void | Promise<void>;
+  set: (
+    value: T
+  ) => void | AgoStateSetResult | Promise<void | AgoStateSetResult>;
+}
+
+/**
+ * Tagged outcome a page setter may return to reject or mark unchanged.
+ *
+ * Returning nothing (void) means APPLY. Returning an unrecognized JS value
+ * (e.g. a string from an assignment expression) is also treated as APPLY.
+ */
+export type AgoStateSetResult =
+  | { result: "rejected"; reason: string }
+  | { result: "unchanged" };
+
+/** The verdict part of a setPageState answer, without the page snapshot. */
+export interface AgoPageStateEnvelope {
+  success: boolean;
+  applied: string[];
+  unchanged: string[];
+  rejected?: Record<string, string>;
+}
+
+/**
+ * What `setPageState` answers the agent. Every non-dropped field the agent sent
+ * is accounted for by name, so it can tell a change it made from one that was
+ * already true. Dropped placeholders are intentionally omitted.
+ */
+export interface AgoPageStateResult<TData = unknown> extends AgoPageStateEnvelope {
+  data?: TData;
 }
 
 /**

@@ -46,6 +46,32 @@ appends one line per raw stream message (a leading tag plus the verbatim JSON) a
 collapses independently of the main panel. Each panel's collapsed/expanded state is
 remembered in `localStorage`.
 
+### Cleanup
+
+`initDevPanel` returns an idempotent disposer that removes its panels and
+unsubscribes all event handlers. In a React effect, return it directly so
+Strict Mode's simulated unmount/remount leaves exactly one connected panel:
+
+```tsx
+useEffect(() => {
+  if (!new URLSearchParams(location.search).has("dev")) return;
+  return initDevPanel({ client, enableFunctionRunner: true });
+}, [client]);
+```
+
+Without the disposer, Strict Mode's first-mount cleanup destroys the
+internally-created client (clearing its listeners), so the panel stays in the
+DOM but stops receiving events. The second mount creates a new panel on the
+live client while the disconnected ghost remains visible.
+
+Calling the disposer outside React works the same way:
+
+```ts
+const dispose = initDevPanel({ client });
+// later:
+dispose(); // removes panels, unsubscribes events
+```
+
 ### Reading the JSON pane
 
 The pane renders the **whole** dynamic context, not just one form: every entry the
@@ -80,23 +106,57 @@ interface DevPanelOptions {
    * and renders its live context snapshot, including every installed form
    * collector's state.
    */
-  client: Pick<AgoClient, "on" | "getRegisteredFunctions" | "getContextSnapshot">;
+  client: Pick<AgoClient, "on" | "off" | "getRegisteredFunctions" | "getContextSnapshot"> & {
+    executeClientFunction?: AgoClient["executeClientFunction"];
+  };
   /** Where to mount: a CSS selector, an Element, or document.body (default). */
   target?: string | Element;
   /** Which edge to pin to: "right" (default) or "left". Panels on the same side stack beside each other. */
   side?: "left" | "right";
   /** Caption shown in the header. Use it to tell panels apart when a page has several. */
   label?: string;
+  /** Mount a local function runner (see below). Requires executeClientFunction on the client. */
+  enableFunctionRunner?: boolean;
 }
 ```
 
 `client` is typed structurally, so a mock client from `@useago/sdk/testing`
-works too.
+works too. `executeClientFunction` is only required when `enableFunctionRunner`
+is `true`; omit it for the default panel.
 
 ```ts
 // Mount inside a specific container instead of document.body
 initDevPanel({ client, target: "#debug-slot" });
 ```
+
+---
+
+## Local function runner
+
+Pass `enableFunctionRunner: true` to add a runner section to the panel. It
+executes registered client functions locally via `client.executeClientFunction`
+and displays the result. Calls stay in the browser; nothing is submitted to the
+agent backend.
+
+```ts
+if (DEV) initDevPanel({ client, enableFunctionRunner: true });
+```
+
+The runner shows a dropdown of registered functions, the selected function's
+JSON Schema, a textarea for arguments (initialized to `{}`), and a Run button.
+After execution it displays the result JSON, the UTF-8 byte count, and any
+error. The function list refreshes on `context:changed`, `function:invoke`,
+`function:result`, runner completion, and an explicit Refresh button, so it
+tracks route changes when the page registers different functions per route
+(e.g. different `setPageState` controls).
+
+Parse and shape errors (non-object, non-JSON) are shown without calling the
+function. The Run button disables while the call is pending to prevent double
+submission.
+
+The "JSON object" and "Function calls" diagnostic sections are independently
+collapsible. The panel body scrolls within the viewport so the runner stays
+reachable on smaller screens.
 
 ---
 

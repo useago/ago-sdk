@@ -4,15 +4,12 @@ import { createRoot } from "react-dom/client";
 import { AgoClient } from "../src/client/AgoClient";
 import { AgoProvider } from "../src/react/context/AgoContext";
 import { useAgoPageState } from "../src/react/hooks/useAgoFunction";
-import type { FunctionRegistry } from "../src/functions/FunctionRegistry";
 
 // React's act() requires this flag outside of @testing-library.
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 function execute(client: AgoClient, name: string, args: Record<string, unknown>) {
-  const registry = (client as unknown as { functionRegistry: FunctionRegistry })
-    .functionRegistry;
-  return registry.execute(name, args);
+  return client.executeClientFunction(name, args);
 }
 
 async function mount(client: AgoClient, Component: React.FC) {
@@ -137,7 +134,8 @@ describe("useAgoPageState", () => {
     expect(container.textContent).toBe("row-for-dupont");
     expect(result).toEqual({
       success: true,
-      applied: { query: "dupont" },
+      applied: ["query"],
+      unchanged: [],
       data: ["row-for-dupont"],
     });
     // The stale-closure rows would have been ["row-initial"].
@@ -153,6 +151,92 @@ describe("useAgoPageState", () => {
       root.unmount();
     });
     expect(client.getRegisteredFunctions()).toHaveLength(0);
+  });
+
+  it("forwards clearable through to the synthesised schema and handler", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    let stored = "hello";
+
+    function Harness() {
+      useAgoPageState([
+        {
+          name: "greeting",
+          description: "A greeting",
+          schema: { type: "string", enum: ["hello", "hi"] },
+          clearable: true,
+          get: () => stored,
+          set: (v) => { stored = v as string; },
+        },
+      ]);
+      return <span>ok</span>;
+    }
+
+    const { root } = await mount(client, Harness);
+
+    // The advertised schema should include "" in the enum and the clear hint.
+    const fn = client.getRegisteredFunctions().find((f) => f.name === "setPageState")!;
+    const prop = fn.parameters.properties["greeting"];
+    expect(prop.enum).toContain("");
+    expect(prop.description).toContain('Pass "" to clear it.');
+
+    // Sending "" should APPLY (not DROP).
+    const result = await execute(client, "setPageState", { greeting: "" });
+    expect(result).toEqual({
+      success: true,
+      applied: ["greeting"],
+      unchanged: [],
+    });
+    expect(stored).toBe("");
+
+    await act(async () => { root.unmount(); });
+  });
+
+  it("re-registers when a control's enum is populated after mount", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const registerSpy = vi.spyOn(client, "registerPageStateFunction");
+    let stored = "";
+    let triggerRerender!: () => void;
+
+    function Harness() {
+      const [models, setModels] = React.useState<string[]>([]);
+      triggerRerender = () => setModels(["gpt-4", "claude-3"]);
+      useAgoPageState([
+        {
+          name: "model",
+          description: "The model",
+          schema: { type: "string", enum: models },
+          get: () => stored,
+          set: (v) => { stored = v as string; },
+        },
+      ]);
+      return <span>{models.join(",")}</span>;
+    }
+
+    const { root, container } = await mount(client, Harness);
+    expect(registerSpy).toHaveBeenCalledTimes(1);
+
+    // At mount the enum is empty, so any value should be rejected.
+    const fn0 = client.getRegisteredFunctions().find((f) => f.name === "setPageState")!;
+    expect(fn0.parameters.properties["model"].enum).toEqual([]);
+
+    const r0 = await execute(client, "setPageState", { model: "gpt-4" });
+    expect(r0).toMatchObject({ success: false, rejected: { model: expect.stringContaining("not an allowed value") } });
+
+    // Simulate async load completing — enum populated.
+    await act(async () => { triggerRerender(); });
+    expect(container.textContent).toBe("gpt-4,claude-3");
+
+    // The hook should have re-registered with the new enum.
+    expect(registerSpy.mock.calls.length).toBeGreaterThan(1);
+    const fn1 = client.getRegisteredFunctions().find((f) => f.name === "setPageState")!;
+    expect(fn1.parameters.properties["model"].enum).toEqual(["gpt-4", "claude-3"]);
+
+    // Now the value should be accepted.
+    const r1 = await execute(client, "setPageState", { model: "gpt-4" });
+    expect(r1).toMatchObject({ success: true, applied: ["model"] });
+    expect(stored).toBe("gpt-4");
+
+    await act(async () => { root.unmount(); });
   });
 
   it("honours a custom functionName", async () => {

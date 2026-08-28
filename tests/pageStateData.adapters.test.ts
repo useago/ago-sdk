@@ -57,7 +57,8 @@ describe("useAgoPageState (Vue)", () => {
 
     expect(await execute(client, "setPageState", { query: "dupont" })).toEqual({
       success: true,
-      applied: { query: "dupont" },
+      applied: ["query"],
+      unchanged: [],
       data: ["row-for-dupont"],
     });
 
@@ -123,7 +124,8 @@ describe("AgoService.registerPageStateFunction (Angular)", () => {
 
     expect(await execute(client, "setPageState", { query: "dupont" })).toEqual({
       success: true,
-      applied: { query: "dupont" },
+      applied: ["query"],
+      unchanged: [],
       data: ["row-for-dupont"],
     });
 

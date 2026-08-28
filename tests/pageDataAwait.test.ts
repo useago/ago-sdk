@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { AgoClient } from "../src/client/AgoClient";
 import { readWhenSettled } from "../src/functions/pageData";
 import type { FunctionRegistry } from "../src/functions/FunctionRegistry";
+import type { AgoPageStateResult } from "../src/functions/types";
 
 function execute(client: AgoClient, name: string, args: Record<string, unknown>) {
   const registry = (client as unknown as { functionRegistry: FunctionRegistry })
@@ -161,7 +162,8 @@ describe("setPageState with an async data source", () => {
 
     expect(await pending).toEqual({
       success: true,
-      applied: { query: "dupont" },
+      applied: ["query"],
+      unchanged: [],
       data: ["resultat-pour-dupont"],
     });
   });
@@ -188,15 +190,14 @@ describe("setPageState with an async data source", () => {
 
     const pending = execute(client, "setPageState", { query: "dupont" });
     await vi.advanceTimersByTimeAsync(1_000);
-    const result = (await pending) as {
-      success: boolean;
-      applied: Record<string, unknown>;
-      data: { error: string; message: string };
-    };
+    const result = (await pending) as Required<
+      AgoPageStateResult<{ error: string; message: string }>
+    >;
 
     // The filter WAS applied; say so, and say the read failed.
     expect(result.success).toBe(true);
-    expect(result.applied).toEqual({ query: "dupont" });
+    expect(result.applied).toEqual(["query"]);
+    expect(result.unchanged).toEqual([]);
     expect(result.data.error).toBe("page_data_unavailable");
     expect(result.data.message).toContain("HTTP 503");
   });

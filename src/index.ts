@@ -79,8 +79,11 @@ export { defineFunction } from "./functions/defineFunction";
 export { FunctionRegistry } from "./functions/FunctionRegistry";
 export type {
   AgoPageDataSource,
+  AgoPageStateEnvelope,
   AgoPageStateOptions,
+  AgoPageStateResult,
   AgoStateControl,
+  AgoStateSetResult,
   ClientFunctionDefinition,
   ClientFunctionHandler,
   ClientFunctionRegisterOptions,

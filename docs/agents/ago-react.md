@@ -249,9 +249,15 @@ useAgoPageState(controls, {
 });
 ```
 
-`setPageState` then returns `{ success, applied, data }` and a read-only
-`readPageData` function is registered too. The SDK waits for `isLoading` to go
-false before reading, and truncates a long list by whole rows. Needs
+`setPageState` then returns `{ success, applied, unchanged, rejected?, data }`
+and a read-only `readPageData` function is registered too. The SDK validates
+each field before calling `set()`: type/enum mismatches and unknown controls are
+rejected, values equal to the current `get()` are skipped (`unchanged`), and
+placeholders (`null`, `undefined`, `""`) are silently dropped. A `set()` that
+returns `{ result: "rejected", reason }` or `{ result: "unchanged" }` feeds the
+same envelope. Mark a string control `clearable: true` to let `""` clear it
+instead of being dropped. The SDK waits for `isLoading` to go false before
+reading, and truncates a long list by whole rows. Needs
 `clientFunctionsMode: "pause"` (the default).
 
 ## 6. Give the agent context: `useAgoContext`

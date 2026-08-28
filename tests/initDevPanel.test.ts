@@ -207,13 +207,16 @@ describe("initDevPanel", () => {
   });
 
   it("collapses the SSE events panel independently of the main panel", () => {
-    localStorage.setItem("ago_dev_events_collapsed", "1");
-
     initDevPanel({ client: createMockClient() });
 
-    // The events panel restores its own collapsed state; the main panel stays open.
-    expect(document.getElementById("ago-dev-events")?.classList.contains("collapsed")).toBe(true);
-    expect(document.getElementById("ago-dev-panel")?.classList.contains("collapsed")).toBe(false);
+    const eventsPanel = document.getElementById("ago-dev-events")!;
+    const mainPanel = document.getElementById("ago-dev-panel")!;
+
+    // Collapse the SSE panel via its toggle button.
+    eventsPanel.querySelector<HTMLButtonElement>(".dev-toggle")!.click();
+
+    expect(eventsPanel.classList.contains("collapsed")).toBe(true);
+    expect(mainPanel.classList.contains("collapsed")).toBe(false);
   });
 
   it("mounts into a target given as a CSS selector", () => {
@@ -327,5 +330,164 @@ describe("initDevPanel", () => {
     const panels = document.querySelectorAll<HTMLElement>("aside.ago-dev-card");
     expect(panels[0].style.left).toBe("16px"); // first left panel
     expect(panels[2].style.left).toBe("392px"); // second left panel shifts over
+  });
+
+  describe("disposal", () => {
+    it("returns a disposer that removes both panels", () => {
+      const dispose = initDevPanel({ client: createMockClient() });
+
+      expect(document.querySelectorAll(".ago-dev-card")).toHaveLength(2);
+
+      dispose();
+
+      expect(document.querySelectorAll(".ago-dev-card")).toHaveLength(0);
+    });
+
+    it("is idempotent", () => {
+      const dispose = initDevPanel({ client: createMockClient() });
+      dispose();
+      dispose();
+
+      expect(document.querySelectorAll(".ago-dev-card")).toHaveLength(0);
+    });
+
+    it("stops SSE events from updating the disposed panel", () => {
+      const client = createMockClient();
+      const dispose = initDevPanel({ client });
+
+      const eventLog = document.querySelector("#ago-dev-event-log");
+      client.__emitEvent("stream:message", { content: "before" });
+      expect(eventLog?.querySelectorAll(".dev-log-line")).toHaveLength(1);
+
+      dispose();
+
+      client.__emitEvent("stream:message", { content: "after" });
+      expect(eventLog?.querySelectorAll(".dev-log-line")).toHaveLength(1);
+    });
+
+    it("stops function events from updating the disposed panel", () => {
+      const client = createMockClient();
+      const dispose = initDevPanel({ client });
+
+      client.__emitEvent("function:invoke", {
+        invocationId: "inv-1",
+        functionName: "doThing",
+        arguments: {},
+        conversationId: "c1",
+      });
+      const logEl = document.querySelector("#ago-dev-log");
+      expect(logEl?.querySelectorAll(".dev-log-line")).toHaveLength(1);
+
+      dispose();
+
+      client.__emitEvent("function:result", {
+        invocationId: "inv-1",
+        result: { ok: true },
+      });
+      expect(logEl?.querySelectorAll(".dev-log-line")).toHaveLength(1);
+    });
+
+    it("stops context:changed from updating the disposed panel", () => {
+      let val = "a";
+      const client = createMockClient({
+        overrides: {
+          getContextSnapshot: () => ({ entries: { x: { name: "x", data: { val } } } }),
+        },
+      });
+      const dispose = initDevPanel({ client });
+      const stateEl = document.querySelector(".dev-state")!;
+
+      expect(stateEl.textContent).toContain('"val": "a"');
+
+      dispose();
+
+      val = "b";
+      client.__emitEvent("context:changed", {});
+      expect(stateEl.textContent).toContain('"val": "a"');
+    });
+
+    it("stops conversation:loaded from updating the disposed panel", () => {
+      const client = createMockClient();
+      const dispose = initDevPanel({ client });
+      const logEl = document.querySelector("#ago-dev-log");
+
+      dispose();
+
+      client.__emitEvent("conversation:loaded", {
+        id: "c1",
+        title: "Test",
+        lastMessageDate: new Date(),
+        messages: [],
+      });
+      expect(logEl?.querySelectorAll(".dev-log-line")).toHaveLength(0);
+    });
+
+    it("disposing one panel does not affect another", () => {
+      const clientA = createMockClient();
+      const clientB = createMockClient();
+      const disposeA = initDevPanel({ client: clientA, label: "A" });
+      initDevPanel({ client: clientB, label: "B" });
+
+      expect(document.querySelectorAll(".ago-dev-card")).toHaveLength(4);
+
+      disposeA();
+
+      expect(document.querySelectorAll(".ago-dev-card")).toHaveLength(2);
+      const remaining = document.querySelector(".dev-title");
+      expect(remaining?.textContent).toContain("B");
+    });
+
+    it("a later panel can still use the shared stylesheet after disposal", () => {
+      const dispose = initDevPanel({ client: createMockClient() });
+      dispose();
+
+      initDevPanel({ client: createMockClient() });
+
+      expect(document.getElementById("ago-dev-panel-styles")).not.toBeNull();
+      expect(document.querySelectorAll(".ago-dev-card")).toHaveLength(2);
+    });
+
+    it("stops function:invoke from updating the disposed panel", () => {
+      const client = createMockClient();
+      const dispose = initDevPanel({ client });
+      const logEl = document.querySelector("#ago-dev-log");
+
+      dispose();
+
+      client.__emitEvent("function:invoke", {
+        invocationId: "inv-1",
+        functionName: "doThing",
+        arguments: {},
+        conversationId: "c1",
+      });
+      expect(logEl?.querySelectorAll(".dev-log-line")).toHaveLength(0);
+    });
+
+    it("tolerates panels removed externally before disposal", () => {
+      const client = createMockClient();
+      const dispose = initDevPanel({ client });
+
+      document.getElementById("ago-dev-panel")!.remove();
+      document.getElementById("ago-dev-events")!.remove();
+
+      expect(() => dispose()).not.toThrow();
+      expect(document.querySelectorAll(".ago-dev-card")).toHaveLength(0);
+    });
+
+    it("two panels sharing one client: disposing one leaves the other receiving events", () => {
+      const client = createMockClient();
+      const disposeA = initDevPanel({ client, label: "A" });
+      initDevPanel({ client, label: "B" });
+
+      disposeA();
+
+      client.__emitEvent("stream:message", { content: "after-dispose" });
+
+      const cards = document.querySelectorAll<HTMLElement>(".ago-dev-card");
+      expect(cards).toHaveLength(2);
+      const sseLog = cards[1].querySelector(".dev-log");
+      expect(sseLog?.querySelectorAll(".dev-log-line")).toHaveLength(1);
+      expect(sseLog?.textContent).toContain("after-dispose");
+    });
   });
 });

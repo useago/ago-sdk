@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { AgoClient } from "../src/client/AgoClient";
 import { AgoProvider } from "../src/react/context/AgoContext";
 import { useAgoPageState } from "../src/react/hooks/useAgoFunction";
-import type { FunctionRegistry } from "../src/functions/FunctionRegistry";
+import type { AgoPageStateResult } from "../src/functions/types";
 // The real modules the glacier example ships, not a re-creation of them.
 import {
   marketPriceOf,
@@ -16,9 +16,7 @@ import { FLAVORS } from "../examples/glacier/src/flavors";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 function execute(client: AgoClient, name: string, args: Record<string, unknown>) {
-  const registry = (client as unknown as { functionRegistry: FunctionRegistry })
-    .functionRegistry;
-  return registry.execute(name, args);
+  return client.executeClientFunction(name, args);
 }
 
 /** The payload the live endpoint actually serves, trimmed to what we map. */
@@ -122,18 +120,17 @@ describe("glacier: switching to live market prices", () => {
     await act(async () => {
       pending = execute(client, "setPageState", { priceSource: "marche" });
     });
-    const result = (await pending) as {
-      success: boolean;
-      applied: Record<string, unknown>;
-      data: {
+    const result = (await pending) as Required<
+      AgoPageStateResult<{
         priceSource: string;
         parfums: { id: string; coursDuJourEuros: number | null }[];
-      };
-    };
+      }>
+    >;
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(result.success).toBe(true);
-    expect(result.applied).toEqual({ priceSource: "marche" });
+    expect(result.applied).toEqual(["priceSource"]);
+    expect(result.unchanged).toEqual([]);
     expect(result.data.priceSource).toBe("marche");
 
     const byId = Object.fromEntries(

@@ -1,5 +1,6 @@
 import type { AgoClient } from "../client/AgoClient";
-import type { SSEChunkData } from "../client/types";
+import { AgoError } from "../client/errors";
+import type { AgoClientEvents, SSEChunkData } from "../client/types";
 
 /** Options for {@link initDevPanel}. */
 export interface DevPanelOptions {
@@ -10,8 +11,10 @@ export interface DevPanelOptions {
    */
   client: Pick<
     AgoClient,
-    "on" | "getRegisteredFunctions" | "getContextSnapshot"
-  >;
+    "on" | "off" | "getRegisteredFunctions" | "getContextSnapshot"
+  > & {
+    executeClientFunction?: AgoClient["executeClientFunction"];
+  };
   /** Where to mount: a CSS selector, an Element, or `document.body` (default). */
   target?: string | Element;
   /**
@@ -25,6 +28,12 @@ export interface DevPanelOptions {
    * page (one per widget): pass e.g. the agent or widget name to tell them apart.
    */
   label?: string;
+  /**
+   * Mount a local function runner in the panel. The runner executes registered
+   * client functions locally via `client.executeClientFunction` and displays
+   * the result. It never submits to the backend. Developer-only.
+   */
+  enableFunctionRunner?: boolean;
 }
 
 // Append one timestamped line to a log pane (the function-call log or the SSE
@@ -106,15 +115,23 @@ function wireCollapse(
   setCollapsed(panel, startCollapsed, storageKey, label);
 }
 
-export function initDevPanel(options: DevPanelOptions): void {
-  const { client, target, label, side = "right" } = options;
+let nextPanelId = 0;
 
-  // Count the panels already mounted by reading the DOM (not a module-level
-  // counter), so initDevPanel keeps no shared state: two widgets on one page each
-  // get an independent panel instead of clobbering each other.
-  const mounted = document.querySelectorAll("#ago-dev-panel").length;
-  // Unique collapse-key suffix per panel; the first/only panel keeps the bare keys.
-  const suffix = mounted === 0 ? "" : `-${mounted + 1}`;
+export function initDevPanel(options: DevPanelOptions): () => void {
+  const { client, target, label, side = "right", enableFunctionRunner = false } = options;
+
+  if (enableFunctionRunner && typeof client.executeClientFunction !== "function") {
+    throw new AgoError(
+      "initDevPanel: enableFunctionRunner requires client.executeClientFunction. " +
+      "Pass a real AgoClient, not a mock that omits it.",
+      "dev_panel_missing_capability",
+    );
+  }
+
+  let disposed = false;
+
+  const panelId = nextPanelId++;
+  const suffix = panelId === 0 ? "" : `-${panelId + 1}`;
   // How many panels already pin to this side, so a second one on the same side
   // shifts over (card width 360 + 16 gap) instead of stacking on top of it.
   const sideIndex = document.querySelectorAll(
@@ -139,12 +156,14 @@ export function initDevPanel(options: DevPanelOptions): void {
   };
   // Re-render the JSON pane. Painted on init and after each function event.
   const renderState = (): void => {
+    if (disposed) return;
     if (stateEl) stateEl.textContent = JSON.stringify(getState(), null, 2);
   };
   const logLine = (
     text: string,
     kind: "invoke" | "result" | "error" | "hydrate",
   ): void => {
+    if (disposed) return;
     appendLine(logEl, text, kind);
   };
 
@@ -174,9 +193,6 @@ export function initDevPanel(options: DevPanelOptions): void {
   place(panel);
   (host ?? document.body).appendChild(panel);
 
-  const registered = client.getRegisteredFunctions?.() ?? [];
-  const fnNames = registered.map((f) => f.name).join(", ") || "—";
-
   // A label (e.g. the agent/widget name) replaces the default caption so two
   // panels on one page are tellable apart.
   const mainTitle = label
@@ -190,11 +206,15 @@ export function initDevPanel(options: DevPanelOptions): void {
       <button type="button" class="dev-toggle" aria-label="Toggle dev tools">—</button>
     </div>
     <div class="dev-body">
-      <div class="dev-fns">Registered functions: <code>${fnNames}</code></div>
-      <div class="dev-section-label">JSON object (built by the agent)</div>
-      <pre class="dev-state" id="ago-dev-state"></pre>
-      <div class="dev-section-label">Function calls</div>
-      <div class="dev-log" id="ago-dev-log"></div>
+      <div class="dev-fns">Registered functions: <code></code></div>
+      <details class="dev-details" open>
+        <summary class="dev-section-label">JSON object (built by the agent)</summary>
+        <pre class="dev-state" id="ago-dev-state"></pre>
+      </details>
+      <details class="dev-details" open>
+        <summary class="dev-section-label">Function calls</summary>
+        <div class="dev-log" id="ago-dev-log"></div>
+      </details>
     </div>
   `;
 
@@ -202,6 +222,59 @@ export function initDevPanel(options: DevPanelOptions): void {
   // id query could resolve to the wrong panel. Each class is unique within a panel.
   stateEl = panel.querySelector<HTMLElement>(".dev-state");
   logEl = panel.querySelector<HTMLElement>(".dev-log");
+  const fnsCodeEl = panel.querySelector<HTMLElement>(".dev-fns code");
+
+  // Runner DOM refs (created later if enabled).
+  let runnerSelectEl: HTMLSelectElement | null = null;
+  let runnerSchemaEl: HTMLElement | null = null;
+
+  // Re-read registered functions, update the summary line, the runner selector,
+  // and the displayed schema. Called on init and after events that change the
+  // function set (navigation, registration lifecycle, local runner calls).
+  let lastSelectedFn = "";
+  const renderFunctions = (): void => {
+    if (disposed) return;
+    const fns = client.getRegisteredFunctions?.() ?? [];
+    const names = fns.map((f) => f.name);
+    if (fnsCodeEl) fnsCodeEl.textContent = names.join(", ") || "—";
+
+    if (!runnerSelectEl) return;
+
+    // Preserve selection when the function still exists, otherwise pick
+    // setPageState, then the first function, then nothing.
+    let selected = lastSelectedFn;
+    if (!names.includes(selected)) {
+      selected = names.includes("setPageState")
+        ? "setPageState"
+        : names[0] ?? "";
+    }
+    lastSelectedFn = selected;
+
+    // Rebuild options.
+    runnerSelectEl.innerHTML = "";
+    if (names.length === 0) {
+      const opt = document.createElement("option");
+      opt.textContent = "(no functions registered)";
+      opt.disabled = true;
+      runnerSelectEl.appendChild(opt);
+    }
+    for (const name of names) {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      opt.selected = name === selected;
+      runnerSelectEl.appendChild(opt);
+    }
+
+    // Update displayed schema.
+    if (runnerSchemaEl) {
+      const fn = fns.find((f) => f.name === selected);
+      runnerSchemaEl.textContent = fn
+        ? JSON.stringify(fn.parameters ?? {}, null, 2)
+        : "";
+    }
+  };
+
   wireCollapse(panel, COLLAPSE_KEY + suffix, "dev tools");
 
   // Separate panel for the raw SSE stream: it's high-volume, so keeping it out of
@@ -227,49 +300,220 @@ export function initDevPanel(options: DevPanelOptions): void {
   eventLogEl = eventsPanel.querySelector<HTMLElement>(".dev-log");
   wireCollapse(eventsPanel, EVENTS_COLLAPSE_KEY + suffix, "SSE event log");
 
-  // Log every raw SSE message as it arrives off the stream, so the exact wire
-  // payload behind each higher-level event is traceable.
-  client.on("stream:message", (data) => {
+  // Named handlers so they can be removed with client.off on disposal.
+  function onStreamMessage(data: SSEChunkData): void {
+    if (disposed) return;
     appendLine(eventLogEl, describeChunk(data), "event");
-  });
+  }
 
-  client.on("function:invoke", ({ functionName, arguments: args }) => {
+  function onFunctionInvoke({ functionName, arguments: args }: AgoClientEvents["function:invoke"]): void {
+    if (disposed) return;
     logLine(`→ ${functionName}(${JSON.stringify(args ?? {})})`, "invoke");
-  });
-  client.on("function:result", ({ result, error }) => {
+    renderFunctions();
+  }
+
+  function onFunctionResult({ result, error }: AgoClientEvents["function:result"]): void {
+    if (disposed) return;
     logLine(
       error ? `✗ error: ${error}` : `← ${JSON.stringify(result)}`,
       error ? "error" : "result",
     );
-    // A function may mutate any dynamic provider's data as a side effect.
     renderState();
-  });
-  // Repaint whenever the context changes: a form collector installing (its initial
-  // missing fields), hydration on conversation reload, agent update_<form> calls, or
-  // any other context registration. Covers the start of a conversation, before any
-  // function has run.
-  client.on("context:changed", renderState);
-  // A loaded conversation replays its persisted tool calls into stateful helpers
-  // (e.g. form collectors), restoring their stores after a page reload. Log it so the
-  // restored state in the JSON pane is traceable to a hydration, not a live call.
-  client.on("conversation:loaded", (conversation) => {
+    renderFunctions();
+  }
+
+  function onContextChanged(): void {
+    if (disposed) return;
+    renderState();
+    renderFunctions();
+  }
+
+  function onConversationLoaded(conversation: AgoClientEvents["conversation:loaded"]): void {
+    if (disposed) return;
     const toolCalls = (conversation.messages ?? []).flatMap(
       (m) => m.toolCalls ?? [],
     );
-    const label = conversation.title || conversation.id;
+    const convLabel = conversation.title || conversation.id;
     logLine(
-      `⟳ hydrated "${label}" — replayed ${toolCalls.length} tool call${
+      `⟳ hydrated "${convLabel}" — replayed ${toolCalls.length} tool call${
         toolCalls.length === 1 ? "" : "s"
       }`,
       "hydrate",
     );
-    // Helpers mutate their stores synchronously during replay; repaint to be sure
-    // the snapshot reflects the post-hydration state even if no context:changed fired.
     renderState();
-  });
+  }
 
-  // Paint the initial context snapshot.
+  client.on("stream:message", onStreamMessage);
+  client.on("function:invoke", onFunctionInvoke);
+  client.on("function:result", onFunctionResult);
+  client.on("context:changed", onContextChanged);
+  client.on("conversation:loaded", onConversationLoaded);
+
+  // --- Optional local function runner ---
+  if (enableFunctionRunner) {
+    const runner = document.createElement("div");
+    runner.className = "dev-runner";
+
+    const heading = document.createElement("div");
+    heading.className = "dev-section-label";
+    heading.textContent = "LOCAL FUNCTION RUNNER";
+    runner.appendChild(heading);
+
+    const warning = document.createElement("div");
+    warning.className = "dev-runner-warning";
+    warning.textContent = "Executes locally. Does not contact the agent backend.";
+    runner.appendChild(warning);
+
+    // Function selector row.
+    const selectorRow = document.createElement("div");
+    selectorRow.className = "dev-runner-row";
+    const select = document.createElement("select");
+    select.className = "dev-runner-select";
+    selectorRow.appendChild(select);
+    const refreshBtn = document.createElement("button");
+    refreshBtn.type = "button";
+    refreshBtn.className = "dev-runner-btn dev-runner-btn-sm";
+    refreshBtn.textContent = "Refresh";
+    refreshBtn.addEventListener("click", renderFunctions);
+    selectorRow.appendChild(refreshBtn);
+    runner.appendChild(selectorRow);
+
+    runnerSelectEl = select;
+
+    // Schema display.
+    const schemaLabel = document.createElement("div");
+    schemaLabel.className = "dev-section-label";
+    schemaLabel.textContent = "SCHEMA";
+    runner.appendChild(schemaLabel);
+    const schemaPre = document.createElement("pre");
+    schemaPre.className = "dev-runner-schema";
+    runner.appendChild(schemaPre);
+    runnerSchemaEl = schemaPre;
+
+    select.addEventListener("change", () => {
+      lastSelectedFn = select.value;
+      renderFunctions();
+    });
+
+    // Arguments textarea.
+    const argsLabel = document.createElement("div");
+    argsLabel.className = "dev-section-label";
+    argsLabel.textContent = "ARGUMENTS (JSON)";
+    runner.appendChild(argsLabel);
+    const textarea = document.createElement("textarea");
+    textarea.className = "dev-runner-args";
+    textarea.value = "{}";
+    textarea.spellcheck = false;
+    runner.appendChild(textarea);
+
+    // Run button.
+    const runBtn = document.createElement("button");
+    runBtn.type = "button";
+    runBtn.className = "dev-runner-btn";
+    runBtn.textContent = "Run";
+    runner.appendChild(runBtn);
+
+    // Result area.
+    const statusEl = document.createElement("div");
+    statusEl.className = "dev-runner-status";
+    runner.appendChild(statusEl);
+    const resultPre = document.createElement("pre");
+    resultPre.className = "dev-runner-result";
+    runner.appendChild(resultPre);
+    const bytesEl = document.createElement("div");
+    bytesEl.className = "dev-runner-bytes";
+    runner.appendChild(bytesEl);
+
+    const exec = client.executeClientFunction!.bind(client);
+
+    runBtn.addEventListener("click", async () => {
+      statusEl.textContent = "";
+      resultPre.textContent = "";
+      bytesEl.textContent = "";
+
+      let args: Record<string, unknown>;
+      try {
+        const parsed: unknown = JSON.parse(textarea.value);
+        if (
+          parsed === null ||
+          Array.isArray(parsed) ||
+          typeof parsed !== "object"
+        ) {
+          statusEl.textContent = "Error: arguments must be a JSON object.";
+          statusEl.className = "dev-runner-status dev-runner-error";
+          return;
+        }
+        args = parsed as Record<string, unknown>;
+      } catch (e) {
+        statusEl.textContent = `Parse error: ${e instanceof Error ? e.message : String(e)}`;
+        statusEl.className = "dev-runner-status dev-runner-error";
+        return;
+      }
+
+      const fnName = select.value;
+      if (!fnName) return;
+
+      runBtn.disabled = true;
+      statusEl.textContent = "Running…";
+      statusEl.className = "dev-runner-status";
+
+      let result: unknown;
+      let execOk = false;
+      try {
+        result = await exec(fnName, args);
+        execOk = true;
+      } catch (err) {
+        if (disposed) return;
+        statusEl.textContent = "Execution error";
+        statusEl.className = "dev-runner-status dev-runner-error";
+        resultPre.textContent = err instanceof Error
+          ? `${err.constructor.name}: ${err.message}`
+          : String(err);
+      }
+
+      if (disposed) return;
+
+      if (execOk) {
+        statusEl.textContent = "OK";
+        statusEl.className = "dev-runner-status dev-runner-ok";
+        if (result === undefined) {
+          resultPre.textContent = "(undefined)";
+        } else {
+          try {
+            resultPre.textContent = JSON.stringify(result, null, 2);
+            const bytes = new TextEncoder().encode(JSON.stringify(result)).length;
+            bytesEl.textContent = `${bytes} bytes (UTF-8)`;
+          } catch {
+            resultPre.textContent = "(result not serializable)";
+          }
+        }
+      }
+
+      runBtn.disabled = false;
+      renderState();
+      renderFunctions();
+    });
+
+    panel.querySelector(".dev-body")!.appendChild(runner);
+  }
+
+  // Paint the initial state.
+  renderFunctions();
   renderState();
+
+  return () => {
+    if (disposed) return;
+    disposed = true;
+
+    client.off("stream:message", onStreamMessage);
+    client.off("function:invoke", onFunctionInvoke);
+    client.off("function:result", onFunctionResult);
+    client.off("context:changed", onContextChanged);
+    client.off("conversation:loaded", onConversationLoaded);
+
+    panel.remove();
+    eventsPanel.remove();
+  };
 }
 
 const STYLE_ID = "ago-dev-panel-styles";
@@ -324,7 +568,7 @@ const PANEL_CSS = `
   cursor: pointer;
 }
 .ago-dev-card .dev-toggle:hover { color: #d7e0e8; border-color: #3a4655; }
-.ago-dev-card .dev-body { display: flex; flex-direction: column; gap: 8px; }
+.ago-dev-card .dev-body { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow-y: auto; }
 
 /* Collapsed: shrink to a small clickable widget showing only the badge. */
 .ago-dev-card.collapsed {
@@ -347,6 +591,11 @@ const PANEL_CSS = `
 .ago-dev-card .dev-title { color: #f59e0b; font-size: 11px; line-height: 1.3; }
 .ago-dev-card .dev-fns { color: #7c8a99; font-size: 11px; }
 .ago-dev-card .dev-fns code { color: #9ecbff; }
+.ago-dev-card .dev-details { margin: 0; }
+.ago-dev-card .dev-details > summary { list-style: none; cursor: pointer; }
+.ago-dev-card .dev-details > summary::-webkit-details-marker { display: none; }
+.ago-dev-card .dev-details > summary::before { content: "▸ "; }
+.ago-dev-card .dev-details[open] > summary::before { content: "▾ "; }
 .ago-dev-card .dev-section-label {
   color: #7c8a99;
   text-transform: uppercase;
@@ -382,4 +631,44 @@ const PANEL_CSS = `
 .ago-dev-card .dev-log-error { color: #fca5a5; }
 .ago-dev-card .dev-log-hydrate { color: #d8b4fe; }
 .ago-dev-card .dev-log-event { color: #7c8a99; }
+/* Function runner */
+.ago-dev-card .dev-runner { border-top: 1px solid #2a3441; padding-top: 8px; margin-top: 4px; }
+.ago-dev-card .dev-runner-warning { color: #f59e0b; font-size: 10px; margin-bottom: 4px; }
+.ago-dev-card .dev-runner-row { display: flex; gap: 6px; align-items: center; }
+.ago-dev-card .dev-runner-select {
+  flex: 1;
+  background: #060a0e; color: #d7e0e8; border: 1px solid #2a3441;
+  border-radius: 6px; padding: 4px 6px; font: inherit; font-size: 11px;
+}
+.ago-dev-card .dev-runner-btn {
+  background: #1a2633; color: #9ecbff; border: 1px solid #2a3441;
+  border-radius: 6px; padding: 4px 10px; font: inherit; font-size: 11px;
+  cursor: pointer;
+}
+.ago-dev-card .dev-runner-btn:hover { background: #243040; }
+.ago-dev-card .dev-runner-btn:disabled { opacity: .5; cursor: default; }
+.ago-dev-card .dev-runner-btn-sm { padding: 4px 8px; }
+.ago-dev-card .dev-runner-schema {
+  margin: 0; padding: 6px 8px; background: #060a0e;
+  border-radius: 6px; overflow: auto; max-height: 16vh;
+  white-space: pre; color: #7c8a99; font-size: 11px;
+}
+.ago-dev-card .dev-runner-args {
+  width: 100%; box-sizing: border-box; min-height: 48px; max-height: 20vh;
+  resize: vertical; background: #060a0e; color: #d7e0e8;
+  border: 1px solid #2a3441; border-radius: 6px; padding: 6px 8px;
+  font: inherit; font-size: 11px;
+}
+.ago-dev-card .dev-runner-status { font-size: 11px; margin-top: 4px; }
+.ago-dev-card .dev-runner-ok { color: #86efac; }
+.ago-dev-card .dev-runner-error { color: #fca5a5; }
+.ago-dev-card .dev-runner-result {
+  margin: 0; padding: 6px 8px; background: #060a0e;
+  border-radius: 6px; overflow: auto; max-height: 24vh;
+  white-space: pre-wrap; word-break: break-word;
+  color: #c8e6c9; font-size: 11px;
+}
+.ago-dev-card .dev-runner-result:empty { display: none; }
+.ago-dev-card .dev-runner-bytes { color: #7c8a99; font-size: 10px; margin-top: 2px; }
+.ago-dev-card .dev-runner-bytes:empty { display: none; }
 `;

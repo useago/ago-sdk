@@ -232,7 +232,10 @@ prompt override) and the pause vs placeholder mechanics are described in
 Register page state, the mirror of navigation: let the agent change the current
 page's state (filters, sort, view mode…) and read it back. Each control becomes
 one optional property of a single synthesized `setPageState` function, and every
-control's `get()` value is sent as context.
+control's `get()` value is sent as context. The SDK validates type and enum,
+skips unchanged values, and drops placeholders. See
+[Page state shortcut](../general/functions-and-context.md#page-state-shortcut)
+for `clearable`, tagged setter outcomes, and the full result envelope.
 
 ```ts
 this.ago.registerPageStateFunction([

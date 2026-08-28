@@ -1,4 +1,8 @@
 import { logger } from "../utils/logger";
+import {
+  byteLength,
+  sliceJsonStringToBytes,
+} from "../utils/jsonBytes";
 import type { AgoPageDataSource } from "./types";
 
 /** Gap between two settle checks, in ms. */
@@ -9,13 +13,6 @@ const SETTLE_STABLE_TICKS = 2;
 export const DEFAULT_SETTLE_TIMEOUT_MS = 10_000;
 /** Upper bound on the preview a non-list snapshot keeps when it overflows. */
 const PREVIEW_CHARS = 2_000;
-
-const encoder = new TextEncoder();
-
-/** Serialized size of a JSON string, the unit every budget here is measured in. */
-export function byteLength(json: string): number {
-  return encoder.encode(json).length;
-}
 
 function safeStringify(value: unknown): string | undefined {
   try {
@@ -150,27 +147,6 @@ function countItemsThatFit(items: unknown[], budget: number): number {
   return count;
 }
 
-/**
- * Longest prefix of `text` that costs at most `maxBytes` bytes *once embedded
- * in JSON*. A preview of raw JSON is mostly quotes, and each one doubles under
- * escaping, so measuring the bare string would undercount by up to 2x.
- */
-function sliceToBytes(text: string, maxBytes: number): string {
-  if (maxBytes <= 0) return "";
-  const cost = (s: string) => byteLength(JSON.stringify(s)) - 2; // minus quotes
-  let out = text.slice(0, maxBytes); // chars ≤ bytes, so this is a safe start
-  let bytes = cost(out);
-  // Shrink proportionally until it fits (converges in a couple of passes).
-  while (bytes > maxBytes && out.length > 0) {
-    out = out.slice(
-      0,
-      Math.max(0, Math.floor((out.length * maxBytes) / bytes) - 1)
-    );
-    bytes = cost(out);
-  }
-  return out;
-}
-
 function hintFor(fnName: string): string {
   return (
     `The page data returned by "${fnName}" was too large to send in full. ` +
@@ -198,7 +174,10 @@ function previewOf(
   const overhead = byteLength(safeStringify(shell) ?? "{}");
   return {
     ...shell,
-    preview: sliceToBytes(json, Math.min(PREVIEW_CHARS, budget - overhead)),
+    preview: sliceJsonStringToBytes(
+      json,
+      Math.min(PREVIEW_CHARS, budget - overhead)
+    ),
   };
 }
 
