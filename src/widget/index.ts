@@ -5,16 +5,31 @@ export type { AgoWidgetColors, AgoWidgetConfig } from "./types";
 export { mountChatWidget } from "./createChatWidget";
 export type {
   ChatWidgetHandle,
+  ConversationStarter,
   MountChatWidgetOptions,
   WelcomeMessage,
   WidgetFeedbackOptions,
+  WidgetLabels,
+  WidgetScreen,
   WidgetTheme,
+  WidgetToolCallFormOptions,
 } from "./types";
 
 // The feedback row's strings, so `feedback: { labels }` can be typed (and the
 // defaults reused) without reaching into the widget internals.
 export { DEFAULT_FEEDBACK_LABELS } from "./renderFeedback";
 export type { FeedbackLabels } from "./renderFeedback";
+
+// The bubble widget's chrome strings and the ticket form's strings, for the
+// same reason.
+export { DEFAULT_WIDGET_LABELS } from "./labels";
+export { DEFAULT_TOOL_CALL_FORM_LABELS } from "./toolCallLabels";
+export type { ToolCallFormLabels } from "./toolCallLabels";
+
+// The embed snippet's color mapping and the header contrast rule, so a host
+// can preview what `colors` will produce.
+export { colorsToTheme } from "./styles";
+export { readableTextColor } from "./colorUtils";
 
 // Dependency-free markdown → DOM renderer used for message content; exported so
 // consumers building a custom vanilla UI can render assistant content the same way.

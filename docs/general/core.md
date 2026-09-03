@@ -367,6 +367,20 @@ await ago.submitToolCallForm(toolCallId, { quantity: 3 });
 await ago.confirmToolCall(toolCallId);
 await ago.rejectToolCall(toolCallId);
 
+// The ticket form behind the agent's `ago_ticketing` tool: its fields come from
+// the tenant config, the ticket is created, then the tool call is completed.
+// The vanilla widget does all three for you (see widget.md, "Ticket form").
+const { permissions } = await ago.getConfig();
+const ticketForm = permissions[0]?.ticketForm;
+const ticket = await ago.createTicket({
+  subject: "Login broken",
+  body: "I cannot log in since this morning.",
+  conversationId,
+  customFields: [{ id: "product", value: "app" }],
+  ticketFormId: ticketForm?.id,
+});
+await ago.submitToolCallForm(toolCallId, { success: true, ticket_id: ticket.id, ticket_url: ticket.url });
+
 // Thumbs up / down on an assistant message
 await ago.submitFeedback(messageId, "positive");
 
@@ -465,6 +479,12 @@ Prefer callbacks over raw events? See the
 
 - `submitToolCallForm(toolCallId, formData)`
 - `confirmToolCall(toolCallId)` · `rejectToolCall(toolCallId)`
+- `getConfig()` → `Promise<SdkConfig>`: the tenant's per-permission agents,
+  ticket form (`ticketForm`), and file-attachment flag (`GET /config`)
+- `createTicket({ subject, body, priority?, typology?, conversationId?, email?, customFields?, files?, ticketFormId? })`
+  → `Promise<{ id, url? }>`: file a support ticket (`POST /tickets`, multipart)
+- `getUserIdentity()` → `{ email?, hasJwt }`: how the client identifies the
+  visitor (the ticket form asks for an email when it has neither)
 - `submitFormCollector(name, values)` → `Promise<unknown>`: relay form
   values through the backend, which resolves the destination from the named
   form's stored definition (used by `createFormCollector` in
@@ -522,6 +542,26 @@ interface Conversation {
 interface StopMessageResult {
   status: "stopping" | "not_running" | "not_supported";
   messageStatus?: AgoMessage["status"]; // status when the stop was requested
+}
+
+interface ToolCallData {
+  id: string;
+  type: "form" | "confirmation_input" | "status_message" | "progress_indicator" | "client_function" | "reasoning" | "mcp_ui_resource";
+  status: string;
+  toolName: string;
+  toolDisplayName?: string;
+  message?: string;
+  formSchema?: FormSchema;
+  data?: Record<string, unknown>; // after a submit: { success, ticket: { ticket_id, ticket_url } }
+  displayMode?: "collapsible" | "display" | "both";
+  // Ticketing `form` tool calls (toolName "ago_ticketing")
+  askToTalkToHuman?: boolean;
+  allowedToCreateTicket?: boolean;
+  ticket?: { subject?; body?; typology?; priority?; tag?; custom_fields?: Record<string, string> };
+  mode?: "form" | "embed";
+  ticketFormId?: string;
+  embedHtml?: string;
+  embedDescription?: string;
 }
 ```
 

@@ -8,8 +8,8 @@ Runnable example apps for `@useago/sdk`, one per stack.
 | `glacier/` | React + Vite (ice-cream shop: functions + navigation) | `npm run dev` |
 | `simple-vue/` | Vue 3 + Vite | `npm run dev` |
 | `simple-angular/` | Angular | `npm run dev` |
-| `simple-ts/` | Vanilla TypeScript | `npm run dev` |
-| `simple-html/` | Plain HTML (no build) | open the `.html` file |
+| `simple-ts/` | Vanilla TypeScript; `/bubble.html` is the floating bubble | `npm run dev` |
+| `simple-html/` | Plain HTML (no build); `bubble-widget.html` is the floating bubble | open the `.html` file |
 | `vue-widget/` | Embeddable widget in Vue | open `index.html` |
 
 The examples default to the public demo account, so they answer out of the box

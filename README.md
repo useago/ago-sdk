@@ -304,6 +304,30 @@ React and Vue have a `useFeedback()` hook/composable; React also exports the
 `<MessageFeedback messageId={...} />` row for a custom message list. Details in
 [Feedback](docs/general/widget.md#feedback).
 
+## Drop the chat bubble on any page
+
+The hosted embed widget, without the iframe: a launcher in the corner, a teaser
+bubble, and a panel with a home screen, the conversation, and the chat history.
+It reopens the visitor's last thread for two hours and goes full screen on a
+phone.
+
+```ts
+import { mountChatWidget } from "@useago/sdk/widget";
+
+mountChatWidget(document.body, {
+  config: { baseUrl: "https://playground.api.useago.com", agent: "generic-guide" },
+  placement: "bubble",
+  title: "Ask AGO",
+  conversationStarters: [{ label: "What can the SDK do?" }],
+  colors: { button: "#007bff", header: "#03182f" },
+});
+```
+
+When the visitor asks for a human, the agent's ticket form renders inside the
+conversation on every placement, with the fields from your AGO dashboard.
+Details in [Floating bubble](docs/general/widget.md#floating-bubble-placement-bubble)
+and [Ticket form](docs/general/widget.md#ticket-form-the-form-tool-call).
+
 ## Show the source docs the agent retrieved
 
 Each assistant message carries the knowledge sources it used in `m.sources`

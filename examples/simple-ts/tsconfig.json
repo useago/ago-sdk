@@ -9,7 +9,12 @@
     "isolatedModules": true,
     "esModuleInterop": true,
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@useago/sdk/widget": ["../../src/widget/index.ts"],
+      "@useago/sdk": ["../../src/index.ts"]
+    }
   },
   "include": ["src/**/*.ts"]
 }
