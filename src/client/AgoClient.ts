@@ -56,7 +56,54 @@ import type {
   StopMessageResult,
   SubmitToolCallResult,
   ToolCallData,
+  CreateTicketInput,
+  CreateTicketResult,
+  SdkConfig,
+  TicketForm,
 } from "./types";
+
+/** `GET /api/sdk/v1/config` as the backend serializes it (snake_case). */
+interface RawTicketForm {
+  id: string;
+  name?: string | null;
+  mode?: string | null;
+  show_subject?: boolean;
+  show_body?: boolean;
+  show_priority?: boolean;
+  show_typology?: boolean;
+  fields?: Array<{
+    id: string;
+    external_id?: string | null;
+    title?: string | null;
+    type?: string | null;
+    required?: boolean;
+    hidden?: boolean;
+    position?: number;
+    options?: Array<{
+      id: string;
+      name?: string | null;
+      value?: string | null;
+      default?: boolean;
+      message?: string | null;
+      message_type?: "info" | "warning" | "danger" | null;
+    }>;
+    conditional_field_id?: string | null;
+    conditional_field_value?: string | null;
+  }>;
+}
+
+interface RawSdkConfig {
+  permissions?: Array<{
+    id?: string | null;
+    name?: string | null;
+    display_name?: string | null;
+    agents?: Array<{ id: string; name?: string | null }>;
+    ticket_form?: RawTicketForm | null;
+    file_attachments_enabled?: boolean;
+    voice_enabled?: boolean;
+  }>;
+  proactive?: { enabled?: boolean };
+}
 
 type NavRoute = { name: string; path: string; description: string };
 
@@ -1041,7 +1088,101 @@ export class AgoClient {
       data: tc.data as Record<string, unknown> | undefined,
       functionName: tc.function_name as string | undefined,
       arguments: tc.arguments as Record<string, unknown> | undefined,
+      displayMode: tc.display_mode as ToolCallData["displayMode"],
+      askToTalkToHuman: tc.ask_to_talk_to_human as boolean | undefined,
+      allowedToCreateTicket: tc.allowed_to_create_ticket as boolean | undefined,
+      ticket: tc.ticket as ToolCallData["ticket"],
+      mode: tc.mode as ToolCallData["mode"],
+      ticketFormId: tc.ticket_form_id as string | undefined,
+      embedHtml: tc.embed_html as string | undefined,
+      embedDescription: tc.embed_description as string | undefined,
     }));
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // Config and tickets
+  // ─────────────────────────────────────────────────────────────────
+
+  /**
+   * The tenant's SDK configuration (`GET /api/sdk/v1/config`): per-permission
+   * agents, the ticket form the agent's `ago_ticketing` tool opens, and the
+   * file-attachment flag. The vanilla widget fetches it once, when a ticket
+   * form first appears in a conversation.
+   */
+  async getConfig(): Promise<SdkConfig> {
+    const raw = await this.httpClient.get<RawSdkConfig>("/api/sdk/v1/config");
+    return {
+      permissions: (raw.permissions ?? []).map((p) => ({
+        id: p.id ?? undefined,
+        name: p.name ?? undefined,
+        displayName: p.display_name ?? undefined,
+        agents: (p.agents ?? []).map((a) => ({
+          id: a.id,
+          name: a.name ?? undefined,
+        })),
+        ticketForm: p.ticket_form ? AgoClient.mapTicketForm(p.ticket_form) : undefined,
+        fileAttachmentsEnabled: !!p.file_attachments_enabled,
+        voiceEnabled: !!p.voice_enabled,
+      })),
+      proactive: { enabled: !!raw.proactive?.enabled },
+    };
+  }
+
+  private static mapTicketForm(raw: RawTicketForm): TicketForm {
+    return {
+      id: raw.id,
+      name: raw.name ?? undefined,
+      mode: raw.mode === "embed" ? "embed" : "form",
+      showSubject: raw.show_subject ?? true,
+      showBody: raw.show_body ?? true,
+      showPriority: raw.show_priority ?? true,
+      showTypology: raw.show_typology ?? true,
+      fields: (raw.fields ?? []).map((f) => ({
+        id: f.id,
+        externalId: f.external_id ?? undefined,
+        title: f.title ?? undefined,
+        type: f.type ?? undefined,
+        required: !!f.required,
+        hidden: !!f.hidden,
+        position: f.position ?? 0,
+        options: (f.options ?? []).map((o) => ({
+          id: o.id,
+          name: o.name ?? undefined,
+          value: o.value ?? undefined,
+          default: !!o.default,
+          message: o.message ?? undefined,
+          messageType: o.message_type ?? "info",
+        })),
+        conditionalFieldId: f.conditional_field_id ?? undefined,
+        conditionalFieldValue: f.conditional_field_value ?? undefined,
+      })),
+    };
+  }
+
+  /**
+   * Create a support ticket (`POST /api/sdk/v1/tickets`, multipart). This is
+   * what the ticket form in the conversation does before it completes the
+   * `form` tool call with {@link submitToolCallForm}.
+   */
+  async createTicket(input: CreateTicketInput): Promise<CreateTicketResult> {
+    const fd = new FormData();
+    fd.append("subject", input.subject);
+    fd.append("body", input.body);
+    if (input.priority) fd.append("priority", input.priority);
+    if (input.typology) fd.append("typology", input.typology);
+    if (input.conversationId) fd.append("conversation_id", input.conversationId);
+    if (input.email) fd.append("email", input.email);
+    if (input.customFields && input.customFields.length > 0) {
+      fd.append("custom_fields", JSON.stringify(input.customFields));
+    }
+    for (const file of input.files ?? []) fd.append("files", file, file.name);
+    if (input.ticketFormId) fd.append("ticket_form_id", input.ticketFormId);
+    const response = await this.httpClient.postFormData("/api/sdk/v1/tickets", fd);
+    const json = (await response.json()) as { id?: unknown; url?: unknown };
+    return {
+      id: String(json.id ?? ""),
+      url: typeof json.url === "string" && json.url ? json.url : undefined,
+    };
   }
 
   /**
@@ -1836,6 +1977,18 @@ export class AgoClient {
   /** @internal The agent (id or slug) the client is configured to talk to. */
   getConfiguredAgent(): string | undefined {
     return this.config.agent || this.config.defaultAgentId;
+  }
+
+  /**
+   * How the SDK identifies the visitor: the configured `userEmail`, and
+   * whether a `userJwt` is set. The ticket form asks for an email when it has
+   * neither.
+   */
+  getUserIdentity(): { email?: string; hasJwt: boolean } {
+    return {
+      email: this.config.userEmail || undefined,
+      hasJwt: !!this.config.userJwt,
+    };
   }
 
   /**

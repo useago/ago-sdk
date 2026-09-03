@@ -50,6 +50,8 @@ const widget = mountChatWidget('#chat', {
   onMessageReceived: (message) => console.log('received:', message.content),
 });
 
+// The floating bubble widget has its own page: open /bubble.html (src/bubble.ts).
+
 // Clean up on hot-reload so listeners/forms don't stack up.
 if (import.meta.hot) {
   import.meta.hot.dispose(() => widget.destroy());

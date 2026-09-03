@@ -365,6 +365,14 @@ export class SSEHandler {
       data: data.data,
       functionName: data.function_name,
       arguments: data.arguments,
+      displayMode: data.display_mode,
+      askToTalkToHuman: data.ask_to_talk_to_human,
+      allowedToCreateTicket: data.allowed_to_create_ticket,
+      ticket: data.ticket,
+      mode: data.mode,
+      ticketFormId: data.ticket_form_id,
+      embedHtml: data.embed_html,
+      embedDescription: data.embed_description,
     };
   }
 

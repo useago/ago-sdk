@@ -16,7 +16,7 @@ There are **two** widgets in this package:
 |                           | Embed snippet             | `mountChatWidget`                  |
 | ------------------------- | ------------------------- | ---------------------------------- |
 | Setup                     | `<script>` tag, no build  | `import` from `@useago/sdk/widget` |
-| Renders                   | floating bubble (iframe)  | inline panel, or fixed side panel  |
+| Renders                   | floating bubble (iframe)  | inline panel, side panel, or the same floating bubble (`placement: "bubble"`) |
 | Framework                 | none                      | none (pure TS/JS)                  |
 | Forms / suggested replies | built-in                  | yes, via options                   |
 | Use when                  | marketing site, zero code | you control the DOM, no framework  |
@@ -66,6 +66,102 @@ widget.stop(); // interrupt the answer being generated (no-op when idle)
 widget.destroy(); // removes listeners, uninstalls forms, clears the DOM
 ```
 
+### Floating bubble (`placement: "bubble"`)
+
+The same widget as the embed snippet, without the iframe: a launcher in the
+bottom-right corner, a teaser bubble a second later, and a 550px panel with a
+home screen, a conversation screen, and a chat history screen. Paste this into
+any page and it answers from the public demo account:
+
+```ts
+import { mountChatWidget } from "@useago/sdk/widget";
+
+mountChatWidget(document.body, {
+  config: { baseUrl: "https://playground.api.useago.com", agent: "generic-guide" },
+  placement: "bubble",
+  title: "Ask AGO",
+  prompt: "Hello, how can I help you today?",
+  subtitle: "Answers come from the **AGO docs**.",
+  conversationStarters: [
+    { label: "What can the SDK do?" },
+    { label: "Pricing", message: "Tell me about pricing" },
+  ],
+  colors: { button: "#007bff", header: "#03182f" },
+});
+```
+
+Swap `baseUrl` for your own `https://YOUR-DOMAIN.api.useago.com` when you have a
+tenant.
+
+**Screens.** The panel opens on **Home**: the title (one line per `\n`), the
+optional markdown `subtitle`, the `conversationStarters` cards, and the composer.
+Sending a message, or clicking a card, lands on the **conversation** screen,
+where the footer hides and the header shows a back chevron and a new-chat
+button. The **Chats** tab lists the visitor's threads newest first with a
+relative time (`5min ago`, `2h ago`, `3d ago`); a row reopens that thread, and
+the floating "New conversation" pill starts over. `hideFooter: true` drops the
+tab bar.
+
+**Reopening the last thread.** On load the widget reopens the visitor's most
+recent conversation if its last message is under two hours old, first from the
+front-side cache (`persistConversation` is on by default here, under the usual
+`ago_last_thread` key), then from the thread list once it arrives, so it also
+works where the browser blocks storage. A visitor who already navigated is never
+redirected. Pass `autoResume: false` to always land on Home; an explicit
+`conversationId` opens that thread directly.
+
+**Mobile.** Under 450px the panel fills the screen, the launcher hides while it
+is open, the page behind it stops scrolling, and Escape or the header "X" close
+it. On a desktop viewport the launcher stays visible and toggles the panel.
+
+**Colors.** `colors` takes the embed snippet's `AgoWidgetColors` object and maps
+it onto the theme tokens; `theme` wins over it key by key.
+
+| `colors` key        | Sets                                                                 |
+| ------------------- | -------------------------------------------------------------------- |
+| `button`            | `launcherBg` and `sendBg`                                            |
+| `header`            | `headerBg` (a gradient works), `headerText` derived for contrast     |
+| `agentMessage`      | `agentBubbleBg` (the assistant row gets a fill)                      |
+| `agentMessageFont`  | `agentBubbleText`                                                    |
+| `background`        | `panelBg` and `messagesBg`                                           |
+| `font`              | `text`                                                               |
+| `userMessage`       | `userBubbleBg`                                                       |
+| `userMessageFont`   | `userBubbleText`                                                     |
+
+The header text is white unless the header color is light (contrast under 3:1),
+in which case it turns black. If you set the header color from host CSS
+instead, set `--ago-header-text-color` alongside it.
+
+**Handle.** On top of the usual methods (including `newConversation()`, which
+every placement has), the bubble handle exposes `screen`,
+`showScreen("home" | "chat" | "history")`, and `openConversation(id)`. The
+chrome's strings are translated through `labels`:
+
+```ts
+mountChatWidget(document.body, {
+  config: { baseUrl: "https://playground.api.useago.com", agent: "generic-guide" },
+  placement: "bubble",
+  labels: {
+    home: "Accueil",
+    chats: "Discussions",
+    history: "Historique",
+    newConversation: "Nouvelle conversation",
+    noHistory: "Aucune discussion pour le moment",
+    askQuestion: "Posez une question",
+    timeAgo: { minutes: "il y a {n} min", hours: "il y a {n} h", days: "il y a {n} j" },
+  },
+});
+```
+
+The bubble ignores `height`, `welcomeMessage`, `bubbleStyle`, `agentBubble`,
+and `showAgentName` (its layout is the hosted widget's), defaults `title` to
+`"AGO Chatbot"`, `width` to `550` (clamped between 400px and the viewport minus
+40px), `mobile.breakpoint` to `450`, and turns `feedback`, `loadThreads`, and
+`persistConversation` on. Every element carries an `ago`-prefixed class name
+(`.ago-chat-widget-launcher`, `.ago-chat-widget-teaser`, `.ago-chat-widget-bubble`,
+`.ago-chat-widget__header`, `.ago-chat-widget__home`, `.ago-chat-widget__history`,
+`.ago-chat-widget__footer`).
+
 ### Options
 
 | Option                  | Type                                                                                      | Default                                                    |
@@ -73,18 +169,26 @@ widget.destroy(); // removes listeners, uninstalls forms, clears the DOM
 | `client?`               | `AgoClient`                                                                               | — (provide this **or** `config`)                           |
 | `config?`               | `AgoConfig`                                                                               | — (needs at least `baseUrl`)                               |
 | `conversationId?`       | `string`                                                                                  | —                                                          |
-| `persistConversation?`  | `boolean \| Partial<ConversationSessionOptions>`                                          | — (off)                                                    |
-| `loadThreads?`          | `boolean`                                                                                 | `false`                                                    |
-| `title?`                | `string`                                                                                  | `"Chat"`                                                   |
+| `persistConversation?`  | `boolean \| Partial<ConversationSessionOptions>`                                          | — (off; `true` for the bubble)                             |
+| `loadThreads?`          | `boolean`                                                                                 | `false` (`true` for the bubble)                            |
+| `title?`                | `string`                                                                                  | `"Chat"` (`"AGO Chatbot"` for the bubble)                  |
 | `welcomeMessage?`       | `string \| { message: string; mode?: "static" \| "streaming"; speed?; followUpReplies? }` | `"Hello! How can I help you today?"`                       |
 | `placeholder?`          | `string`                                                                                  | `"Type a message..."`                                      |
 | `allowFiles?`           | `boolean`                                                                                 | `false`                                                    |
 | `allowStop?`            | `boolean`                                                                                 | `true` (see [Stop button](#stop-button))                   |
 | `height?`               | `string \| number`                                                                        | `500` (ignored for side panels)                            |
-| `placement?`            | `"inline" \| "left" \| "right"`                                                           | `"inline"`                                                 |
-| `width?`                | `string \| number`                                                                        | `400` (side panels only)                                   |
-| `launcher?`             | `boolean`                                                                                 | `true` (side panels only)                                  |
-| `defaultOpen?`          | `boolean`                                                                                 | `false` (side panels only)                                 |
+| `placement?`            | `"inline" \| "left" \| "right" \| "bubble"`                                               | `"inline"` (see [Floating bubble](#floating-bubble-placement-bubble)) |
+| `width?`                | `string \| number`                                                                        | `400` (side panels), `550` (bubble)                        |
+| `launcher?`             | `boolean`                                                                                 | `true` (side panels and bubble)                            |
+| `defaultOpen?`          | `boolean`                                                                                 | `false` (side panels and bubble)                           |
+| `prompt?`               | `string \| false`                                                                         | `"Hello, how can I help you today?"` (bubble teaser)       |
+| `icon?`                 | `string`                                                                                  | — (bubble launcher image)                                  |
+| `colors?`               | `AgoWidgetColors`                                                                         | — (bubble only)                                            |
+| `hideFooter?`           | `boolean`                                                                                 | `false` (bubble only)                                      |
+| `subtitle?`             | `string` (markdown)                                                                       | — (bubble home screen)                                     |
+| `conversationStarters?` | `Array<{ label: string; message?: string }>`                                              | — (bubble home screen)                                     |
+| `autoResume?`           | `boolean`                                                                                 | `true` (bubble only)                                       |
+| `labels?`               | `Partial<WidgetLabels>`                                                                   | English strings (bubble only)                              |
 | `mobile?`               | `{ breakpoint?: number; trigger?: "tap" \| "focus" \| "manual" }`                         | — (automatic; see [Mobile fullscreen](#mobile-fullscreen)) |
 | `logoUrl?`              | `string`                                                                                  | —                                                          |
 | `showAgentName?`        | `boolean`                                                                                 | `false`                                                    |
@@ -94,7 +198,8 @@ widget.destroy(); // removes listeners, uninstalls forms, clears the DOM
 | `theme?`                | `WidgetTheme`                                                                             | — (see [Theming](#theming))                                |
 | `forms?`                | `Array<CreateFormCollectorOptions \| LoadFormCollectorOptions>`                           | —                                                          |
 | `formSubmittedMessage?` | `string \| ((result) => string \| null)`                                                  | server `message`, else `"Form submitted."`                 |
-| `feedback?`             | `boolean \| WidgetFeedbackOptions`                                                        | `false` (see [Feedback](#feedback))                        |
+| `feedback?`             | `boolean \| WidgetFeedbackOptions`                                                        | `false` (`true` for the bubble; see [Feedback](#feedback)) |
+| `toolCallForm?`         | `WidgetToolCallFormOptions`                                                               | — (see [Ticket form](#ticket-form-the-form-tool-call))     |
 | `onFollowUpClick?`      | `((reply) => void) \| false`                                                              | sends the reply                                            |
 | `onOpen?`               | `() => void`                                                                              | — (side open / inline expand)                              |
 | `onClose?`              | `() => void`                                                                              | — (side close / inline collapse)                           |
@@ -158,6 +263,68 @@ The row's elements carry `ago-feedback*` class names, so host CSS can restyle
 them; it ships no stylesheet of its own. The client-level API behind it is
 [`submitFeedback`](core.md#6-tool-calls-feedback-and-lifecycle).
 
+### Ticket form (the `form` tool call)
+
+When the visitor asks to talk to a human, the agent's built-in `ago_ticketing`
+tool opens a contact form inside the conversation, as a `form` tool call. The
+widget renders it the way the hosted widget does, with no option to set:
+
+```ts
+mountChatWidget("#ago-chat", {
+  config: { baseUrl: "https://YOUR-DOMAIN.api.useago.com", agent: "support-bot" },
+});
+// Visitor: "I want to talk to someone" → the form appears under the answer.
+```
+
+The fields come from the ticket form configured in your AGO dashboard (fetched
+once from `GET /config`): subject, typology, priority, the custom fields, the
+detailed context, and attachments when the tenant allows them. The form asks
+for an email when the client has neither `userEmail` nor `userJwt`. Submitting
+creates the ticket (`POST /tickets`), completes the tool call
+(`POST /tool-calls/{id}/submit`), and shows a green confirmation with the
+ticket link. Fields pre-filled by the agent are kept, and what the visitor types
+survives every streamed chunk.
+
+Three variants: the inline form above; an **embedded** form when the ticket
+form is in embed mode (the tenant's HubSpot HTML is hosted in place, pre-filled,
+and its submission detected); and a yellow notice when the tenant does not allow
+this visitor to create a ticket. While a form is pending the composer is
+replaced by a "complete the form above" card; once the ticket exists it becomes
+"a ticket has been created" with a **New conversation** button, which is also
+`widget.newConversation()`.
+
+```ts
+mountChatWidget("#ago-chat", {
+  config: { baseUrl: "https://YOUR-DOMAIN.api.useago.com", agent: "support-bot" },
+  toolCallForm: {
+    userEmail: currentUser.email, // skip the email field for a known visitor
+    successMessage: "Merci, votre demande est enregistrée.",
+    labels: { subject: "Sujet", submit: "Envoyer", detailedContext: "Description" },
+    onSubmitted: ({ toolCallId, ticket, values }) => track("ticket", ticket?.id),
+    onError: (error) => console.warn("ticket failed", error),
+  },
+});
+```
+
+| Option              | Type                                                        | Default                            |
+| ------------------- | ----------------------------------------------------------- | ---------------------------------- |
+| `labels?`           | `Partial<ToolCallFormLabels>`                               | English strings                    |
+| `successMessage?`   | `string`                                                    | "Your ticket has been successfully submitted." |
+| `successUrlLabel?`  | `string`                                                    | "You can find it here:"            |
+| `userEmail?`        | `string`                                                    | the client's `userEmail`           |
+| `onSubmitted?`      | `({ toolCallId, toolName, mode, ticket, values }) => void` | —                                  |
+| `onError?`          | `(error: Error) => void`                                    | —                                  |
+| `onNewConversation?`| `() => void`                                                | —                                  |
+
+Only the newest form in a thread is live; an older one is replaced by a short
+status line, as in the hosted widget. This is separate from the `forms` option
+(form collectors the agent fills through client functions): the two can coexist,
+and the ticket form never triggers `onFormSubmitted`. The widget renders no
+other tool call type; a `confirmation_input` is yours to handle with
+`confirmToolCall` / `rejectToolCall` (see [Tool calls](events-and-streaming.md#tool-calls)).
+The client-level calls behind the form are
+[`getConfig`, `createTicket`, and `submitToolCallForm`](core.md#6-tool-calls-feedback-and-lifecycle).
+
 ### Stop button
 
 While the agent answers, the send button becomes a **Stop** button that
@@ -203,10 +370,12 @@ mountChatWidget("#ago-chat", {
 ```
 
 `mountChatWidget` returns a handle:
-`{ client, element, sendMessage, stop, session, threads, refreshThreads, destroy }` (`session` is
-present only when `persistConversation` is set; `open`/`close`/`toggle` are present for side
-placements and, in a browser, for inline placement, see [Side panel](#side-panel-left--right)
-and [Mobile fullscreen](#mobile-fullscreen)). `threads` is the visitor's conversation list,
+`{ client, element, sendMessage, stop, newConversation, session, threads, refreshThreads, destroy }`
+(`session` is present only when `persistConversation` is set; `open`/`close`/`toggle` are present
+for side and bubble placements and, in a browser, for inline placement, see
+[Side panel](#side-panel-left--right) and [Mobile fullscreen](#mobile-fullscreen); the bubble
+adds `screen`, `showScreen`, and `openConversation`). `newConversation()` forgets the current
+thread and starts over. `threads` is the visitor's conversation list,
 the vanilla equivalent of the React/Vue `useConversation().conversations`. It auto-loads on
 mount and refreshes after each turn only when `loadThreads: true`; otherwise it stays empty
 until you call `refreshThreads()`. To debug, hand `widget.client` to the [dev panel](devtools.md)
@@ -451,6 +620,18 @@ so no media queries or hover); CSS variables override it if both are present.
 | `--ago-border-color`            | `border`        | `#dee3e8`                                      | Panel, input, pills, cards (set transparent to hide)              |
 | `--ago-accent-color`            | `accent`        | `#1b5fc4`                                      | Source badges + suggested-reply hover outline                     |
 | `--ago-agent-bubble-background` | `agentBubbleBg` | `#f1f3f5`                                      | Assistant message bubble fill (when `agentBubble` is on)          |
+| `--ago-agent-bubble-text-color` | `agentBubbleText` | → `text`                                     | Assistant message text                                            |
+| `--ago-user-bubble-background`  | `userBubbleBg`  | `#fff` (bubble)                                | User message card (`placement: "bubble"`)                         |
+| `--ago-user-bubble-text-color`  | `userBubbleText`| `#0a0a0a` (bubble)                             | User message text (`placement: "bubble"`)                         |
+| `--ago-launcher-background`     | `launcherBg`    | `#007bff` (bubble)                             | Floating launcher circle (`placement: "bubble"`)                  |
+| `--ago-launcher-text-color`     | `launcherText`  | `#fff`                                         | Launcher glyph                                                    |
+| `--ago-send-button-background`  | `sendBg`        | → `brand`                                      | Composer send/stop button and ticket form submit (bubble)         |
+| `--ago-panel-width`             | `panelWidth`    | `550px`                                        | Bubble panel width (clamped to 400px and the viewport minus 40px) |
+
+With `placement: "bubble"`, `--ago-header-background` accepts a gradient and
+`--ago-header-text-color` is derived from it for contrast unless you set it;
+`--ago-panel-background` and `--ago-accent-color` there default to the hosted
+widget's `#f8faff` and `#003edf`.
 
 Error messages stay red by design, and a couple of incidental tints (file/source
 chip background, streaming dots) are fixed neutrals that read on any light surface.
@@ -484,6 +665,10 @@ Configure `window.AGO` before loading the widget script:
 
 (Grab the recommended `integrity` hash from your AGO dashboard, and add the
 domain where you embed the widget to your allowed domains list.)
+
+The same UI is available without the iframe through
+`mountChatWidget(document.body, { placement: "bubble", colors })`, see
+[Floating bubble](#floating-bubble-placement-bubble).
 
 ---
 

@@ -82,6 +82,11 @@ export function createMockClient(
     submitToolCallForm: async () => ({ status: "completed" }),
     confirmToolCall: async () => undefined,
     rejectToolCall: async () => undefined,
+    getConfig: async () => ({ permissions: [], proactive: { enabled: false } }),
+    createTicket: async () => ({
+      id: "mock-ticket-1",
+      url: "https://example.test/tickets/mock-ticket-1",
+    }),
     submitFeedback: async () => undefined,
     // Mirrors the real return: the message id the report landed on.
     submitConversationFeedback: async () => noopMessage.id,
@@ -98,6 +103,7 @@ export function createMockClient(
     registerNavigationFunction: () => undefined,
     unregisterNavigationFunction: () => undefined,
     getConfiguredAgent: () => undefined,
+    getUserIdentity: () => ({ email: undefined, hasJwt: false }),
     // Minimal transport stub: a proactive engine attached to the mock sees an
     // empty config (→ kill-switch stays off) and swallows POSTs.
     getHttp: () => ({

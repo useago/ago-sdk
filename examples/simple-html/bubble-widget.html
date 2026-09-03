@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AGO SDK — Floating bubble widget (mountChatWidget)</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      max-width: 720px;
+      margin: 40px auto;
+      padding: 20px;
+      color: #1a1a1a;
+      line-height: 1.6;
+    }
+    .config {
+      background: #f5f5f5;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+    .config label { font-weight: 500; display: block; margin-top: 10px; }
+    .config input {
+      width: 100%;
+      padding: 8px;
+      margin-top: 4px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      box-sizing: border-box;
+    }
+    button {
+      margin-top: 14px;
+      padding: 10px 20px;
+      background: #03182f;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1>AGO — Floating bubble widget</h1>
+  <p>
+    The hosted embed widget, without the iframe: a launcher in the corner, a
+    teaser bubble, and a panel with a home screen, a conversation, and the chat
+    history. Click <strong>Mount widget</strong>, then the blue button bottom right.
+  </p>
+
+  <div class="config">
+    <label>
+      Base URL
+      <input id="baseUrl" value="https://playground.api.useago.com" />
+    </label>
+    <label>
+      Default agent (id or slug, optional)
+      <input id="agent" value="generic-guide" />
+    </label>
+    <label>
+      Launcher color
+      <input id="button" value="#007bff" />
+    </label>
+    <label>
+      Header color (a gradient works too)
+      <input id="header" value="#03182f" />
+    </label>
+    <button id="mount">Mount widget</button>
+  </div>
+
+  <script type="module">
+    // No build step: open this file directly in a browser. The @1 pin floats
+    // patch/minor through a third-party CDN (no SRI possible) — fine for a demo.
+    import { mountChatWidget } from 'https://esm.sh/@useago/sdk@1/widget';
+    // Working on the SDK itself? Build it (`npm run build` at the repo root),
+    // serve the repo (`python3 -m http.server`), and swap the import for:
+    // import { mountChatWidget } from '../../dist/widget.js';
+
+    let widget = null;
+
+    document.getElementById('mount').addEventListener('click', () => {
+      if (widget) widget.destroy();
+
+      const baseUrl = document.getElementById('baseUrl').value.trim();
+      const agent = document.getElementById('agent').value.trim();
+
+      widget = mountChatWidget(document.body, {
+        config: { baseUrl, agent: agent || undefined },
+        placement: 'bubble',
+        title: 'Ask AGO',
+        prompt: 'Hello, how can I help you today?',
+        subtitle: 'Answers come from the **AGO docs**.',
+        conversationStarters: [
+          { label: 'What can the SDK do?' },
+          { label: 'Pricing', message: 'Tell me about pricing' },
+        ],
+        colors: {
+          button: document.getElementById('button').value.trim(),
+          header: document.getElementById('header').value.trim(),
+        },
+        onOpen: () => console.log('opened'),
+        onClose: () => console.log('closed'),
+        onMessageSent: (text) => console.log('sent:', text),
+        onMessageReceived: (m) => console.log('received:', m.content),
+      });
+    });
+  </script>
+</body>
+</html>

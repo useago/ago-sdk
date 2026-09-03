@@ -9,7 +9,7 @@
  * which HTML-escapes all message text first.
  */
 
-import type { AgoMessage } from "../client/types";
+import type { AgoAttachment, AgoMessage, ToolCallData } from "../client/types";
 import {
   canInlineImage,
   formatFileSize,
@@ -57,6 +57,195 @@ export interface RenderMessageOptions {
    * from inside this module would make rendering a message mutate that state.
    */
   feedbackRow?: HTMLElement | null;
+  /**
+   * Render one tool call attached to the message (a ticket form, a status
+   * line). Called once per entry of `message.toolCalls`, in order; a null
+   * result skips that call. Like `feedbackRow`, the caller owns any state the
+   * node needs across re-renders.
+   */
+  renderToolCall?: (
+    toolCall: ToolCallData,
+    message: AgoMessage,
+  ) => HTMLElement | null;
+}
+
+/**
+ * Uploaded files, shown above the bubble. Only backend-verified safe images
+ * embed inline as an `<img>`; everything else is a download link (no XSS
+ * surface). Shared by both message renderers.
+ */
+export function buildAttachments(
+  attachments: AgoAttachment[],
+  opts: {
+    isUser: boolean;
+    /** Text color inside a download card. */
+    cardColor: string;
+    /** Background of a download card. */
+    cardBackground: string;
+  },
+): HTMLElement {
+  const wrap = div({
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "6px",
+    marginBottom: "6px",
+    justifyContent: opts.isUser ? "flex-end" : "flex-start",
+    maxWidth: "75%",
+  });
+  wrap.className = "ago-message__attachments";
+  for (const att of attachments) {
+    const href = safeAttachmentUrl(att.url);
+    if (canInlineImage(att) && href) {
+      const link = document.createElement("a");
+      link.href = href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      css(link, { display: "inline-block", textDecoration: "none" });
+      const img = document.createElement("img");
+      img.src = href;
+      img.alt = att.name;
+      img.loading = "lazy";
+      css(img, {
+        maxWidth: "180px",
+        maxHeight: "160px",
+        objectFit: "cover",
+        borderRadius: "10px",
+        border: `1px solid ${BORDER_COLOR}`,
+        display: "block",
+      });
+      link.appendChild(img);
+      wrap.appendChild(link);
+      continue;
+    }
+
+    const card = href
+      ? document.createElement("a")
+      : document.createElement("div");
+    if (href && card instanceof HTMLAnchorElement) {
+      card.href = href;
+      card.target = "_blank";
+      card.rel = "noopener noreferrer";
+    }
+    css(card, {
+      display: "inline-flex",
+      alignItems: "center",
+      gap: "8px",
+      padding: "8px 12px",
+      borderRadius: "10px",
+      border: `1px solid ${BORDER_COLOR}`,
+      backgroundColor: opts.cardBackground,
+      color: opts.cardColor,
+      fontSize: "13px",
+      textDecoration: "none",
+      maxWidth: "220px",
+    });
+    const icon = document.createElement("span");
+    icon.textContent = "📄";
+    icon.setAttribute("aria-hidden", "true");
+    css(icon, { fontSize: "16px", lineHeight: "1", flexShrink: "0" });
+    const meta = div({
+      display: "flex",
+      flexDirection: "column",
+      minWidth: "0",
+    });
+    const name = div({
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap",
+      maxWidth: "160px",
+    });
+    name.textContent = att.name;
+    name.title = att.name;
+    meta.appendChild(name);
+    const size = formatFileSize(att.fileSize);
+    if (size) {
+      const sizeEl = div({ fontSize: "11px", color: MUTED_TEXT_COLOR });
+      sizeEl.textContent = size;
+      meta.appendChild(sizeEl);
+    }
+    card.append(icon, meta);
+    wrap.appendChild(card);
+  }
+  return wrap;
+}
+
+/** Style preset for the suggested-reply pills of {@link buildFollowUps}. */
+export type FollowUpLook = "classic" | "embed";
+
+/**
+ * The row of suggested-reply pills under the last answer. `classic` is the
+ * inline/side look (44px pills, brand hover outline); `embed` reproduces the
+ * hosted widget's chips (white, neutral border, light hover).
+ */
+export function buildFollowUps(
+  replies: string[],
+  opts: {
+    enabled: boolean;
+    handler?: (reply: string) => void;
+    look?: FollowUpLook;
+  },
+): HTMLElement {
+  const embed = opts.look === "embed";
+  const followups = div({
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "8px",
+    marginTop: embed ? "16px" : "10px",
+  });
+  followups.className = "ago-message__followups";
+  for (const reply of replies) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "ago-message__followup-btn";
+    btn.textContent = reply;
+    btn.disabled = !opts.enabled;
+    css(
+      btn,
+      embed
+        ? {
+            display: "inline-flex",
+            alignItems: "center",
+            padding: "8px",
+            fontSize: "14px",
+            lineHeight: "20px",
+            font: "inherit",
+            color: "#525252",
+            backgroundColor: "#fff",
+            border: "1px solid #e5e5e5",
+            borderRadius: "12px",
+            boxShadow: "0 1px 2px 0 rgba(0,0,0,0.05)",
+            cursor: opts.enabled ? "pointer" : "default",
+            transition: "background-color 0.15s",
+          }
+        : {
+            // Suggested replies are the primary tap target of the whole suggestion
+            // pattern; 36px left them under the 44px comfortable minimum.
+            minHeight: "44px",
+            padding: "6px 14px",
+            fontSize: "14px",
+            borderRadius: MESSAGE_RADIUS,
+            border: `1px solid ${BORDER_COLOR}`,
+            backgroundColor: PANEL_BACKGROUND,
+            color: TEXT_COLOR,
+            cursor: opts.enabled ? "pointer" : "default",
+            transition: "border-color 0.15s",
+          },
+    );
+    if (opts.handler) {
+      const handler = opts.handler;
+      btn.addEventListener("click", () => handler(reply));
+    }
+    btn.addEventListener("mouseenter", () => {
+      if (embed) btn.style.backgroundColor = "#fafafa";
+      else btn.style.borderColor = ACCENT_COLOR;
+    });
+    btn.addEventListener("mouseleave", () => {
+      if (embed) btn.style.backgroundColor = "#fff";
+      else btn.style.borderColor = BORDER_COLOR;
+    });
+    followups.appendChild(btn);
+  }
+  return followups;
 }
 
 export function renderMessage(
@@ -158,92 +347,23 @@ export function renderMessage(
     wrap.appendChild(sources);
   }
 
-  // Uploaded files, above the bubble. Only backend-verified safe images embed
-  // inline as an <img>; everything else is a download link (no XSS surface).
   if (message.attachments && message.attachments.length > 0) {
-    const attachments = div({
-      display: "flex",
-      flexWrap: "wrap",
-      gap: "6px",
-      marginBottom: "6px",
-      justifyContent: isUser ? "flex-end" : "flex-start",
-      maxWidth: "75%",
-    });
-    attachments.className = "ago-message__attachments";
-    for (const att of message.attachments) {
-      const href = safeAttachmentUrl(att.url);
-      if (canInlineImage(att) && href) {
-        const link = document.createElement("a");
-        link.href = href;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        css(link, { display: "inline-block", textDecoration: "none" });
-        const img = document.createElement("img");
-        img.src = href;
-        img.alt = att.name;
-        img.loading = "lazy";
-        css(img, {
-          maxWidth: "180px",
-          maxHeight: "160px",
-          objectFit: "cover",
-          borderRadius: "10px",
-          border: `1px solid ${BORDER_COLOR}`,
-          display: "block",
-        });
-        link.appendChild(img);
-        attachments.appendChild(link);
-        continue;
-      }
+    wrap.appendChild(
+      buildAttachments(message.attachments, {
+        isUser,
+        cardBackground: isUser ? "rgba(255,255,255,0.12)" : PANEL_BACKGROUND,
+        cardColor: isUser ? BRAND_TEXT_COLOR : TEXT_COLOR,
+      }),
+    );
+  }
 
-      const card = href
-        ? document.createElement("a")
-        : document.createElement("div");
-      if (href && card instanceof HTMLAnchorElement) {
-        card.href = href;
-        card.target = "_blank";
-        card.rel = "noopener noreferrer";
-      }
-      css(card, {
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "8px",
-        padding: "8px 12px",
-        borderRadius: "10px",
-        border: `1px solid ${BORDER_COLOR}`,
-        backgroundColor: isUser ? "rgba(255,255,255,0.12)" : PANEL_BACKGROUND,
-        color: isUser ? BRAND_TEXT_COLOR : TEXT_COLOR,
-        fontSize: "13px",
-        textDecoration: "none",
-        maxWidth: "220px",
-      });
-      const icon = document.createElement("span");
-      icon.textContent = "📄";
-      icon.setAttribute("aria-hidden", "true");
-      css(icon, { fontSize: "16px", lineHeight: "1", flexShrink: "0" });
-      const meta = div({
-        display: "flex",
-        flexDirection: "column",
-        minWidth: "0",
-      });
-      const name = div({
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap",
-        maxWidth: "160px",
-      });
-      name.textContent = att.name;
-      name.title = att.name;
-      meta.appendChild(name);
-      const size = formatFileSize(att.fileSize);
-      if (size) {
-        const sizeEl = div({ fontSize: "11px", color: MUTED_TEXT_COLOR });
-        sizeEl.textContent = size;
-        meta.appendChild(sizeEl);
-      }
-      card.append(icon, meta);
-      attachments.appendChild(card);
+  // Tool calls (a ticket form, a status line) sit between the sources and the
+  // answer text, where the hosted widget puts them.
+  if (!isUser && opts.renderToolCall && message.toolCalls?.length) {
+    for (const call of message.toolCalls) {
+      const node = opts.renderToolCall(call, message);
+      if (node) wrap.appendChild(node);
     }
-    wrap.appendChild(attachments);
   }
 
   const bubbled = isUser || agentBubble || imessage;
@@ -342,44 +462,13 @@ export function renderMessage(
   // Only on the last message, so stale suggestions disappear once the user
   // sends their next message.
   if (isLast && message.followUpReplies && message.followUpReplies.length > 0) {
-    const followups = div({
-      display: "flex",
-      flexWrap: "wrap",
-      gap: "8px",
-      marginTop: "10px",
-    });
-    followups.className = "ago-message__followups";
-    for (const reply of message.followUpReplies) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "ago-message__followup-btn";
-      btn.textContent = reply;
-      btn.disabled = !followUpEnabled;
-      css(btn, {
-        // Suggested replies are the primary tap target of the whole suggestion
-        // pattern; 36px left them under the 44px comfortable minimum.
-        minHeight: "44px",
-        padding: "6px 14px",
-        fontSize: "14px",
-        borderRadius: MESSAGE_RADIUS,
-        border: `1px solid ${BORDER_COLOR}`,
-        backgroundColor: PANEL_BACKGROUND,
-        color: TEXT_COLOR,
-        cursor: followUpEnabled ? "pointer" : "default",
-        transition: "border-color 0.15s",
-      });
-      if (followUpHandler) {
-        btn.addEventListener("click", () => followUpHandler(reply));
-      }
-      btn.addEventListener("mouseenter", () => {
-        btn.style.borderColor = ACCENT_COLOR;
-      });
-      btn.addEventListener("mouseleave", () => {
-        btn.style.borderColor = BORDER_COLOR;
-      });
-      followups.appendChild(btn);
-    }
-    wrap.appendChild(followups);
+    wrap.appendChild(
+      buildFollowUps(message.followUpReplies, {
+        enabled: followUpEnabled,
+        handler: followUpHandler,
+        look: "classic",
+      }),
+    );
   }
 
   return wrap;

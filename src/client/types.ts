@@ -175,10 +175,112 @@ export type MessageStatus =
 export interface SubmitToolCallResult {
   status: string;
   result?: unknown;
+  /** Set when `status` is `"error"`. */
+  error?: string;
+  /** The ticket a ticketing `form` tool call resolved to, when it did. */
+  ticket?: { ticket_id: string; ticket_url?: string; [key: string]: unknown };
   resume?: {
     message_id: string;
     ready: boolean;
   };
+}
+
+// ── Tickets and the SDK config ─────────────────────────────────────
+
+/** An option of a ticket form field (`GET /config` → `ticket_form.fields[].options[]`). */
+export interface TicketFieldOption {
+  id: string;
+  /** Label shown to the user. */
+  name?: string;
+  /** Value submitted. Falls back to `name` when absent. */
+  value?: string;
+  /** Preselected when the form opens. */
+  default: boolean;
+  /** A note shown under the field once this option is picked. */
+  message?: string;
+  messageType: "info" | "warning" | "danger";
+}
+
+/** A custom field of a ticket form. */
+export interface TicketField {
+  id: string;
+  /** The key the ticketing backend expects; used as the submit key when set. */
+  externalId?: string;
+  title?: string;
+  /** Field kind, e.g. `"text"`, `"checkbox"`, `"tagger"`. */
+  type?: string;
+  required: boolean;
+  /** Carried in the submission but never shown. */
+  hidden: boolean;
+  position: number;
+  /** Non-empty turns the field into a select. */
+  options: TicketFieldOption[];
+  /** Show this field only when the parent field holds `conditionalFieldValue`. */
+  conditionalFieldId?: string;
+  conditionalFieldValue?: string;
+}
+
+/** The ticket form an agent's `ago_ticketing` tool opens in the conversation. */
+export interface TicketForm {
+  id: string;
+  name?: string;
+  /** `"form"` renders the SDK's own fields; `"embed"` hosts third-party HTML. */
+  mode: "form" | "embed";
+  showSubject: boolean;
+  showBody: boolean;
+  showPriority: boolean;
+  showTypology: boolean;
+  fields: TicketField[];
+}
+
+/** One permission's configuration in {@link SdkConfig}. */
+export interface SdkPermissionConfig {
+  id?: string;
+  name?: string;
+  displayName?: string;
+  agents: Array<{ id: string; name?: string }>;
+  ticketForm?: TicketForm;
+  fileAttachmentsEnabled: boolean;
+  voiceEnabled: boolean;
+}
+
+/** Response of `GET /api/sdk/v1/config` (see `AgoClient.getConfig`). */
+export interface SdkConfig {
+  permissions: SdkPermissionConfig[];
+  proactive: { enabled: boolean };
+}
+
+/** Input of `AgoClient.createTicket` (`POST /api/sdk/v1/tickets`). */
+export interface CreateTicketInput {
+  subject: string;
+  body: string;
+  priority?: string;
+  typology?: string;
+  /** Conversation the ticket is filed from. */
+  conversationId?: string;
+  /** Reporter email, for a visitor the SDK does not otherwise identify. */
+  email?: string;
+  customFields?: Array<{ id: string; value: string }>;
+  files?: File[];
+  ticketFormId?: string;
+}
+
+/** Response of `AgoClient.createTicket`. */
+export interface CreateTicketResult {
+  id: string;
+  url?: string;
+}
+
+/** The ticket the agent pre-filled on a ticketing `form` tool call. */
+export interface ToolCallTicketPrefill {
+  subject?: string;
+  body?: string;
+  typology?: string;
+  priority?: string;
+  tag?: string;
+  products?: string[];
+  /** Keyed by the field's external id, or a lowercased, underscored title. */
+  custom_fields?: Record<string, string>;
 }
 
 /**
@@ -288,6 +390,23 @@ export interface ToolCallData {
   // For client functions
   functionName?: string;
   arguments?: Record<string, unknown>;
+  /**
+   * Where the hosted widget shows the call: in the collapsible "reasoning"
+   * section, in the message body, or both. Absent means collapsible only.
+   */
+  displayMode?: "collapsible" | "display" | "both";
+  // For the ticketing `form` tool call (`toolName: "ago_ticketing"`)
+  /** The user asked to talk to a human. */
+  askToTalkToHuman?: boolean;
+  /** `false` when the tenant blocks ticket creation for this visitor. */
+  allowedToCreateTicket?: boolean;
+  /** Fields the agent pre-filled from the conversation. */
+  ticket?: ToolCallTicketPrefill;
+  /** `"embed"` hosts third-party HTML (`embedHtml`); otherwise the SDK's form. */
+  mode?: "form" | "embed";
+  ticketFormId?: string;
+  embedHtml?: string;
+  embedDescription?: string;
 }
 
 export type ToolCallType =
@@ -388,6 +507,13 @@ export interface SSEChunkData {
   follow_up_replies?: string[];
   satisfaction_feedback?: unknown;
   ask_to_talk_to_human?: boolean;
+  allowed_to_create_ticket?: boolean;
+  ticket?: ToolCallTicketPrefill;
+  mode?: "form" | "embed";
+  ticket_form_id?: string;
+  embed_html?: string;
+  embed_description?: string;
+  display_mode?: "collapsible" | "display" | "both";
   /** Tool call ids still awaiting a client result, sent with the final `WAITING_CLIENT` event. */
   waiting_tool_call_ids?: string[];
 }

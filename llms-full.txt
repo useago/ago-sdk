@@ -2103,6 +2103,14 @@ client.on("toolCall:received", async (toolCall) => {
 `ToolCallType` is one of: `form`, `confirmation_input`, `status_message`,
 `progress_indicator`, `client_function`, `reasoning`, `mcp_ui_resource`.
 
+A `form` tool call from the agent's `ago_ticketing` tool is the ticket form:
+`toolName` is `"ago_ticketing"`, `formSchema` is empty, and the fields come from
+`getConfig().permissions[0].ticketForm` instead. The call carries the agent's
+pre-filled `ticket`, `allowedToCreateTicket`, and for embed-mode forms
+`embedHtml`. The vanilla widget renders and submits it for you (see
+[Ticket form](widget.md#ticket-form-the-form-tool-call)); a custom UI creates
+the ticket with `createTicket()` and then calls `submitToolCallForm(id, { success: true, ticket_id, ticket_url })`.
+
 ---
 
 ## Framework equivalents

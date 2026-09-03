@@ -14,6 +14,7 @@
 
 import type { FeedbackRating, FeedbackReason } from "../client/types";
 import { FEEDBACK_REASONS } from "../client/types";
+import { thumbDownIcon, thumbUpIcon } from "./icons";
 import {
   ACCENT_COLOR,
   BORDER_COLOR,
@@ -99,6 +100,18 @@ export interface FeedbackRowOptions {
     rating: FeedbackRating,
     details: { reasons: FeedbackReason[]; comment: string }
   ) => Promise<boolean>;
+  /**
+   * `classic` (default) is the inline/side look. `embed` reproduces the hosted
+   * widget's action row: Material thumbs, right-aligned, stone greys.
+   */
+  look?: "classic" | "embed";
+}
+
+/** Thumb colors per look. */
+interface ThumbPalette {
+  idle: string;
+  hover: string;
+  active: string;
 }
 
 const GHOST_BUTTON = {
@@ -123,14 +136,38 @@ const GHOST_BUTTON = {
 /** Build the thumbs row (plus its details panel when open) for one message. */
 export function renderFeedbackRow(opts: FeedbackRowOptions): HTMLElement {
   const { state, labels, askWhy, onRate, onReport } = opts;
+  const embed = opts.look === "embed";
+  const palette: ThumbPalette = embed
+    ? { idle: "#78716c", hover: "#1c1917", active: "#1c1917" }
+    : { idle: MUTED_TEXT_COLOR, hover: TEXT_COLOR, active: ACCENT_COLOR };
 
-  const wrap = div({ marginTop: "6px", width: "100%", maxWidth: "85%" });
+  const wrap = div(
+    embed
+      ? {
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginTop: "8px",
+          width: "100%",
+        }
+      : { marginTop: "6px", width: "100%", maxWidth: "85%" },
+  );
   wrap.className = "ago-feedback";
 
-  const row = div({ display: "flex", alignItems: "center", gap: "2px" });
+  const row = div({
+    display: "flex",
+    alignItems: "center",
+    gap: embed ? "8px" : "2px",
+  });
   row.className = "ago-feedback__actions";
 
-  const up = thumbButton("up", labels.helpful, state.rating === "positive");
+  const up = thumbButton(
+    "up",
+    labels.helpful,
+    state.rating === "positive",
+    palette,
+    embed,
+  );
   up.addEventListener("click", () => {
     state.rating = "positive";
     state.detailsOpen = false;
@@ -139,7 +176,13 @@ export function renderFeedbackRow(opts: FeedbackRowOptions): HTMLElement {
     onRate("positive");
   });
 
-  const down = thumbButton("down", labels.notHelpful, state.rating === "negative");
+  const down = thumbButton(
+    "down",
+    labels.notHelpful,
+    state.rating === "negative",
+    palette,
+    embed,
+  );
   down.addEventListener("click", () => {
     state.rating = "negative";
     // The thumb itself is the report; the panel only asks for detail on top.
@@ -150,15 +193,19 @@ export function renderFeedbackRow(opts: FeedbackRowOptions): HTMLElement {
   });
 
   row.append(up, down);
+  // Embed: an empty left slot keeps the thumbs flush right (the reference's
+  // left group holds staff-only actions that are not ported).
+  if (embed) wrap.appendChild(div({ flex: "1" }));
   wrap.appendChild(row);
 
   const panelSlot = div();
   panelSlot.className = "ago-feedback__panel-slot";
+  if (embed) panelSlot.style.flexBasis = "100%";
   wrap.appendChild(panelSlot);
 
   function paintThumbs(): void {
-    setThumbSelected(up, state.rating === "positive");
-    setThumbSelected(down, state.rating === "negative");
+    setThumbSelected(up, state.rating === "positive", palette);
+    setThumbSelected(down, state.rating === "negative", palette);
   }
 
   function renderPanel(): void {
@@ -192,7 +239,9 @@ export function renderFeedbackRow(opts: FeedbackRowOptions): HTMLElement {
 function thumbButton(
   direction: "up" | "down",
   label: string,
-  selected: boolean
+  selected: boolean,
+  palette: ThumbPalette,
+  embed = false,
 ): HTMLButtonElement {
   const btn = document.createElement("button");
   btn.type = "button";
@@ -200,24 +249,39 @@ function thumbButton(
   btn.setAttribute("aria-label", label);
   btn.title = label;
   css(btn, GHOST_BUTTON);
-  btn.appendChild(thumbIcon(direction));
-  setThumbSelected(btn, selected);
+  if (embed) {
+    // 16px control in the reference; the 44px hit area is kept, the glyph is
+    // the Material one at 18px.
+    btn.style.margin = "-14px";
+    btn.appendChild(
+      direction === "up"
+        ? thumbUpIcon({ size: 18 })
+        : thumbDownIcon({ size: 18 }),
+    );
+  } else {
+    btn.appendChild(thumbIcon(direction));
+  }
+  setThumbSelected(btn, selected, palette);
   btn.addEventListener("mouseenter", () => {
     if (btn.getAttribute("aria-pressed") !== "true") {
-      btn.style.color = TEXT_COLOR;
+      btn.style.color = palette.hover;
     }
   });
   btn.addEventListener("mouseleave", () => {
     if (btn.getAttribute("aria-pressed") !== "true") {
-      btn.style.color = MUTED_TEXT_COLOR;
+      btn.style.color = palette.idle;
     }
   });
   return btn;
 }
 
-function setThumbSelected(btn: HTMLButtonElement, selected: boolean): void {
+function setThumbSelected(
+  btn: HTMLButtonElement,
+  selected: boolean,
+  palette: ThumbPalette,
+): void {
   btn.setAttribute("aria-pressed", selected ? "true" : "false");
-  btn.style.color = selected ? ACCENT_COLOR : MUTED_TEXT_COLOR;
+  btn.style.color = selected ? palette.active : palette.idle;
 }
 
 /** A thumbs-up / thumbs-down glyph, drawn so the widget ships no icon font. */

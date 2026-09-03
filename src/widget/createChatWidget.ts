@@ -7,6 +7,8 @@ import type {
   Conversation,
   FeedbackRating,
   FeedbackReason,
+  TicketForm,
+  ToolCallData,
 } from "../client/types";
 import {
   createFormCollector,
@@ -18,7 +20,39 @@ import {
 import { createConversationSession } from "../state/createConversationSession";
 import { attachmentsFromFiles } from "../utils/attachments";
 import { buildInput } from "./buildInput";
+import { isValidHexColor, lightenColor, readableTextColor } from "./colorUtils";
+import { buildFooter, type FooterHandle } from "./footer";
+import { buildEmbedHeader, type EmbedHeaderHandle } from "./header";
+import { addCommentIcon, arrowDownwardIcon } from "./icons";
+import { resolveLabels } from "./labels";
+import { buildLauncher, type LauncherHandle } from "./launcher";
+import { buildEmbedAlert, renderEmbedMessage } from "./renderEmbedMessage";
+import {
+  createEmbedFormView,
+  type EmbedFormState,
+  type EmbedFormView,
+} from "./renderEmbedForm";
 import { renderMarkdown } from "./renderMarkdown";
+import {
+  createTicketFormState,
+  createTicketFormView,
+  hydrateTicketFormState,
+  renderTicketDenied,
+  type TicketFormState,
+  type TicketFormView,
+} from "./renderTicketForm";
+import {
+  isTicketingCall,
+  latestFormToolCallId,
+  renderGenericFormPlaceholder,
+  renderStatusMessage,
+  submittedTicketOf,
+  ticketCreatedInThread,
+} from "./renderToolCall";
+import {
+  DEFAULT_TOOL_CALL_FORM_LABELS,
+  type ToolCallFormLabels,
+} from "./toolCallLabels";
 import {
   createFeedbackState,
   DEFAULT_FEEDBACK_LABELS,
@@ -26,33 +60,44 @@ import {
   type FeedbackLabels,
   type MessageFeedbackState,
 } from "./renderFeedback";
-import {
-  buildChatIcon,
-  renderFormNotice,
-  renderMessage,
-} from "./renderMessage";
+import { renderFormNotice, renderMessage } from "./renderMessage";
+import { buildChatScreen, type ChatScreenHandle } from "./screens/chat";
+import { buildHistoryScreen, type HistoryScreenHandle } from "./screens/history";
+import { buildHomeScreen, type HomeScreenHandle } from "./screens/home";
 import {
   applyTheme,
   BORDER_COLOR,
-  BRAND_COLOR,
-  BRAND_TEXT_COLOR,
+  colorsToTheme,
   css,
   div,
+  EMBED_BACKGROUND,
   ensureKeyframes,
   FONT_VAR,
   HEADER_BACKGROUND,
   HEADER_TEXT_COLOR,
   MESSAGES_BACKGROUND,
   MUTED_TEXT_COLOR,
+  NEUTRAL_BORDER,
   PANEL_BACKGROUND,
+  PANEL_SHADOW,
+  PANEL_WIDTH,
   RADIUS,
+  SHADOW_MD,
   TEXT_COLOR,
 } from "./styles";
 import {
   lockBackgroundScroll,
   unlockBackgroundScroll,
 } from "./scrollLock";
-import type { ChatWidgetHandle, MountChatWidgetOptions } from "./types";
+import { buildTeaser, type TeaserHandle } from "./teaser";
+import { pickResumableThread } from "./threads";
+import type {
+  ChatWidgetHandle,
+  ConversationStarter,
+  MountChatWidgetOptions,
+  WidgetScreen,
+  WidgetTheme,
+} from "./types";
 
 // These public types used to be declared in this file; re-exported from their new
 // home in `./types` so existing `from "./createChatWidget"` imports keep working.
@@ -98,6 +143,34 @@ function messageFromResult(result: unknown): string | null {
 /** Per-document counter so each mobile-fullscreen widget gets a unique
  * `view-transition-name` (names must be unique across the document). */
 let widgetSeq = 0;
+
+/** The hosted widget's teaser text when `prompt` is not set. */
+const DEFAULT_PROMPT = "Hello, how can I help you today?";
+/** Gap between the launcher and the panel / teaser (frame.js `BUTTON_GAP`). */
+const BUBBLE_GAP = 6;
+/** The panel never grows taller than this (frame.js `MAX_PANEL_HEIGHT`). */
+const BUBBLE_MAX_HEIGHT = 800;
+/** Accepted `width` values for the bubble panel (frame.js `PANEL_WIDTH_PATTERN`). */
+const PANEL_WIDTH_PATTERN =
+  /^(?:\d+(?:\.\d+)?(?:px|rem|em|vw|vmin|vmax|%)|(?:min|max|clamp|calc)\([^;{}]+\))$/i;
+
+/**
+ * Normalize the bubble panel width, or null when it is not a usable CSS length
+ * (the panel then keeps its 550px default, like the hosted widget).
+ */
+function resolvePanelWidth(value: string | number): string | null {
+  const normalized =
+    typeof value === "number" ? `${value}px` : String(value).trim();
+  if (!PANEL_WIDTH_PATTERN.test(normalized)) return null;
+  if (
+    typeof CSS !== "undefined" &&
+    typeof CSS.supports === "function" &&
+    !CSS.supports("width", `min(max(400px, ${normalized}), 100% - 40px)`)
+  ) {
+    return null;
+  }
+  return normalized;
+}
 
 /** `document` augmented with the View Transitions API (not in all TS DOM libs). */
 type DocumentWithVT = Document & {
@@ -148,26 +221,23 @@ export function mountChatWidget(
   target: string | HTMLElement,
   options: MountChatWidgetOptions,
 ): ChatWidgetHandle {
+  const placement = options.placement ?? "inline";
+  // The bubble placement reproduces the hosted embed widget; several defaults
+  // follow that widget rather than the inline card, so they resolve here.
+  const isBubble = placement === "bubble";
   const {
-    title = "Chat",
     welcomeMessage = "Hello! How can I help you today?",
-    placeholder = "Type a message...",
     allowFiles = false,
     allowStop = true,
     height = 500,
-    placement = "inline",
-    width = 400,
     defaultOpen = false,
     logoUrl,
     showAgentName = false,
     agentBubble = false,
     bubbleStyle = "default",
     showHeader = true,
-    theme,
-    loadThreads = false,
     forms,
     formSubmittedMessage = DEFAULT_FORM_SUBMITTED_MESSAGE,
-    feedback = false,
     onFollowUpClick,
     onMessageSent,
     onMessageReceived,
@@ -175,7 +245,25 @@ export function mountChatWidget(
     onFormError,
     onOpen,
     onClose,
+    icon,
+    subtitle,
+    conversationStarters = [],
+    autoResume = true,
+    hideFooter = false,
   } = options;
+  const title = options.title ?? (isBubble ? "AGO Chatbot" : "Chat");
+  const width = options.width ?? (isBubble ? 550 : 400);
+  const loadThreads = options.loadThreads ?? isBubble;
+  // The hosted widget always shows thumbs under an answer.
+  const feedback = options.feedback ?? isBubble;
+  const labels = resolveLabels(options.labels);
+  const placeholder =
+    options.placeholder ?? (isBubble ? labels.askQuestion : "Type a message...");
+  const prompt = options.prompt === undefined ? DEFAULT_PROMPT : options.prompt;
+  // `colors` is the embed snippet's palette; `theme` wins over it key by key.
+  const theme: WidgetTheme | undefined = isBubble
+    ? { ...colorsToTheme(options.colors), ...options.theme }
+    : options.theme;
 
   // Normalize the greeting into a string + presentation. A bare string (or the
   // default) is the classic centered empty-state; the object form opts into the
@@ -203,8 +291,11 @@ export function mountChatWidget(
   // slides open and closed. `inline` (default) keeps the original behavior of
   // filling the target element.
   const isSide = placement === "left" || placement === "right";
-  const showLauncher = isSide && (options.launcher ?? true);
-  let panelOpen = isSide ? defaultOpen : true;
+  // Side and bubble panels share the fixed-wrapper mechanics (open/close,
+  // launcher, modal on mobile); inline is the odd one out.
+  const isFixedPanel = isSide || isBubble;
+  const showLauncher = isFixedPanel && (options.launcher ?? true);
+  let panelOpen = isFixedPanel ? defaultOpen : true;
   // Whether the side panel currently holds the background scroll lock (mobile,
   // full-screen only). Tracked so applyOpenState can reconcile lock/unlock.
   let panelScrollLocked = false;
@@ -213,7 +304,8 @@ export function mountChatWidget(
   // screen with no opt-in. All viewport/transition APIs below are feature-detected
   // so the behavior is inert (and test-safe) where they are missing: jsdom and
   // older browsers have no matchMedia / visualViewport / startViewTransition.
-  const mobileBreakpoint = options.mobile?.breakpoint ?? 768;
+  const mobileBreakpoint =
+    options.mobile?.breakpoint ?? (isBubble ? 450 : 768);
   const mobileTrigger = options.mobile?.trigger ?? "tap";
   const hasMatchMedia = typeof window !== "undefined" && !!window.matchMedia;
   // Width alone misses a phone in landscape: an iPhone is 844x390 there, so a
@@ -235,7 +327,7 @@ export function mountChatWidget(
   // narrower: it gates only the inline card -> sheet morph.
   const mobileEnabled = !!mobileMQ;
   // Inline placement morphs to a sheet on mobile; side panels just square off.
-  const inlineFullscreen = !isSide && !!mobileMQ;
+  const inlineFullscreen = !isFixedPanel && !!mobileMQ;
   // Identity for this widget's claim on the document scroll lock, so releasing
   // is idempotent and never drops another widget's lock.
   const lockOwner = Symbol("ago-scroll-lock");
@@ -245,7 +337,9 @@ export function mountChatWidget(
 
   // Optional cross-reload resumption of the visitor's last active thread, keyed off
   // a single stable widget id rather than a per-agent stored conversation id.
-  const persist = options.persistConversation;
+  // The bubble widget persists by default: the history screen and the
+  // auto-resume both key off the stable widget id the session provides.
+  const persist = options.persistConversation ?? (isBubble ? true : undefined);
   const session = persist
     ? createConversationSession(persist === true ? {} : persist)
     : undefined;
@@ -305,9 +399,32 @@ export function mountChatWidget(
   // Theme = inline `--ago-*` custom properties on the root; the `var()` references
   // throughout the panel resolve against them (and host-page CSS can set them too).
   applyTheme(container, theme);
+  if (isBubble) {
+    // The bubble wrapper draws the frame; the container is the embed layout
+    // root (`flex flex-col h-screen` on the faint blue-white surface).
+    css(container, {
+      height: "100%",
+      width: "100%",
+      border: "none",
+      borderRadius: "0",
+      boxShadow: "none",
+      backgroundColor: EMBED_BACKGROUND,
+      color: TEXT_COLOR,
+      fontSize: "14px",
+      lineHeight: "24px",
+    });
+    // Header text follows the header color for contrast (white unless the
+    // host picked a light header), the way the hosted widget derives it.
+    if (!theme?.headerText) {
+      container.style.setProperty(
+        "--ago-header-text-color",
+        readableTextColor(theme?.headerBg ?? theme?.brand ?? "#03182f"),
+      );
+    }
+  }
 
   let header: HTMLDivElement | undefined;
-  if (showHeader) {
+  if (showHeader && !isBubble) {
     header = div({
       padding: "14px 16px",
       borderBottom: `1px solid ${BORDER_COLOR}`,
@@ -378,6 +495,22 @@ export function mountChatWidget(
   messagesEl.setAttribute("aria-live", "polite");
   messagesEl.setAttribute("aria-relevant", "additions text");
   messagesEl.setAttribute("aria-atomic", "false");
+  // The bubble look scrolls a transparent column (`py-4`) and centers the
+  // messages in a 768px container; the nodes go into `listEl`, the scroll
+  // container stays `messagesEl`.
+  const listEl = isBubble
+    ? div({
+        maxWidth: "768px",
+        margin: "0 auto",
+        padding: "0 8px",
+        boxSizing: "border-box",
+      })
+    : messagesEl;
+  if (isBubble) {
+    css(messagesEl, { padding: "16px 0", backgroundColor: "transparent" });
+    listEl.className = "ago-chat-widget__list";
+    messagesEl.appendChild(listEl);
+  }
 
   // ── Follow-the-bottom policy ───────────────────────────────────────
   // The pane follows new content only while the reader is already at the bottom.
@@ -439,6 +572,24 @@ export function mountChatWidget(
     cursor: "pointer",
     zIndex: "2",
   });
+  if (isBubble) {
+    // `ButtonScrollToBottom`: a white disc that fades rather than unmounts.
+    jumpBtn.setAttribute("aria-label", labels.scrollToBottom);
+    jumpBtn.replaceChildren(arrowDownwardIcon({ size: 20 }));
+    css(jumpBtn, {
+      display: "flex",
+      width: "36px",
+      height: "36px",
+      padding: "8px",
+      boxSizing: "border-box",
+      border: `1px solid ${NEUTRAL_BORDER}`,
+      backgroundColor: "#fff",
+      boxShadow: SHADOW_MD,
+      transition: "opacity 0.3s",
+      opacity: "0",
+      pointerEvents: "none",
+    });
+  }
   jumpBtn.addEventListener("click", () => {
     stickToBottom = true;
     withoutScrollTracking(() => {
@@ -448,6 +599,11 @@ export function mountChatWidget(
   });
 
   function syncJumpBtn(): void {
+    if (isBubble) {
+      jumpBtn.style.opacity = stickToBottom ? "0" : "1";
+      jumpBtn.style.pointerEvents = stickToBottom ? "none" : "auto";
+      return;
+    }
     jumpBtn.style.display = stickToBottom ? "none" : "flex";
   }
 
@@ -476,16 +632,35 @@ export function mountChatWidget(
   });
   messagesWrap.append(messagesEl, jumpBtn);
 
-  const { inputRow, setDisabled, focus, restoreDraft } = buildInput({
+  const {
+    inputRow,
+    setDisabled,
+    focus,
+    restoreDraft,
+    setPlaceholder,
+    getValueAndClear,
+  } = buildInput({
     placeholder,
     allowFiles,
     onSend: (content, files) => void send(content, files),
     onStop: allowStop ? () => void stop() : undefined,
+    look: isBubble ? "embed" : "classic",
+    labels: isBubble
+      ? {
+          attachFiles: labels.attachFiles,
+          dismiss: labels.dismiss,
+          tooManyFiles: labels.tooManyFiles,
+          invalidFileType: labels.invalidFileType,
+          fileTooLarge: labels.fileTooLarge,
+        }
+      : undefined,
   });
 
   ensureKeyframes();
 
-  container.append(...(header ? [header] : []), messagesWrap, inputRow);
+  if (!isBubble) {
+    container.append(...(header ? [header] : []), messagesWrap, inputRow);
+  }
 
   // In side mode the panel lives inside a fixed, full-height wrapper pinned to the
   // chosen edge; otherwise it's mounted inline as before. `mountInto` is whatever
@@ -493,10 +668,127 @@ export function mountChatWidget(
   let mountInto: HTMLElement = container;
   let wrapper: HTMLDivElement | undefined;
   let launcherBtn: HTMLButtonElement | undefined;
+  let launcher: LauncherHandle | undefined;
 
   // Which viewport edge the side panel/launcher pin to (narrowed for use as a
-  // CSS property key); only meaningful when `isSide`.
+  // CSS property key); only meaningful when `isFixedPanel`.
   const edge: "left" | "right" = placement === "left" ? "left" : "right";
+
+  // ── Bubble scaffold (screens, chrome) ──────────────────────────────
+  let embedHeader: EmbedHeaderHandle | undefined;
+  let footer: FooterHandle | undefined;
+  let homeScreen: HomeScreenHandle | undefined;
+  let historyScreen: HistoryScreenHandle | undefined;
+  let chatScreen: ChatScreenHandle | undefined;
+  let mainEl: HTMLDivElement | undefined;
+  let teaser: TeaserHandle | undefined;
+  let teaserTimer: ReturnType<typeof setTimeout> | undefined;
+  let resizeTimer: ReturnType<typeof setTimeout> | undefined;
+  let screen: WidgetScreen = "home";
+  // The screen the current conversation was opened from, for the back chevron.
+  let cameFrom: WidgetScreen = "home";
+  // Once the visitor navigates on their own, the load-time auto-resume must
+  // not yank them elsewhere.
+  let navigatedByUser = false;
+  // True until the first thread list resolves (history spinner, resume gate).
+  let threadsLoading = loadThreads;
+  // True while a selected thread's history is being fetched.
+  let threadLoading = false;
+  // The load-time resume runs at most once.
+  let resumeChecked = false;
+
+  if (isBubble) {
+    wrapper = div({
+      position: "fixed",
+      right: "20px",
+      bottom: "80px",
+      top: `max(40px, calc(100% - ${80 + BUBBLE_MAX_HEIGHT}px))`,
+      width: `min(max(400px, ${PANEL_WIDTH}), var(--ago-panel-max, calc(100% - 40px)))`,
+      height: "auto",
+      borderRadius: "16px",
+      boxShadow: PANEL_SHADOW,
+      overflow: "hidden",
+      transformOrigin: "right bottom",
+      zIndex: "2147483000",
+      backgroundColor: EMBED_BACKGROUND,
+      display: "none",
+      fontFamily: FONT_VAR,
+    });
+    wrapper.className = "ago-chat-widget-bubble";
+    wrapper.dataset.agoLayout = "panel";
+    // Tokens on the wrapper too: its own width reads `--ago-panel-width`, and
+    // the container inherits everything else.
+    applyTheme(wrapper, theme);
+    if (!theme?.panelWidth) {
+      const panelWidth = resolvePanelWidth(width);
+      if (panelWidth) {
+        wrapper.style.setProperty("--ago-panel-width", panelWidth);
+      } else {
+        console.warn(
+          `[AGO] mountChatWidget width "${String(width)}" is not a valid CSS length, ignoring. ` +
+            'Expected e.g. 700 or "45rem". Falling back to 550px.',
+        );
+      }
+    }
+
+    if (showHeader) {
+      embedHeader = buildEmbedHeader({
+        title,
+        labels,
+        onBack: () => showScreen(cameFrom, { byUser: true }),
+        onNewChat: () => startNewConversation(),
+        onClose: () => closePanel(),
+      });
+      container.appendChild(embedHeader.el);
+    }
+    mainEl = div({
+      flex: "1",
+      display: "flex",
+      flexDirection: "column",
+      minHeight: "0",
+      overflow: "hidden",
+    });
+    mainEl.className = "ago-chat-widget__main";
+    container.appendChild(mainEl);
+    if (!hideFooter) {
+      footer = buildFooter({
+        labels,
+        onNavigate: (next) => showScreen(next, { byUser: true }),
+      });
+      container.appendChild(footer.el);
+    }
+
+    homeScreen = buildHomeScreen({
+      title,
+      subtitle,
+      starters: conversationStarters,
+      onStarter: (starter: ConversationStarter) => {
+        homeScreen?.setPending(starter);
+        void send(starter.message ?? starter.label).finally(() =>
+          homeScreen?.setPending(null),
+        );
+      },
+    });
+    const hostBackground = options.colors?.background;
+    historyScreen = buildHistoryScreen({
+      labels,
+      onSelect: (thread) => {
+        navigatedByUser = true;
+        cameFrom = "history";
+        void openThread(thread.id);
+      },
+      onNew: () => startNewConversation(),
+      hoverBackground:
+        hostBackground && isValidHexColor(hostBackground)
+          ? lightenColor(hostBackground, 10)
+          : undefined,
+      customFont: !!options.colors?.font,
+    });
+    chatScreen = buildChatScreen({ messagesWrap, jumpBtn });
+
+    wrapper.appendChild(container);
+    mountInto = wrapper;
+  }
 
   if (isSide) {
     wrapper = div({
@@ -528,38 +820,16 @@ export function mountChatWidget(
   }
 
   if (showLauncher) {
-    launcherBtn = document.createElement("button");
-    launcherBtn.type = "button";
-    launcherBtn.className = "ago-chat-widget-launcher";
-    launcherBtn.setAttribute("aria-label", `Open ${title}`);
-    css(launcherBtn, {
-      position: "fixed",
-      bottom: "20px",
-      [edge]: "20px",
-      width: "56px",
-      height: "56px",
-      borderRadius: "50%",
-      border: "none",
-      backgroundColor: BRAND_COLOR,
-      color: BRAND_TEXT_COLOR,
-      cursor: "pointer",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      zIndex: "2147483000",
-      boxShadow: "rgba(15, 15, 15, 0.2) 0px 4px 14px 0px",
-      fontFamily: FONT_VAR,
+    launcher = buildLauncher({
+      look: isBubble ? "bubble" : "classic",
+      edge,
+      title,
+      icon: isBubble ? icon : logoUrl,
+      // The bubble launcher stays on screen while open (desktop) and toggles;
+      // the side launcher hides while open, so it only ever opens.
+      onClick: () => (isBubble ? togglePanel() : openPanel()),
     });
-    if (logoUrl) {
-      const img = document.createElement("img");
-      img.src = logoUrl;
-      img.alt = "";
-      css(img, { width: "26px", height: "26px", objectFit: "contain" });
-      launcherBtn.appendChild(img);
-    } else {
-      launcherBtn.appendChild(buildChatIcon());
-    }
-    launcherBtn.addEventListener("click", () => openPanel());
+    launcherBtn = launcher.el;
   }
 
   // ── Mobile-fullscreen state (inert unless inline in a browser) ──
@@ -586,6 +856,17 @@ export function mountChatWidget(
   root.appendChild(mountInto);
   if (launcherBtn) root.appendChild(launcherBtn);
   applyOpenState();
+
+  if (isBubble) {
+    // The teaser pops in a second after mount, like the hosted widget, unless
+    // the panel is already open or the host opted out.
+    if (prompt !== false && !panelOpen) {
+      teaserTimer = setTimeout(showTeaser, 1000);
+    }
+    // Escape closes the desktop panel too (the modal handler covers mobile).
+    document.addEventListener("keydown", onBubbleKeydown);
+    window.addEventListener("resize", onBubbleResize);
+  }
 
   // ── Mobile-fullscreen setup (inline morph; nothing below runs otherwise) ──
   if (inlineFullscreen) {
@@ -726,11 +1007,344 @@ export function mountChatWidget(
     return renderFeedbackRow({
       state,
       labels: feedbackLabels,
-      askWhy: feedbackOptions.askWhy ?? true,
+      // Embed mode is thumbs only, as in the hosted widget.
+      askWhy: feedbackOptions.askWhy ?? !isBubble,
       // The thumb goes out on its own so the signal survives a visitor who
       // never fills the panel; the panel then files the detailed report.
       onRate: (rating) => void report(rating),
       onReport: (rating, details) => report(rating, details),
+      look: isBubble ? "embed" : "classic",
+    });
+  }
+
+  // ── Tool calls: the ticket form ────────────────────────────────────
+  // The agent's `ago_ticketing` tool opens a contact form in the conversation
+  // as a `form` tool call. Its fields come from the tenant's ticket form
+  // (`GET /config`), fetched once, the first time such a call shows up. Like
+  // the feedback row, every form's state and DOM node live here, keyed by
+  // tool call id, so a re-render moves the node instead of rebuilding it and
+  // a half-typed description survives every streamed chunk.
+  const toolCallFormOptions = options.toolCallForm ?? {};
+  const toolCallLabels: ToolCallFormLabels = {
+    ...DEFAULT_TOOL_CALL_FORM_LABELS,
+    ...toolCallFormOptions.labels,
+  };
+  const identity = client.getUserIdentity();
+  const identityEmail = toolCallFormOptions.userEmail ?? identity.email;
+  // No email and no JWT: the SDK cannot name the reporter, so the form asks.
+  const requireEmail = !identityEmail && !identity.hasJwt;
+  let ticketForm: TicketForm | null = null;
+  let ticketFormLoaded = false;
+  let ticketFormPromise: Promise<void> | undefined;
+  let fileAttachmentsEnabled = false;
+  type ToolCallEntry =
+    | {
+        kind: "ticket";
+        state: TicketFormState;
+        view: TicketFormView;
+        call: ToolCallData;
+      }
+    | { kind: "embed"; state: EmbedFormState; view: EmbedFormView }
+    | { kind: "static"; el: HTMLElement };
+  const toolCallViews = new Map<string, ToolCallEntry>();
+  // Tool calls whose ticket was created in this session (before a reload
+  // would surface it on the persisted call's `data`).
+  const submittedToolCalls = new Set<string>();
+
+  function ensureTicketFormConfig(): void {
+    if (ticketFormPromise) return;
+    ticketFormPromise = client
+      .getConfig()
+      .then((config) => {
+        const permission = config.permissions[0];
+        ticketForm = permission?.ticketForm ?? null;
+        fileAttachmentsEnabled = !!permission?.fileAttachmentsEnabled;
+      })
+      .catch(() => {
+        ticketForm = null;
+      })
+      .then(() => {
+        ticketFormLoaded = true;
+        if (destroyed) return;
+        for (const entry of toolCallViews.values()) {
+          if (entry.kind !== "ticket") continue;
+          if (ticketForm) {
+            hydrateTicketFormState(entry.state, entry.call.ticket, ticketForm);
+          }
+          entry.view.rebuild({ ticketForm, configLoading: false });
+        }
+      });
+  }
+
+  function clearToolCallViews(): void {
+    for (const entry of toolCallViews.values()) {
+      if (entry.kind === "embed") entry.view.destroy();
+    }
+    toolCallViews.clear();
+    submittedToolCalls.clear();
+  }
+
+  function findToolCall(id: string): ToolCallData | undefined {
+    for (const message of messages) {
+      const call = message.toolCalls?.find((tc) => tc.id === id);
+      if (call) return call;
+    }
+    return undefined;
+  }
+
+  /** Build (once) the node for a ticketing `form` tool call. */
+  function ticketFormEntry(call: ToolCallData): ToolCallEntry {
+    const existing = toolCallViews.get(call.id);
+    if (existing) return existing;
+    let entry: ToolCallEntry;
+    if (call.allowedToCreateTicket === false) {
+      const wrap = div({ display: "flex", flexDirection: "column", gap: "16px" });
+      wrap.className = "ago-ticket-form ago-ticket-form--denied";
+      wrap.appendChild(renderTicketDenied(toolCallLabels.notAllowed));
+      entry = { kind: "static", el: wrap };
+    } else if (call.mode === "embed") {
+      const state: EmbedFormState = {
+        status: submittedTicketOf(call) ? "submitted" : "loading",
+      };
+      const view = createEmbedFormView({
+        state,
+        embedHtml: call.embedHtml,
+        description: call.embedDescription,
+        ticket: call.ticket,
+        email: identityEmail,
+        labels: toolCallLabels,
+        message: call.message,
+        successMessage: toolCallFormOptions.successMessage,
+        onSubmitted: (captured) => {
+          submittedToolCalls.add(call.id);
+          void client
+            .submitToolCallForm(call.id, {
+              success: true,
+              source: "embed",
+              thread_id: conversationId,
+              captured_form_data: captured,
+            })
+            .then((response) => {
+              const raw =
+                response.ticket ??
+                (response.result as { ticket?: { ticket_id?: string; ticket_url?: string } } | undefined)
+                  ?.ticket;
+              toolCallFormOptions.onSubmitted?.({
+                toolCallId: call.id,
+                toolName: call.toolName,
+                mode: "embed",
+                ticket: raw?.ticket_id
+                  ? { id: String(raw.ticket_id), url: raw.ticket_url }
+                  : undefined,
+                values: captured ?? {},
+              });
+            })
+            .catch((error: unknown) => {
+              toolCallFormOptions.onError?.(
+                error instanceof Error ? error : new Error(String(error)),
+              );
+            })
+            .finally(() => {
+              if (!destroyed) render();
+            });
+        },
+      });
+      entry = { kind: "embed", state, view };
+    } else {
+      ensureTicketFormConfig();
+      const state = createTicketFormState(call.ticket, ticketForm, identityEmail ?? "");
+      const done = submittedTicketOf(call);
+      if (done) state.submitted = done;
+      const view = createTicketFormView({
+        state,
+        ticketForm,
+        configLoading: !ticketFormLoaded,
+        labels: toolCallLabels,
+        message: call.message,
+        requireEmail,
+        allowFiles: allowFiles || fileAttachmentsEnabled,
+        successMessage: toolCallFormOptions.successMessage,
+        successUrlLabel: toolCallFormOptions.successUrlLabel,
+        createTicket: (payload) =>
+          client.createTicket({
+            subject: payload.subject,
+            body: payload.body,
+            priority: payload.priority,
+            typology: payload.typology,
+            conversationId,
+            email: payload.email,
+            customFields: payload.customFields,
+            files: payload.files,
+            ticketFormId: payload.ticketFormId,
+          }),
+        onCreated: (result, formState) => {
+          submittedToolCalls.add(call.id);
+          const customFields = Object.entries(formState.customFields).map(
+            ([id, value]) => ({ id, value }),
+          );
+          void client
+            .submitToolCallForm(call.id, {
+              success: true,
+              ticket_id: result.id,
+              ticket_url: result.url,
+              subject: formState.ticket.subject,
+              typology: formState.ticket.typology,
+              priority: formState.ticket.priority,
+              body: formState.ticket.body,
+              tag: formState.ticket.tag,
+              custom_fields: customFields,
+              created_at: new Date().toISOString(),
+            })
+            .catch((error: unknown) => {
+              toolCallFormOptions.onError?.(
+                error instanceof Error ? error : new Error(String(error)),
+              );
+            })
+            .finally(() => {
+              toolCallFormOptions.onSubmitted?.({
+                toolCallId: call.id,
+                toolName: call.toolName,
+                mode: "form",
+                ticket: { id: result.id, url: result.url },
+                values: {
+                  ...formState.ticket,
+                  custom_fields: formState.customFields,
+                  email: requireEmail ? formState.email : undefined,
+                },
+              });
+              if (!destroyed) render();
+            });
+        },
+        onError: toolCallFormOptions.onError,
+      });
+      entry = { kind: "ticket", state, view, call };
+    }
+    toolCallViews.set(call.id, entry);
+    return entry;
+  }
+
+  /**
+   * The node for one tool call, or null. Only the newest `form` call in the
+   * thread renders as a form; older ones become the status line the hosted
+   * widget shows in their place. Other types belong to the collapsible
+   * "reasoning" section, which embed mode hides.
+   */
+  function renderToolCall(call: ToolCallData): HTMLElement | null {
+    if (call.type !== "form") return null;
+    // A form explicitly confined to the collapsible section stays hidden, as
+    // in the hosted widget; the ticketing tool always asks for `display`.
+    if (call.displayMode === "collapsible") return null;
+    const latest = latestFormToolCallId(messages);
+    if (latest && latest !== call.id) {
+      const newest = findToolCall(latest);
+      const rejected =
+        !!newest?.askToTalkToHuman && newest.allowedToCreateTicket === false;
+      return renderStatusMessage(
+        rejected
+          ? toolCallLabels.contactFormRejected
+          : toolCallLabels.contactFormCreated,
+        rejected ? "warning" : "info",
+      );
+    }
+    if (!isTicketingCall(call)) {
+      return renderGenericFormPlaceholder(call, toolCallLabels);
+    }
+    const entry = ticketFormEntry(call);
+    return entry.kind === "static" ? entry.el : entry.view.el;
+  }
+
+  // The composer is replaced by a card while a form is pending, and by the
+  // "ticket created" card (with a way to start over) once the ticket exists.
+  let blockedCard: HTMLDivElement | undefined;
+  function syncBlockedCard(): void {
+    const hasPendingForm = messages.some((m) =>
+      m.toolCalls?.some((tc) => tc.type === "form"),
+    );
+    const ticketCreated =
+      submittedToolCalls.size > 0 || ticketCreatedInThread(messages);
+    if (!hasPendingForm && !ticketCreated) {
+      inputRow.style.display = "";
+      blockedCard?.remove();
+      return;
+    }
+    if (!blockedCard) {
+      blockedCard = div({
+        margin: "12px",
+        borderRadius: "24px",
+        border: `1px solid ${BORDER_COLOR}`,
+        boxShadow: "0 1px 2px rgba(0, 0, 0, 0.05)",
+        backgroundColor: PANEL_BACKGROUND,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: "16px",
+        padding: "28px 24px",
+        textAlign: "center",
+        fontFamily: FONT_VAR,
+      });
+      blockedCard.className = "ago-chat-blocked";
+    }
+    blockedCard.replaceChildren();
+    const text = document.createElement("p");
+    text.textContent = ticketCreated
+      ? toolCallLabels.ticketCreatedBlocked
+      : toolCallLabels.formPending;
+    css(text, {
+      color: MUTED_TEXT_COLOR,
+      lineHeight: "1.625",
+      fontSize: "16px",
+      margin: "0",
+      whiteSpace: "pre-line",
+    });
+    blockedCard.appendChild(text);
+    if (ticketCreated) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "ago-chat-blocked__new";
+      css(btn, {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "8px",
+        borderRadius: "9999px",
+        padding: "0 20px",
+        minHeight: "44px",
+        backgroundColor: "var(--ago-brand-color, #03182f)",
+        color: "var(--ago-brand-text-color, #fff)",
+        border: "none",
+        cursor: "pointer",
+        font: "inherit",
+        fontSize: "14px",
+        fontWeight: "500",
+      });
+      btn.append(addCommentIcon({ size: 18 }));
+      const label = document.createElement("span");
+      label.textContent = toolCallLabels.newConversation;
+      btn.appendChild(label);
+      btn.addEventListener("click", () => {
+        startNewConversation();
+        toolCallFormOptions.onNewConversation?.();
+      });
+      blockedCard.appendChild(btn);
+    }
+    inputRow.style.display = "none";
+    inputRow.parentElement?.insertBefore(blockedCard, inputRow);
+  }
+
+  /** Build the DOM node for the message at `index`, in the placement's look. */
+  function renderOne(index: number): HTMLElement {
+    const message = messages[index];
+    if (!isBubble) {
+      return renderMessage(message, { ...messageOpts(index), renderToolCall });
+    }
+    return renderEmbedMessage(message, {
+      isLast: index === messages.length - 1,
+      followUpEnabled,
+      followUpHandler,
+      agentRowTinted: !!theme?.agentBubbleBg,
+      agentRowTextTinted: !!theme?.agentBubbleText,
+      labels,
+      actionsRow: buildFeedback(message),
+      renderToolCall,
     });
   }
 
@@ -778,9 +1392,15 @@ export function mountChatWidget(
     const message = messages[index];
     if (!message || message.role !== "assistant") return false;
     const current = messageNodes[index];
-    if (!current || current.parentNode !== messagesEl) return false;
-    const next = renderMessage(message, messageOpts(index));
-    withoutScrollTracking(() => messagesEl.replaceChild(next, current));
+    if (!current || current.parentNode !== listEl) return false;
+    const next = renderOne(index);
+    // A ticket form being typed into is moved, not rebuilt; keep the caret
+    // where it was through the swap.
+    const active = document.activeElement;
+    const keepFocus =
+      active instanceof HTMLElement && current.contains(active) ? active : null;
+    withoutScrollTracking(() => listEl.replaceChild(next, current));
+    if (keepFocus && next.contains(keepFocus)) keepFocus.focus({ preventScroll: true });
     messageNodes[index] = next;
     autoScroll();
     return true;
@@ -801,16 +1421,38 @@ export function mountChatWidget(
     // completed answer is announced once, when aria-busy clears.
     messagesEl.setAttribute("aria-busy", isAnswering ? "true" : "false");
     setDisabled(isAnswering);
+    syncBlockedCard();
   }
 
   function renderAll(): void {
-    messagesEl.replaceChildren();
+    listEl.replaceChildren();
     messageNodes = [];
     if (messages.length === 0) {
-      // In streaming mode the empty state stays blank: the greeting plays as a
-      // real assistant bubble (see streamWelcome), so there are no messages to
-      // show only for the brief moment before the first token arrives.
-      if (welcomeMode === "static") {
+      if (isBubble) {
+        // The home screen is the empty state; the list only shows a spinner
+        // while a selected thread loads.
+        if (threadLoading) {
+          const wrap = div({
+            display: "flex",
+            justifyContent: "center",
+            padding: "32px 0",
+          });
+          wrap.className = "ago-chat-widget__thread-loading";
+          const spinner = div({
+            width: "32px",
+            height: "32px",
+            borderRadius: "50%",
+            borderBottom: "2px solid var(--ago-brand-color, #03182f)",
+            animation: "ago-spin 1s linear infinite",
+          });
+          spinner.setAttribute("role", "status");
+          wrap.appendChild(spinner);
+          listEl.appendChild(wrap);
+        }
+      } else if (welcomeMode === "static") {
+        // In streaming mode the empty state stays blank: the greeting plays as a
+        // real assistant bubble (see streamWelcome), so there are no messages to
+        // show only for the brief moment before the first token arrives.
         const welcome = div({
           textAlign: "center",
           color: MUTED_TEXT_COLOR,
@@ -819,20 +1461,24 @@ export function mountChatWidget(
           lineHeight: "1.5",
         });
         welcome.appendChild(renderMarkdown(welcomeText));
-        messagesEl.appendChild(welcome);
+        listEl.appendChild(welcome);
       }
     } else {
-      messages.forEach((message, index) => {
-        const node = renderMessage(message, messageOpts(index));
+      messages.forEach((_, index) => {
+        const node = renderOne(index);
         messageNodes[index] = node;
-        messagesEl.appendChild(node);
+        listEl.appendChild(node);
       });
     }
     // One confirmation per submitted form, below the conversation.
     for (const text of formNotices) {
-      messagesEl.appendChild(renderFormNotice(text));
+      listEl.appendChild(renderFormNotice(text));
     }
     if (errorMessage) {
+      if (isBubble) {
+        listEl.appendChild(buildEmbedAlert(labels.errorTitle, errorMessage));
+        return;
+      }
       const err = div({
         padding: "10px 14px",
         backgroundColor: "#fef2f2",
@@ -845,7 +1491,7 @@ export function mountChatWidget(
       // Announce failures immediately (the surrounding log is only `polite`).
       err.setAttribute("role", "alert");
       err.textContent = errorMessage;
-      messagesEl.appendChild(err);
+      listEl.appendChild(err);
     }
   }
 
@@ -969,12 +1615,42 @@ export function mountChatWidget(
     }, welcomeSpeed);
   }
 
+  // A generated title lands on the thread list live, so the history screen
+  // does not show "New conversation" for a thread that just got named.
+  const onTitle = (data: AgoClientEvents["conversation:title"]): void => {
+    const thread = threads.find((t) => t.id === data.conversationId);
+    if (thread) thread.title = data.title;
+    if (isBubble && screen === "history") {
+      historyScreen?.render({ threads, loading: threadsLoading });
+    }
+  };
+
+  // A tool call lands mid-stream: attach it to the bubble being written so a
+  // ticket form shows up the moment the agent opens it, not at the end of the
+  // turn. The final message carries the same call (same id), so the cached
+  // form node is reused rather than rebuilt.
+  const onToolCall = (call: ToolCallData): void => {
+    if (call.type !== "form") return;
+    const target =
+      lastInProgressAssistant() ??
+      [...messages].reverse().find((m) => m.role === "assistant");
+    if (!target) return;
+    const calls = target.toolCalls ?? [];
+    const idx = calls.findIndex((tc) => tc.id === call.id);
+    if (idx >= 0) calls[idx] = call;
+    else calls.push(call);
+    target.toolCalls = calls;
+    render();
+  };
+
   client.on("message:start", onStart);
   client.on("message:chunk", onChunk);
   client.on("message:answer-complete", onAnswerComplete);
   client.on("message:complete", onComplete);
   client.on("message:stopped", onStopped);
   client.on("message:error", onError);
+  client.on("conversation:title", onTitle);
+  client.on("toolCall:received", onToolCall);
 
   // Forward form submit outcomes to the optional callbacks. The success notice is
   // still driven by the collector store below; these are additive (and the only
@@ -1023,6 +1699,12 @@ export function mountChatWidget(
   async function send(content: string, files?: File[]): Promise<void> {
     const trimmed = content.trim();
     if ((!trimmed && !files?.length) || isLoading) return;
+    // Sending from the home screen (composer or a starter card) lands the
+    // exchange on the conversation screen.
+    if (isBubble && screen !== "chat") {
+      cameFrom = "home";
+      showScreen("chat", { byUser: true });
+    }
     onMessageSent?.(trimmed);
     isLoading = true;
     errorMessage = null;
@@ -1132,6 +1814,13 @@ export function mountChatWidget(
     } catch {
       // Keep the previous list on failure (offline, transient error).
     }
+    threadsLoading = false;
+    if (isBubble && !destroyed) {
+      if (screen === "history") {
+        historyScreen?.render({ threads, loading: false });
+      }
+      tryAutoResume();
+    }
     return threads;
   }
 
@@ -1140,40 +1829,246 @@ export function mountChatWidget(
   async function loadHistory(id: string): Promise<void> {
     try {
       const conv = await client.getConversation(id);
+      // The visitor moved on (new conversation, another thread) meanwhile.
+      if (conversationId !== id) return;
       const history = conv?.messages ?? [];
+      threadLoading = false;
       // Skip if the user already started a message while we were loading.
       if (history.length > 0 && messages.length === 0) {
         messages = history;
         render();
+      } else if (isBubble) {
+        render();
       }
+      if (isBubble) session?.setActiveThread(id, conv.lastMessageDate);
     } catch {
+      if (conversationId !== id) return;
+      threadLoading = false;
       // Expired, deleted, or offline — forget it and start fresh on the next send.
       if (messages.length === 0) {
         session?.clear();
         conversationId = undefined;
+        if (isBubble) {
+          if (screen === "chat") showScreen("home");
+          render();
+        }
       }
     }
   }
 
-  render();
-  // On a mobile viewport the inline card is a compact launcher; don't auto-focus
-  // it (that would pop the keyboard and morph to full screen on load). Focus
-  // happens on genuine user engagement instead (pointerdown / focusin).
-  if (!(inlineFullscreen && mobileMQ?.matches)) focus();
-  // Resuming a thread loads its real history; otherwise (a fresh visit) play the
-  // streamed greeting if one was configured. `conversationId` is the fresh-visit
-  // gate: it's set only when an explicit id or a stored last-active thread exists.
-  if (conversationId) void loadHistory(conversationId);
-  else if (welcomeMode === "streaming") streamWelcome(welcomeText);
+  // ── Bubble screens and navigation ──────────────────────────────────
+  /** Show one of the three bubble screens and update the header/footer. */
+  function showScreen(
+    next: WidgetScreen,
+    opts?: { byUser?: boolean },
+  ): void {
+    if (!isBubble || !mainEl || !homeScreen || !chatScreen || !historyScreen) {
+      return;
+    }
+    if (opts?.byUser) navigatedByUser = true;
+    screen = next;
+    // One composer, moved to whichever screen shows it.
+    if (next === "home") {
+      homeScreen.composerSlot.appendChild(inputRow);
+      setPlaceholder(placeholder);
+    } else if (next === "chat") {
+      chatScreen.composerSlot.appendChild(inputRow);
+      // No placeholder inside a thread (reference `data-placeholder=""`).
+      setPlaceholder("");
+    }
+    const el =
+      next === "home"
+        ? homeScreen.el
+        : next === "chat"
+          ? chatScreen.el
+          : historyScreen.el;
+    mainEl.replaceChildren(el);
+    if (next === "history") {
+      historyScreen.render({ threads, loading: threadsLoading });
+    }
+    if (next === "chat") {
+      stickToBottom = true;
+      autoScroll();
+    }
+    embedHeader?.update({ screen: next });
+    footer?.setActive(next);
+    footer?.setVisible(next !== "chat");
+  }
+
+  /** Open a thread on the chat screen and load its history. */
+  async function openThread(id: string): Promise<void> {
+    if (!isBubble) return;
+    if (isLoading) await stop();
+    conversationId = id;
+    messages = [];
+    errorMessage = null;
+    formNotices.length = 0;
+    feedbackStates.clear();
+    clearToolCallViews();
+    threadLoading = true;
+    showScreen("chat");
+    render();
+    await loadHistory(id);
+  }
+
+  /**
+   * Forget the current thread and start over: the bubble widget returns to
+   * its home screen, the others clear the thread in place.
+   */
+  function startNewConversation(): void {
+    if (isLoading) void stop();
+    conversationId = undefined;
+    messages = [];
+    errorMessage = null;
+    formNotices.length = 0;
+    feedbackStates.clear();
+    clearToolCallViews();
+    threadLoading = false;
+    session?.clear();
+    getValueAndClear();
+    homeScreen?.setPending(null);
+    cameFrom = "home";
+    if (isBubble) showScreen("home", { byUser: true });
+    render();
+  }
+
+  /**
+   * The load-time resume, driven by the server's thread list: reopen the most
+   * recent thread if its last message is under two hours old. Runs once, and
+   * only on the untouched home screen, so a visitor who already navigated is
+   * never redirected.
+   */
+  function tryAutoResume(): void {
+    if (!isBubble || resumeChecked) return;
+    resumeChecked = true;
+    if (
+      !autoResume ||
+      navigatedByUser ||
+      screen !== "home" ||
+      messages.length > 0 ||
+      conversationId
+    ) {
+      return;
+    }
+    const thread = pickResumableThread(threads);
+    if (thread) void openThread(thread.id);
+  }
+
+  function showTeaser(): void {
+    teaserTimer = undefined;
+    if (destroyed || panelOpen || prompt === false || teaser) return;
+    teaser = buildTeaser({
+      text: prompt,
+      edge,
+      onOpen: () => openPanel(),
+      onDismiss: () => {
+        teaser = undefined;
+      },
+    });
+    root.appendChild(teaser.el);
+    syncPositionsToLauncher();
+  }
+
+  /**
+   * Derive the panel and teaser position from the launcher's used position
+   * (frame.js `syncPositionsToButton`), so a host that moves the launcher with
+   * CSS moves the panel with it. Computed style, not the bounding rect: the
+   * rect includes the hover scale and would jitter.
+   */
+  function syncPositionsToLauncher(): void {
+    if (!isBubble || !wrapper || !launcherBtn || isCompact()) return;
+    if (!launcherBtn.offsetHeight) return;
+    const style = getComputedStyle(launcherBtn);
+    const launcherBottom = parseFloat(style.bottom);
+    const launcherRight = parseFloat(style.right);
+    if (Number.isNaN(launcherBottom) || Number.isNaN(launcherRight)) return;
+    const bottom =
+      Math.round(launcherBottom + launcherBtn.offsetHeight) + BUBBLE_GAP;
+    const right = Math.round(launcherRight);
+    const targets: HTMLElement[] = [wrapper];
+    if (teaser) targets.push(teaser.el);
+    for (const el of targets) {
+      el.style.setProperty("bottom", `${bottom}px`, "important");
+      el.style.setProperty("right", `${right}px`, "important");
+    }
+    wrapper.style.setProperty(
+      "top",
+      `max(40px, calc(100% - ${bottom + BUBBLE_MAX_HEIGHT}px))`,
+      "important",
+    );
+    wrapper.style.setProperty("--ago-panel-max", `calc(100% - ${right + 20}px)`);
+  }
+
+  function onBubbleKeydown(e: KeyboardEvent): void {
+    if (e.key !== "Escape" || !panelOpen || e.defaultPrevented) return;
+    if (
+      e.target instanceof HTMLInputElement ||
+      e.target instanceof HTMLTextAreaElement
+    ) {
+      return;
+    }
+    // On a compact viewport the modal handler already closes it.
+    if (isModal()) return;
+    closePanel();
+  }
+
+  function onBubbleResize(): void {
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      resizeTimer = undefined;
+      if (destroyed) return;
+      syncPositionsToLauncher();
+      homeScreen?.syncColumns();
+    }, 150);
+  }
+
+  if (isBubble) {
+    showScreen("home");
+    render();
+    if (options.conversationId) {
+      // An explicit thread opens straight into the conversation, and counts
+      // as the visitor's own navigation (no load-time redirect on top).
+      navigatedByUser = true;
+      resumeChecked = true;
+      void openThread(options.conversationId);
+    } else if (conversationId && autoResume) {
+      // The front-side cache (same two-hour rule) resumes without a round-trip.
+      resumeChecked = true;
+      void openThread(conversationId);
+    } else {
+      conversationId = undefined;
+    }
+  } else {
+    render();
+    // On a mobile viewport the inline card is a compact launcher; don't auto-focus
+    // it (that would pop the keyboard and morph to full screen on load). Focus
+    // happens on genuine user engagement instead (pointerdown / focusin).
+    if (!(inlineFullscreen && mobileMQ?.matches)) focus();
+    // Resuming a thread loads its real history; otherwise (a fresh visit) play the
+    // streamed greeting if one was configured. `conversationId` is the fresh-visit
+    // gate: it's set only when an explicit id or a stored last-active thread exists.
+    if (conversationId) void loadHistory(conversationId);
+    else if (welcomeMode === "streaming") streamWelcome(welcomeText);
+  }
   if (loadThreads) void refreshThreads();
 
-  return {
+  const handle: ChatWidgetHandle = {
     client,
     element: mountInto,
     sendMessage: send,
     stop,
-    ...(isSide || inlineFullscreen
+    ...(isFixedPanel || inlineFullscreen
       ? { open: openCtl, close: closeCtl, toggle: toggleCtl }
+      : {}),
+    newConversation: startNewConversation,
+    ...(isBubble
+      ? {
+          showScreen: (next: WidgetScreen) => showScreen(next, { byUser: true }),
+          openConversation: (id: string) => {
+            navigatedByUser = true;
+            return openThread(id);
+          },
+        }
       : {}),
     session,
     threads,
@@ -1184,12 +2079,18 @@ export function mountChatWidget(
       if (destroyed) return;
       destroyed = true;
       if (introTimer) clearInterval(introTimer);
+      if (teaserTimer) clearTimeout(teaserTimer);
+      if (resizeTimer) clearTimeout(resizeTimer);
+      teaser?.remove();
       client.off("message:start", onStart);
       client.off("message:chunk", onChunk);
       client.off("message:answer-complete", onAnswerComplete);
       client.off("message:complete", onComplete);
       client.off("message:stopped", onStopped);
       client.off("message:error", onError);
+      client.off("conversation:title", onTitle);
+      client.off("toolCall:received", onToolCall);
+      clearToolCallViews();
       if (onFormSubmitted) client.off("form:submitted", onFormSubmittedEvent);
       if (onFormError) client.off("form:error", onFormErrorEvent);
       formsDestroyed = true;
@@ -1197,6 +2098,8 @@ export function mountChatWidget(
       mountInto.remove();
       launcherBtn?.remove();
       mobileBar?.remove();
+      document.removeEventListener("keydown", onBubbleKeydown);
+      window.removeEventListener("resize", onBubbleResize);
       vtStyle?.remove();
       inlineSpacer?.remove();
       mobileMQ?.removeEventListener("change", onMobileMqChange);
@@ -1214,14 +2117,25 @@ export function mountChatWidget(
       if (!options.client) client.destroy();
     },
   };
+  // A live getter: an object-literal getter would be flattened to a snapshot
+  // by the spreads above.
+  if (isBubble) {
+    Object.defineProperty(handle, "screen", {
+      get: () => screen,
+      enumerable: true,
+    });
+  }
+  return handle;
 
   // ── Side-panel open/close (no-ops in inline mode) ──────────────────
   function applyOpenState(): void {
     if (!wrapper) return;
-    // Square the side panel off to a full-screen sheet on mobile (automatic; no
-    // opt-in). On viewports wider than the breakpoint it keeps its resting width
-    // and inner divider. Slide mechanics below are unchanged.
-    {
+    if (isBubble) {
+      applyBubbleGeometry();
+    } else {
+      // Square the side panel off to a full-screen sheet on mobile (automatic; no
+      // opt-in). On viewports wider than the breakpoint it keeps its resting width
+      // and inner divider. Slide mechanics below are unchanged.
       const sideBorder = edge === "left" ? "border-right" : "border-left";
       if (mobileMQ?.matches) {
         wrapper.style.width = "100%";
@@ -1231,12 +2145,12 @@ export function mountChatWidget(
         wrapper.style.width = typeof width === "number" ? `${width}px` : width;
         container.style.setProperty(sideBorder, `1px solid ${BORDER_COLOR}`);
       }
+      const hidden =
+        placement === "left" ? "translateX(-100%)" : "translateX(100%)";
+      wrapper.style.transform = panelOpen ? "translateX(0)" : hidden;
+      if (launcherBtn) launcherBtn.style.display = panelOpen ? "none" : "flex";
     }
-    const hidden =
-      placement === "left" ? "translateX(-100%)" : "translateX(100%)";
-    wrapper.style.transform = panelOpen ? "translateX(0)" : hidden;
     wrapper.setAttribute("aria-hidden", panelOpen ? "false" : "true");
-    if (launcherBtn) launcherBtn.style.display = panelOpen ? "none" : "flex";
     // Everything below is reconciled from `isModal()` rather than set at each
     // call site, so open/close, breakpoint crossings and rotation all converge
     // on the same state instead of each having to remember the full checklist.
@@ -1270,8 +2184,75 @@ export function mountChatWidget(
       }
     }
   }
+  /**
+   * The bubble panel's geometry: the hosted widget's fixed bottom-right card on
+   * desktop, a full-screen sheet on a compact viewport (launcher hidden, safe
+   * areas padded). The panel collapses to nothing while closed.
+   */
+  function applyBubbleGeometry(): void {
+    if (!wrapper) return;
+    wrapper.style.display = panelOpen ? "block" : "none";
+    launcher?.setOpen(panelOpen);
+    const compact = isCompact();
+    if (launcherBtn) {
+      launcherBtn.style.display = compact && panelOpen ? "none" : "flex";
+    }
+    if (compact) {
+      for (const prop of ["bottom", "right", "top", "--ago-panel-max"]) {
+        wrapper.style.removeProperty(prop);
+      }
+      css(wrapper, {
+        top: "0",
+        left: "0",
+        right: "0",
+        bottom: "0",
+        width: "100dvw",
+        maxWidth: "100vw",
+        height: "var(--ago-vh, 100dvh)",
+        borderRadius: "0",
+        paddingTop: "env(safe-area-inset-top, 0px)",
+        paddingBottom: "env(safe-area-inset-bottom, 0px)",
+        paddingLeft: "env(safe-area-inset-left, 0px)",
+        paddingRight: "env(safe-area-inset-right, 0px)",
+        boxSizing: "border-box",
+      });
+      wrapper.dataset.agoLayout = "fullscreen";
+      if (panelOpen) {
+        teaser?.remove();
+        teaser = undefined;
+      }
+    } else {
+      for (const prop of [
+        "left",
+        "max-width",
+        "padding-top",
+        "padding-bottom",
+        "padding-left",
+        "padding-right",
+      ]) {
+        wrapper.style.removeProperty(prop);
+      }
+      css(wrapper, {
+        right: "20px",
+        bottom: "80px",
+        top: `max(40px, calc(100% - ${80 + BUBBLE_MAX_HEIGHT}px))`,
+        width: `min(max(400px, ${PANEL_WIDTH}), var(--ago-panel-max, calc(100% - 40px)))`,
+        height: "auto",
+        borderRadius: "16px",
+      });
+      wrapper.dataset.agoLayout = "panel";
+      syncPositionsToLauncher();
+    }
+  }
   function openPanel(): void {
     panelOpen = true;
+    // The teaser has done its job once the panel opens.
+    if (teaserTimer) {
+      clearTimeout(teaserTimer);
+      teaserTimer = undefined;
+    }
+    teaser?.remove();
+    teaser = undefined;
     applyOpenState();
     // On a compact viewport, focusing the textarea would pop the on-screen
     // keyboard immediately and eat half the panel before anything is read. Move
@@ -1295,15 +2276,15 @@ export function mountChatWidget(
 
   // ── Mobile fullscreen (inline card ↔ full-screen sheet) ────────────
   function openCtl(): void {
-    if (isSide) openPanel();
+    if (isFixedPanel) openPanel();
     else void expandInline();
   }
   function closeCtl(): void {
-    if (isSide) closePanel();
+    if (isFixedPanel) closePanel();
     else void collapseInline();
   }
   function toggleCtl(): void {
-    if (isSide) togglePanel();
+    if (isFixedPanel) togglePanel();
     else if (inlineExpanded) void collapseInline();
     else void expandInline();
   }
@@ -1319,7 +2300,7 @@ export function mountChatWidget(
   // The host page is still visible and usable beside it, so trapping Tab there
   // would strand keyboard users and `aria-modal` would lie to assistive tech.
   function isModal(): boolean {
-    return isCompact() && (isSide ? panelOpen : inlineExpanded);
+    return isCompact() && (isFixedPanel ? panelOpen : inlineExpanded);
   }
   // Visible, tabbable elements inside the modal surface (skips display:none
   // subtrees like the hidden in-card header; getClientRects covers fixed elements
@@ -1335,7 +2316,7 @@ export function mountChatWidget(
   function onModalKeydown(e: KeyboardEvent): void {
     if (!isModal()) return;
     if (e.key === "Escape") {
-      if (isSide) closePanel();
+      if (isFixedPanel) closePanel();
       else void collapseInline();
       return;
     }
@@ -1362,7 +2343,7 @@ export function mountChatWidget(
     }
   }
   function onMobileMqChange(e: MediaQueryListEvent): void {
-    if (isSide) applyOpenState();
+    if (isFixedPanel) applyOpenState();
     else if (!e.matches && inlineExpanded) void collapseInline();
     // Bubble max-width depends on the breakpoint (see renderMessage isMobile), so
     // reflow the thread when it changes (rotation / resize across the breakpoint).
@@ -1395,7 +2376,7 @@ export function mountChatWidget(
     const vv = window.visualViewport;
     const top = vv?.offsetTop ?? 0;
     const h = vv?.height ?? fullVh;
-    if (isSide) {
+    if (isFixedPanel) {
       if (!wrapper) return;
       // Layout viewport height: unchanged by the iOS keyboard, which is exactly
       // why `bottom: 0` ends up underneath it and has to be corrected here.
@@ -1415,9 +2396,11 @@ export function mountChatWidget(
   }
   /** Undo `applyVh`'s side-panel writes so a desktop panel keeps its CSS geometry. */
   function resetVh(): void {
-    if (isSide && wrapper) {
+    if (isFixedPanel && wrapper) {
       wrapper.style.removeProperty("bottom");
       wrapper.style.removeProperty("top");
+      // The bubble panel re-derives its desktop anchors from the launcher.
+      if (isBubble && !destroyed) applyBubbleGeometry();
     }
   }
   // The keyboard opening fires a burst of resize + scroll events. Coalesce them

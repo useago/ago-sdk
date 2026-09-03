@@ -5,6 +5,45 @@ All notable changes to `@useago/sdk` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0] - 2026-09-03
+
+### Added
+
+- **`placement: "bubble"` on `mountChatWidget`.** The hosted embed widget
+  without the iframe: a 54px launcher bottom right, a teaser bubble one second
+  after mount, and a 550px panel with a home screen (title, markdown
+  `subtitle`, `conversationStarters` cards), a conversation screen, and a chat
+  history screen with relative times and a "New conversation" pill. Reopens
+  the visitor's most recent thread when its last message is under two hours
+  old (`autoResume`), goes full screen under 450px, closes on Escape, and
+  takes the embed snippet's `colors` (`button`, `header` with gradients,
+  `agentMessage`, `background`, `font`, `userMessage`) with the header text
+  derived for contrast. New options `prompt`, `icon`, `colors`, `hideFooter`,
+  `subtitle`, `conversationStarters`, `autoResume`, `labels`; new handle
+  members `screen`, `showScreen`, `openConversation`, `newConversation`. New
+  theme tokens `--ago-launcher-background`, `--ago-launcher-text-color`,
+  `--ago-send-button-background`, `--ago-user-bubble-background`,
+  `--ago-user-bubble-text-color`, `--ago-agent-bubble-text-color`,
+  `--ago-panel-width`.
+- **The ticket form renders in the vanilla widget.** The `form` tool call the
+  agent's `ago_ticketing` tool opens now shows the tenant's contact form in the
+  conversation, on every placement: inline fields from `GET /config`, the
+  embedded (HubSpot) variant, the "not allowed" notice, a green success block,
+  and the composer replaced by a "complete the form" card, then "ticket
+  created" with a New conversation button. New `toolCallForm` option (labels,
+  success text, `userEmail`, callbacks).
+- **`AgoClient.getConfig()`, `AgoClient.createTicket()`, and
+  `AgoClient.getUserIdentity()`.** `ToolCallData` carries the ticketing fields
+  (`displayMode`, `askToTalkToHuman`, `allowedToCreateTicket`, `ticket`,
+  `mode`, `ticketFormId`, `embedHtml`, `embedDescription`), streamed and
+  persisted alike. New exported types `TicketForm`, `TicketField`,
+  `SdkConfig`, `CreateTicketInput`, `CreateTicketResult`.
+
+### Changed
+
+- Nothing for the existing `inline`, `left`, and `right` placements. The
+  `newConversation()` handle method is new on all of them.
+
 ## [1.9.0] - 2026-08-28
 
 ### Changed

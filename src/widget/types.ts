@@ -21,6 +21,7 @@ import type {
   FeedbackReason,
 } from "../client/types";
 import type { FeedbackLabels } from "./renderFeedback";
+import type { ToolCallFormLabels } from "./toolCallLabels";
 import type {
   CreateFormCollectorOptions,
   LoadFormCollectorOptions,
@@ -103,6 +104,79 @@ export interface WidgetTheme {
   accent?: string;
   /** Background of assistant message bubbles when `agentBubble` is on. Defaults to a light gray. (`--ago-agent-bubble-background`) */
   agentBubbleBg?: string;
+  /** Text color inside assistant messages. Defaults to `text`. (`--ago-agent-bubble-text-color`) */
+  agentBubbleText?: string;
+  /** User message card background. `placement: "bubble"` only; defaults to white there. (`--ago-user-bubble-background`) */
+  userBubbleBg?: string;
+  /** User message text color. `placement: "bubble"` only. (`--ago-user-bubble-text-color`) */
+  userBubbleText?: string;
+  /** Floating launcher circle. `placement: "bubble"` only; defaults to `#007bff`. (`--ago-launcher-background`) */
+  launcherBg?: string;
+  /** Glyph color on the launcher. (`--ago-launcher-text-color`) */
+  launcherText?: string;
+  /** Composer send/stop button. `placement: "bubble"` only; defaults to `brand`. (`--ago-send-button-background`) */
+  sendBg?: string;
+  /** Panel width for `placement: "bubble"`, e.g. `"700px"`. Defaults to `550px`. (`--ago-panel-width`) */
+  panelWidth?: string;
+}
+
+/** The three screens of the bubble widget (`placement: "bubble"`). */
+export type WidgetScreen = "home" | "chat" | "history";
+
+/** A card on the bubble widget's home screen that starts a conversation. */
+export interface ConversationStarter {
+  /** Text shown on the card. */
+  label: string;
+  /** Message sent when clicked. Defaults to `label`. */
+  message?: string;
+}
+
+/**
+ * Every string the bubble widget's chrome shows (header, footer, home,
+ * history, errors), so a non-English site can translate them. Message-level
+ * strings live in {@link WidgetFeedbackOptions.labels}.
+ */
+export interface WidgetLabels {
+  /** Footer tab. */
+  home: string;
+  /** Footer tab. */
+  chats: string;
+  /** Header title on the history screen. */
+  history: string;
+  /** The floating pill on the history screen, and a thread without a title. */
+  newConversation: string;
+  /** Empty history screen. */
+  noHistory: string;
+  /** Composer placeholder on the home screen. */
+  askQuestion: string;
+  /** Accessible name of the header back button. */
+  back: string;
+  /** Accessible name of the header close button. */
+  close: string;
+  /** Accessible name of the header new-chat button. */
+  newChat: string;
+  /** Title of the alert shown on a failed answer. */
+  errorTitle: string;
+  /** Body of the alert shown on a failed answer. */
+  errorDescription: string;
+  /** Accessible name of the scroll-to-bottom button. */
+  scrollToBottom: string;
+  /** Label of the button that hides a file error. */
+  dismiss: string;
+  /** Accessible name of the attach button. */
+  attachFiles: string;
+  /** Composer file errors; `{max}` / `{name}` are substituted. */
+  tooManyFiles: string;
+  invalidFileType: string;
+  fileTooLarge: string;
+  /** Relative time templates on the history screen; `{n}` is the count. */
+  timeAgo: {
+    minutes: string;
+    hours: string;
+    days: string;
+    weeks: string;
+    months: string;
+  };
 }
 
 /**
@@ -164,6 +238,37 @@ export interface WidgetFeedbackOptions {
 }
 
 /**
+ * Fine-tuning for the ticket form the agent's `ago_ticketing` tool opens in
+ * the conversation (the `form` tool call). The form is always on: a tool call
+ * the widget ignored would leave the visitor stuck.
+ */
+export interface WidgetToolCallFormOptions {
+  /** Translate any of the form's strings. */
+  labels?: Partial<ToolCallFormLabels>;
+  /** Replace the success text once the ticket exists. */
+  successMessage?: string;
+  /** Replace the "You can find it here:" label before the ticket link. */
+  successUrlLabel?: string;
+  /**
+   * Email of the visitor when the SDK has no identity for them (no `userEmail`
+   * or `userJwt` in the client config). When absent, the form asks for it.
+   */
+  userEmail?: string;
+  /** Called once the ticket exists and the tool call is completed. */
+  onSubmitted?: (data: {
+    toolCallId: string;
+    toolName: string;
+    mode: "form" | "embed";
+    ticket?: { id: string; url?: string };
+    values: Record<string, unknown>;
+  }) => void;
+  /** Called when creating the ticket or completing the tool call failed. */
+  onError?: (error: Error) => void;
+  /** Called when the visitor starts a new conversation from the blocked composer. */
+  onNewConversation?: () => void;
+}
+
+/**
  * Options for `mountChatWidget` — the framework-agnostic (pure TS/JS)
  * equivalent of the React `<ChatWidget>` component. Same features: conversational
  * forms (form creator) and clickable suggested replies.
@@ -213,14 +318,58 @@ export interface MountChatWidgetOptions {
    * closed; the target is only used as the DOM parent (pass `document.body` for
    * a true page overlay). In side mode `height` is ignored and the width comes
    * from {@link MountChatWidgetOptions.width}.
+   *
+   * `"bubble"` reproduces the hosted embed widget without an iframe: a floating
+   * launcher bottom-right, a teaser bubble, and a 550px panel with a home
+   * screen, a conversation screen, and a chat history screen. See the
+   * "Floating bubble" section of `docs/general/widget.md`.
    */
-  placement?: "inline" | "left" | "right";
+  placement?: "inline" | "left" | "right" | "bubble";
   /**
    * Width of the side panel for `placement: "left" | "right"` (number → px).
    * Capped at the viewport width so it never overflows on mobile. Ignored when
-   * `placement` is `"inline"`. Defaults to `400`.
+   * `placement` is `"inline"`. Defaults to `400`; to `550` for `"bubble"`, where
+   * it is clamped between 400px and the viewport width minus 40px.
    */
   width?: string | number;
+  /**
+   * `placement: "bubble"` only. The teaser speech bubble shown above the
+   * launcher one second after mount, inviting the visitor in. Pass `false` to
+   * skip it. Defaults to `"Hello, how can I help you today?"`.
+   */
+  prompt?: string | false;
+  /**
+   * `placement: "bubble"` only. URL of an image (32×32) shown on the launcher
+   * instead of the default chat glyph.
+   */
+  icon?: string;
+  /**
+   * `placement: "bubble"` only. The same `colors` object as the embed snippet's
+   * `window.AGO.colors`, mapped onto {@link WidgetTheme} keys. `theme` wins over
+   * it key by key. The header text color is derived for contrast automatically.
+   */
+  colors?: AgoWidgetColors;
+  /** `placement: "bubble"` only. Hide the Home / Chats bottom bar. Defaults to `false`. */
+  hideFooter?: boolean;
+  /**
+   * `placement: "bubble"` only. Markdown shown under the title on the home
+   * screen.
+   */
+  subtitle?: string;
+  /**
+   * `placement: "bubble"` only. Cards on the home screen that each start a
+   * conversation with a preset message.
+   */
+  conversationStarters?: ConversationStarter[];
+  /**
+   * `placement: "bubble"` only. On open, reopen the visitor's most recent
+   * conversation if its last message is under two hours old. Defaults to `true`.
+   */
+  autoResume?: boolean;
+  /** `placement: "bubble"` only. Translate the chrome's strings. */
+  labels?: Partial<Omit<WidgetLabels, "timeAgo">> & {
+    timeAgo?: Partial<WidgetLabels["timeAgo"]>;
+  };
   /**
    * For side placements, render the built-in floating launcher button that opens
    * the panel (plus a close "×" in the header). Set `false` to drive open/close
@@ -334,6 +483,11 @@ export interface MountChatWidgetOptions {
    */
   feedback?: boolean | WidgetFeedbackOptions;
   /**
+   * The ticket form the agent can open in the conversation (labels, success
+   * text, callbacks). See {@link WidgetToolCallFormOptions}.
+   */
+  toolCallForm?: WidgetToolCallFormOptions;
+  /**
    * How clicking a suggested follow-up reply behaves. Defaults to sending the
    * reply as a new user message. Pass a handler to override, or `false` to
    * render the suggestions as non-interactive.
@@ -406,6 +560,18 @@ export interface ChatWidgetHandle {
   readonly threads: Conversation[];
   /** Re-fetch the conversations list and update {@link ChatWidgetHandle.threads}. */
   refreshThreads: () => Promise<Conversation[]>;
+  /** `placement: "bubble"` only. The screen currently shown. */
+  readonly screen?: WidgetScreen;
+  /** `placement: "bubble"` only. Switch to the home, chat, or history screen. */
+  showScreen?: (screen: WidgetScreen) => void;
+  /** `placement: "bubble"` only. Open a conversation by id on the chat screen. */
+  openConversation?: (conversationId: string) => Promise<void>;
+  /**
+   * Forget the current thread and start over, like the header's new-chat
+   * button and the "New conversation" button shown once a ticket exists. The
+   * bubble widget also returns to its home screen.
+   */
+  newConversation: () => void;
   /** Remove listeners, uninstall forms, and clear the DOM. */
   destroy: () => void;
 }
