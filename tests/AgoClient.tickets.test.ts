@@ -87,6 +87,83 @@ describe("getConfig", () => {
     });
     client.destroy();
   });
+
+  it("maps the home page config, using each starter's description as its label", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          object: "config",
+          permissions: [
+            {
+              id: "p1",
+              home_page: {
+                title: "How can we help?",
+                subtitle: "Answers from the **docs**",
+                widget_starter: {
+                  id: "ws1",
+                  initial_message: "Hi! Anything I can look up?",
+                  agent_id: "ag-greeter",
+                },
+                home_starters: [
+                  {
+                    id: "s1",
+                    title: "Pricing card (internal name)",
+                    description: "How much does it cost?",
+                    initial_message: "Tell me about pricing",
+                    agent_id: "ag-sales",
+                  },
+                  // No initial_message: the card sends what it shows.
+                  { id: "s2", title: "Docs", description: "Where are the docs?" },
+                  // Nothing to show and nothing to send: dropped.
+                  { id: "s3" },
+                ],
+              },
+            },
+          ],
+        }),
+      ),
+    );
+    const client = new AgoClient({ baseUrl: "https://x.example.com" });
+    const home = (await client.getConfig()).permissions[0].homePage;
+    expect(home).toEqual({
+      title: "How can we help?",
+      subtitle: "Answers from the **docs**",
+      starters: [
+        {
+          id: "s1",
+          label: "How much does it cost?",
+          message: "Tell me about pricing",
+          agentId: "ag-sales",
+        },
+        {
+          id: "s2",
+          label: "Where are the docs?",
+          message: "Where are the docs?",
+          agentId: undefined,
+        },
+      ],
+      widgetStarter: {
+        id: "ws1",
+        message: "Hi! Anything I can look up?",
+        agentId: "ag-greeter",
+      },
+    });
+    client.destroy();
+  });
+
+  it("leaves homePage undefined when the backend does not send one", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({ object: "config", permissions: [{ id: "p1" }] }),
+      ),
+    );
+    const client = new AgoClient({ baseUrl: "https://x.example.com" });
+    const config = await client.getConfig();
+    expect(config.permissions[0].homePage).toBeUndefined();
+    client.destroy();
+  });
 });
 
 describe("createTicket", () => {

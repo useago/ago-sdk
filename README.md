@@ -323,6 +323,9 @@ mountChatWidget(document.body, {
 });
 ```
 
+Add `loadHomeConfig: true` and the home title, subtitle and starter cards come
+from your AGO dashboard instead of the options above.
+
 When the visitor asks for a human, the agent's ticket form renders inside the
 conversation on every placement, with the fields from your AGO dashboard.
 Details in [Floating bubble](docs/general/widget.md#floating-bubble-placement-bubble)

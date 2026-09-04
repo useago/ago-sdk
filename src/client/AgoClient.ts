@@ -59,6 +59,7 @@ import type {
   CreateTicketInput,
   CreateTicketResult,
   SdkConfig,
+  SdkHomePageConfig,
   TicketForm,
 } from "./types";
 
@@ -92,6 +93,24 @@ interface RawTicketForm {
   }>;
 }
 
+interface RawHomePage {
+  title?: string | null;
+  subtitle?: string | null;
+  widget_starter?: {
+    id: string;
+    initial_message?: string | null;
+    agent_id?: string | null;
+  } | null;
+  home_starters?: Array<{
+    id: string;
+    /** The dashboard's internal name; the card shows `description`. */
+    title?: string | null;
+    description?: string | null;
+    initial_message?: string | null;
+    agent_id?: string | null;
+  }>;
+}
+
 interface RawSdkConfig {
   permissions?: Array<{
     id?: string | null;
@@ -99,6 +118,7 @@ interface RawSdkConfig {
     display_name?: string | null;
     agents?: Array<{ id: string; name?: string | null }>;
     ticket_form?: RawTicketForm | null;
+    home_page?: RawHomePage | null;
     file_attachments_enabled?: boolean;
     voice_enabled?: boolean;
   }>;
@@ -1121,10 +1141,45 @@ export class AgoClient {
           name: a.name ?? undefined,
         })),
         ticketForm: p.ticket_form ? AgoClient.mapTicketForm(p.ticket_form) : undefined,
+        homePage: p.home_page ? AgoClient.mapHomePage(p.home_page) : undefined,
         fileAttachmentsEnabled: !!p.file_attachments_enabled,
         voiceEnabled: !!p.voice_enabled,
       })),
       proactive: { enabled: !!raw.proactive?.enabled },
+    };
+  }
+
+  /**
+   * The dashboard's home screen content. A starter card shows its
+   * `description` and sends its `initial_message`; one with neither is
+   * unusable and is dropped rather than rendered as an empty card.
+   */
+  private static mapHomePage(raw: RawHomePage): SdkHomePageConfig {
+    const starter = raw.widget_starter;
+    return {
+      title: raw.title ?? undefined,
+      subtitle: raw.subtitle ?? undefined,
+      starters: (raw.home_starters ?? []).flatMap((s) => {
+        const label = s.description || s.title || "";
+        const message = s.initial_message || label;
+        if (!label || !message) return [];
+        return [
+          {
+            id: s.id,
+            label,
+            message,
+            agentId: s.agent_id ?? undefined,
+          },
+        ];
+      }),
+      widgetStarter:
+        starter && starter.initial_message
+          ? {
+              id: starter.id,
+              message: starter.initial_message,
+              agentId: starter.agent_id ?? undefined,
+            }
+          : undefined,
     };
   }
 

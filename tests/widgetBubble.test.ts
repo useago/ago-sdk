@@ -64,6 +64,8 @@ async function flush(): Promise<void> {
 function mountBubble(
   options: Partial<Parameters<typeof mountChatWidget>[1]> = {},
   threads: Conversation[] = [],
+  // Runs before the widget mounts, for anything it requests on mount.
+  setup?: (client: AgoClient) => void,
 ) {
   const client = new AgoClient({ baseUrl: "https://example.test" });
   const listSpy = vi
@@ -88,6 +90,7 @@ function mountBubble(
     }),
   );
   const storage = fakeStorage();
+  setup?.(client);
   const widget = mountChatWidget(document.body, {
     client,
     placement: "bubble",
@@ -502,6 +505,160 @@ describe("placement: bubble (mobile)", () => {
     b.widget.open!();
     expect(b.panel().dataset.agoLayout).toBe("panel");
     expect(b.panel().style.borderRadius).toBe("16px");
+    b.cleanup();
+  });
+});
+
+describe("placement: bubble (loadHomeConfig)", () => {
+  const homePage = {
+    title: "How can we help?",
+    subtitle: "Answers from the **docs**",
+    starters: [
+      {
+        id: "s1",
+        label: "How much does it cost?",
+        message: "Tell me about pricing",
+        agentId: "ag-sales",
+      },
+    ],
+  };
+
+  /** The dashboard config, with only the fields the home screen reads. */
+  function stubConfig(home: unknown): (client: AgoClient) => void {
+    return (client) => {
+      vi.spyOn(client, "getConfig").mockResolvedValue({
+        permissions: [
+          {
+            agents: [],
+            fileAttachmentsEnabled: false,
+            voiceEnabled: false,
+            ...(home ? { homePage: home } : {}),
+          },
+        ],
+        proactive: { enabled: false },
+      } as Awaited<ReturnType<AgoClient["getConfig"]>>);
+    };
+  }
+
+  it("does not fetch the config unless asked", async () => {
+    let configSpy: ReturnType<typeof vi.spyOn> | undefined;
+    const b = mountBubble({ title: "Ask AGO" }, [], (client) => {
+      configSpy = vi.spyOn(client, "getConfig");
+    });
+    await flush();
+    expect(configSpy).not.toHaveBeenCalled();
+    b.cleanup();
+  });
+
+  it("replaces the home title, subtitle and starters with the dashboard's", async () => {
+    const b = mountBubble(
+      {
+        loadHomeConfig: true,
+        title: "Ask AGO",
+        subtitle: "hardcoded",
+        conversationStarters: [{ label: "hardcoded card" }],
+      },
+      [],
+      stubConfig(homePage),
+    );
+    const sendSpy = vi.spyOn(b.client, "sendMessage").mockResolvedValue(assistant());
+    await flush();
+
+    const home = b.panel().querySelector<HTMLElement>(".ago-chat-widget__home")!;
+    expect(home.querySelector(".ago-chat-widget__home-title")!.textContent).toBe(
+      "How can we help?",
+    );
+    expect(home.querySelector(".ago-chat-widget__home-subtitle strong")!.textContent).toBe(
+      "docs",
+    );
+    // The header keeps the option's title, as in the hosted widget.
+    expect(b.panel().querySelector(".ago-chat-widget__header")!.textContent).toContain(
+      "Ask AGO",
+    );
+
+    const cards = home.querySelectorAll<HTMLButtonElement>(".ago-chat-widget__starter");
+    expect(cards).toHaveLength(1);
+    expect(cards[0].textContent).toContain("How much does it cost?");
+    cards[0].click();
+    await flush();
+    expect(sendSpy).toHaveBeenCalledWith(
+      "Tell me about pricing",
+      expect.objectContaining({ agentId: "ag-sales" }),
+    );
+    b.cleanup();
+  });
+
+  it("keeps what the options set for anything the dashboard leaves empty", async () => {
+    const b = mountBubble(
+      {
+        loadHomeConfig: true,
+        title: "Ask AGO",
+        subtitle: "kept",
+        conversationStarters: [{ label: "kept card" }],
+      },
+      [],
+      stubConfig({ starters: [] }),
+    );
+    await flush();
+    const home = b.panel().querySelector<HTMLElement>(".ago-chat-widget__home")!;
+    expect(home.querySelector(".ago-chat-widget__home-title")!.textContent).toBe("Ask AGO");
+    expect(home.querySelector(".ago-chat-widget__home-subtitle")!.textContent).toBe("kept");
+    expect(home.querySelectorAll(".ago-chat-widget__starter")).toHaveLength(1);
+    b.cleanup();
+  });
+
+  it("keeps the home screen when the config request fails", async () => {
+    const b = mountBubble({ loadHomeConfig: true, title: "Ask AGO" }, [], (client) => {
+      vi.spyOn(client, "getConfig").mockRejectedValue(new Error("offline"));
+    });
+    await flush();
+    expect(
+      b.panel().querySelector(".ago-chat-widget__home-title")!.textContent,
+    ).toBe("Ask AGO");
+    b.cleanup();
+  });
+
+  it("sends the dashboard's widget starter when the panel is first opened", async () => {
+    const b = mountBubble(
+      { loadHomeConfig: true },
+      [],
+      stubConfig({
+        ...homePage,
+        widgetStarter: { id: "ws1", message: "Hi! Anything I can look up?" },
+      }),
+    );
+    const sendSpy = vi.spyOn(b.client, "sendMessage").mockResolvedValue(assistant());
+    await flush();
+    await flush();
+    // Nothing is spent on a visitor who never clicks the launcher.
+    expect(sendSpy).not.toHaveBeenCalled();
+
+    b.launcher().click();
+    await flush();
+    expect(sendSpy).toHaveBeenCalledWith(
+      "Hi! Anything I can look up?",
+      expect.anything(),
+    );
+    expect(b.widget.screen).toBe("chat");
+    b.cleanup();
+  });
+
+  it("skips the widget starter when a thread is resumed instead", async () => {
+    const b = mountBubble(
+      { loadHomeConfig: true },
+      [thread("fresh", HOUR)],
+      stubConfig({
+        ...homePage,
+        widgetStarter: { id: "ws1", message: "Hi! Anything I can look up?" },
+      }),
+    );
+    const sendSpy = vi.spyOn(b.client, "sendMessage").mockResolvedValue(assistant());
+    await flush();
+    await flush();
+    b.launcher().click();
+    await flush();
+    expect(b.getSpy).toHaveBeenCalledWith("fresh");
+    expect(sendSpy).not.toHaveBeenCalled();
     b.cleanup();
   });
 });
