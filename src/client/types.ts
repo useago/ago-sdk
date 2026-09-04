@@ -1,10 +1,14 @@
 import type { ActivityEntry } from "../activity/ActivityLedger";
-import type { CapturedError, ErrorWatcherOptions } from "../errors/ErrorWatcher";
-import type { ContextSnapshot } from "../state/ClientContextRegistry";
+import type {
+  CapturedError,
+  ErrorWatcherOptions,
+} from "../errors/ErrorWatcher";
+import type { ClientFunctionSchema } from "../functions/types";
 import type {
   ProactiveNudgeInstance,
   ProactiveOptions,
 } from "../proactive/types";
+import type { ContextSnapshot } from "../state/ClientContextRegistry";
 
 /**
  * SDK Configuration
@@ -97,6 +101,15 @@ export interface AgoConfig {
    * mode's `jsErrors` signal. See `client.reportError()` for caught errors.
    */
   errorWatcher?: boolean | ErrorWatcherOptions;
+  /** Mirror every registered client function into the browser's WebMCP registry
+   * (`document.modelContext`), so an external agent can call the same functions
+   * the in-app agent calls. Off by default; no-ops without WebMCP.
+   *
+   * A mirrored function runs immediately: the approval gate
+   * ({@link approvalPolicy}, `requiresApproval`) covers the agent loop only.
+   * Use `webmcp: false` on a definition to keep it out.
+   */
+  webmcp?: boolean;
 }
 
 /** See {@link AgoConfig.clientFunctionsMode}. */
@@ -689,6 +702,8 @@ export interface AgoClientEvents {
    * call running immediately.
    */
   "function:awaiting-approval": ClientFunctionInvocation;
+  /** A function was registered or unregistered, or the registry cleared. */
+  "functions:changed": ClientFunctionSchema[];
   "function:result": {
     invocationId: string;
     result: unknown;

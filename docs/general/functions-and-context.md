@@ -451,6 +451,54 @@ user declined, then lets the turn resume. This is a no-op in placeholder mode
 In React, `useAgoActivity` surfaces awaiting items with ready-made `approve` /
 `reject` controls (see the [React guide](../frameworks/react.md)).
 
+### WebMCP bridge (share your functions with browser agents)
+
+[WebMCP](https://github.com/webmachinelearning/webmcp) is a browser API that lets
+a page hand tools to whatever agent the user brings, such as an agentic browser
+or an extension. Set `webmcp` and every function you register becomes a WebMCP
+tool as well.
+
+```ts
+const client = new AgoClient({
+  baseUrl: "https://playground.api.useago.com",
+  agent: "your-agent",
+  webmcp: true,
+});
+
+client.registerFunction({
+  name: "listFlights",
+  description: "The flights currently on screen, after filtering.",
+  parameters: { type: "object", properties: {} },
+  handler: () => visibleFlights(),
+  // Optional, WebMCP only: MCP behavior hints.
+  webmcp: { annotations: { readOnlyHint: true } },
+});
+```
+
+In React it is a prop:
+
+```tsx
+<AgoProvider baseUrl="https://playground.api.useago.com" agent="your-agent" webmcp>
+  <App />
+</AgoProvider>
+```
+
+A function a page registers on mount disappears from the browser's tool list
+when that page unmounts. Check what is exposed from the console:
+
+```js
+(await document.modelContext.getTools()).map((t) => t.name);
+```
+
+Off by default, and a no-op in browsers without WebMCP. Calls arrive as
+`function:invoke` and `function:result` like any other, so your logging and the
+dev panel already cover them.
+
+**There is no approval gate on a WebMCP call**, and cancelling one does not stop
+your handler. `requiresApproval` and `approvalPolicy` hold a call in the agent
+loop, which a WebMCP call never enters. Set `webmcp: false` on a definition to
+keep that function private to your own agent.
+
 ---
 
 ## Pre-built helpers

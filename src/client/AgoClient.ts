@@ -1,8 +1,11 @@
-import { ActivityLedger } from "../activity/ActivityLedger";
 import type { ActivityEntry, ActivityInput } from "../activity/ActivityLedger";
-import { ErrorWatcher } from "../errors/ErrorWatcher";
-import type { CapturedError, ErrorWatcherOptions } from "../errors/ErrorWatcher";
+import { ActivityLedger } from "../activity/ActivityLedger";
 import { HttpClient, isAbortError } from "../api/HttpClient";
+import type {
+  CapturedError,
+  ErrorWatcherOptions,
+} from "../errors/ErrorWatcher";
+import { ErrorWatcher } from "../errors/ErrorWatcher";
 import type {
   FormCollectorDefinition,
   FormCollectorSchema,
@@ -24,46 +27,49 @@ import type {
   ClientFunctionHandler,
   ClientFunctionRegisterOptions,
   ClientFunctionSchema,
+  RegisteredFunction,
 } from "../functions/types";
-import { byteLength } from "../utils/jsonBytes";
 import { createAgoProactive } from "../proactive/createAgoProactive";
 import type { ProactiveController } from "../proactive/types";
-import { ClientContextRegistry } from "../state/ClientContextRegistry";
 import type {
   ContextEntry,
   ContextSnapshot,
   DynamicContextProvider,
 } from "../state/ClientContextRegistry";
-import { computePageStateDelta } from "../state/pageStateDelta";
+import { ClientContextRegistry } from "../state/ClientContextRegistry";
 import type { PageStateBaseline } from "../state/pageStateDelta";
+import { computePageStateDelta } from "../state/pageStateDelta";
 import { SSEHandler } from "../streaming/SSEHandler";
 import { mapAttachment } from "../utils/attachments";
 import { EventEmitter } from "../utils/eventEmitter";
+import { byteLength } from "../utils/jsonBytes";
 import { logger } from "../utils/logger";
+import { generateUuid } from "../utils/uuid";
+import { attachWebMCP } from "../webmcp/attachWebMCP";
 import { AgoError } from "./errors";
-import { validateConfig } from "./validateConfig";
 import type {
-  AgoConfig,
   AgoClientEvents,
-  AgoEventName,
+  AgoConfig,
   AgoEventHandler,
+  AgoEventName,
   AgoMessage,
   ClientFunctionInvocation,
   ClientFunctionsMode,
   Conversation,
+  CreateTicketInput,
+  CreateTicketResult,
   FeedbackDetails,
   FeedbackRating,
   PaginatedResult,
+  SdkConfig,
+  SdkHomePageConfig,
   SendMessageOptions,
   StopMessageResult,
   SubmitToolCallResult,
-  ToolCallData,
-  CreateTicketInput,
-  CreateTicketResult,
-  SdkConfig,
-  SdkHomePageConfig,
   TicketForm,
+  ToolCallData,
 } from "./types";
+import { validateConfig } from "./validateConfig";
 
 /** `GET /api/sdk/v1/config` as the backend serializes it (snake_case). */
 interface RawTicketForm {
@@ -211,7 +217,7 @@ function routeParamNames(path: string): string[] {
  */
 function fillRouteParams(
   path: string,
-  params: Record<string, unknown>
+  params: Record<string, unknown>,
 ): { path: string; missing: string[] } {
   const missing: string[] = [];
   const filled = path
@@ -230,7 +236,10 @@ function fillRouteParams(
   return { path: filled, missing };
 }
 
-function matchRoute(pathname: string, routes: NavRoute[]): NavRoute | undefined {
+function matchRoute(
+  pathname: string,
+  routes: NavRoute[],
+): NavRoute | undefined {
   const exact = routes.find((r) => r.path === pathname);
   if (exact) return exact;
 
@@ -313,7 +322,8 @@ export class AgoClient {
    * open stream in that window, but the turn is still live for the user, so it
    * stays stoppable (see {@link stop}).
    */
-  private pausedTurn: { messageId: string; conversationId: string } | null = null;
+  private pausedTurn: { messageId: string; conversationId: string } | null =
+    null;
 
   /**
    * Turns stopped while they were paused on client functions. A resume may
@@ -329,6 +339,9 @@ export class AgoClient {
    */
   proactive: ProactiveController | null = null;
 
+  /** Removes the mirrored WebMCP tools; `null` when the bridge is off. */
+  private detachWebMCP: (() => void) | null = null;
+
   constructor(config: AgoConfig) {
     validateConfig(config, "AgoClient");
     this.config = config;
@@ -341,13 +354,20 @@ export class AgoClient {
     this.eventEmitter = new EventEmitter();
     this.registerActivityContext();
 
+    this.functionRegistry.onChange(() => {
+      this.eventEmitter.emit(
+        "functions:changed",
+        this.functionRegistry.getSchemas(),
+      );
+    });
+
     if (config.debug) {
       logger.enable();
     }
 
     if (config.errorWatcher) {
       this.enableErrorWatcher(
-        config.errorWatcher === true ? undefined : config.errorWatcher
+        config.errorWatcher === true ? undefined : config.errorWatcher,
       );
     }
 
@@ -355,7 +375,14 @@ export class AgoClient {
       createAgoProactive(this, config.proactive);
     }
 
+    this.attachWebMCPBridge();
+
     logger.log("AgoClient initialized");
+  }
+
+  private attachWebMCPBridge(): void {
+    if (!this.config.webmcp || this.detachWebMCP) return;
+    this.detachWebMCP = attachWebMCP(this);
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -367,7 +394,7 @@ export class AgoClient {
    */
   async sendMessage(
     content: string,
-    options?: SendMessageOptions
+    options?: SendMessageOptions,
   ): Promise<AgoMessage> {
     const clientFunctions = this.functionRegistry.getSchemas();
 
@@ -376,11 +403,11 @@ export class AgoClient {
     const configAgent = this.config.agent || this.config.defaultAgentId;
 
     const mode = this.resolveClientFunctionsMode(options);
-    const metadata = options?.metadata !== undefined
-      ? options.metadata
-      : this.config.metadata;
+    const metadata =
+      options?.metadata !== undefined ? options.metadata : this.config.metadata;
     // Validate serializability before opening a turn (also used by FormData).
-    const serializedMetadata = metadata != null ? JSON.stringify(metadata) : undefined;
+    const serializedMetadata =
+      metadata != null ? JSON.stringify(metadata) : undefined;
 
     const body: Record<string, unknown> = {
       content,
@@ -448,13 +475,13 @@ export class AgoClient {
       response = await this.sendRequest(turn, () =>
         this.httpClient.postFormData("/api/sdk/v1/messages", formData, {
           signal: turn.controller.signal,
-        })
+        }),
       );
     } else {
       response = await this.sendRequest(turn, () =>
         this.httpClient.postStream("/api/sdk/v1/messages", body, {
           signal: turn.controller.signal,
-        })
+        }),
       );
     }
 
@@ -471,7 +498,7 @@ export class AgoClient {
    */
   private async sendRequest(
     turn: ActiveTurn,
-    request: () => Promise<Response>
+    request: () => Promise<Response>,
   ): Promise<Response | null> {
     try {
       return await request();
@@ -484,7 +511,7 @@ export class AgoClient {
 
   private async processSSEResponse(
     response: Response,
-    turn?: ActiveTurn
+    turn?: ActiveTurn,
   ): Promise<AgoMessage> {
     // One stream == one assistant message. Client-function invocations are
     // deliberately NOT in the final message's `toolCalls` (SSEHandler filters
@@ -493,73 +520,80 @@ export class AgoClient {
     // tracked with this closure-local flag instead.
     let sawClientFunction = false;
 
-    const handler = new SSEHandler({
-      onRawChunk: (data) => {
-        // Capture the ids the moment they appear: `stop()` addresses the turn by
-        // message id, and a stop can land before the first content chunk.
-        if (turn) {
-          if (data.message_id && !turn.messageId) turn.messageId = data.message_id;
-          if (data.thread?.id) turn.conversationId = data.thread.id;
-        }
-        this.eventEmitter.emit("stream:message", data);
-      },
-      onStart: (data) => {
-        this.eventEmitter.emit("message:start", data);
-      },
-      onChunk: (data) => {
-        this.eventEmitter.emit("message:chunk", data);
-      },
-      onToolCall: (toolCall) => {
-        this.eventEmitter.emit("toolCall:received", toolCall);
+    const handler = new SSEHandler(
+      {
+        onRawChunk: (data) => {
+          // Capture the ids the moment they appear: `stop()` addresses the turn by
+          // message id, and a stop can land before the first content chunk.
+          if (turn) {
+            if (data.message_id && !turn.messageId)
+              turn.messageId = data.message_id;
+            if (data.thread?.id) turn.conversationId = data.thread.id;
+          }
+          this.eventEmitter.emit("stream:message", data);
+        },
+        onStart: (data) => {
+          this.eventEmitter.emit("message:start", data);
+        },
+        onChunk: (data) => {
+          this.eventEmitter.emit("message:chunk", data);
+        },
+        onToolCall: (toolCall) => {
+          this.eventEmitter.emit("toolCall:received", toolCall);
 
-        if (toolCall.type === "form") {
-          this.eventEmitter.emit("toolCall:form", toolCall);
-        }
+          if (toolCall.type === "form") {
+            this.eventEmitter.emit("toolCall:form", toolCall);
+          }
+        },
+        onClientFunction: async (data) => {
+          sawClientFunction = true;
+          this.eventEmitter.emit("function:invoke", data);
+          this.recordAgentAction(data);
+          // Gate on approval only when there's a pause to hold onto (invocationId
+          // present == pause mode). Otherwise run immediately, as before.
+          if (data.invocationId && this.requiresApproval(data)) {
+            this.pendingApprovals.set(data.invocationId, data);
+            this.eventEmitter.emit("function:awaiting-approval", data);
+            return;
+          }
+          await this.handleClientFunctionInvocation(data);
+        },
+        onTitle: (data) => {
+          this.eventEmitter.emit("conversation:title", data);
+        },
+        onAnswerComplete: (message) => {
+          this.eventEmitter.emit("message:answer-complete", message);
+        },
+        onWaitingClient: (data) => {
+          // The stream ends here but the turn does not: keep it stoppable while
+          // the client functions run and the resume is being prepared.
+          this.pausedTurn = {
+            messageId: data.messageId,
+            conversationId: data.conversationId,
+          };
+          this.eventEmitter.emit("message:waiting-client", data);
+          this.markResumeSignal(
+            data.messageId,
+            data.conversationId,
+            "waitingConfirmed",
+          );
+        },
+        onComplete: (message) => {
+          // A turn stopped before the backend named its message has nothing to
+          // complete: emitting it would land a blank bubble in the transcript.
+          // `message:stopped` still fires, and that is what UIs finalize on.
+          if (turn?.stopRequested && !message.id) return;
+          this.eventEmitter.emit("message:complete", message);
+        },
+        onError: (error) => {
+          this.eventEmitter.emit("message:error", {
+            error: error.message,
+            code: error instanceof AgoError ? error.code : undefined,
+          });
+        },
       },
-      onClientFunction: async (data) => {
-        sawClientFunction = true;
-        this.eventEmitter.emit("function:invoke", data);
-        this.recordAgentAction(data);
-        // Gate on approval only when there's a pause to hold onto (invocationId
-        // present == pause mode). Otherwise run immediately, as before.
-        if (data.invocationId && this.requiresApproval(data)) {
-          this.pendingApprovals.set(data.invocationId, data);
-          this.eventEmitter.emit("function:awaiting-approval", data);
-          return;
-        }
-        await this.handleClientFunctionInvocation(data);
-      },
-      onTitle: (data) => {
-        this.eventEmitter.emit("conversation:title", data);
-      },
-      onAnswerComplete: (message) => {
-        this.eventEmitter.emit("message:answer-complete", message);
-      },
-      onWaitingClient: (data) => {
-        // The stream ends here but the turn does not: keep it stoppable while
-        // the client functions run and the resume is being prepared.
-        this.pausedTurn = {
-          messageId: data.messageId,
-          conversationId: data.conversationId,
-        };
-        this.eventEmitter.emit("message:waiting-client", data);
-        this.markResumeSignal(data.messageId, data.conversationId, "waitingConfirmed");
-      },
-      onComplete: (message) => {
-        // A turn stopped before the backend named its message has nothing to
-        // complete: emitting it would land a blank bubble in the transcript.
-        // `message:stopped` still fires, and that is what UIs finalize on.
-        if (turn?.stopRequested && !message.id) return;
-        this.eventEmitter.emit("message:complete", message);
-      },
-      onError: (error) => {
-        this.eventEmitter.emit("message:error", {
-          error: error.message,
-          code: error instanceof AgoError ? error.code : undefined,
-        });
-      },
-    },
-    { signal: turn?.controller.signal });
+      { signal: turn?.controller.signal },
+    );
 
     try {
       const message = await handler.processStream(response);
@@ -691,7 +725,7 @@ export class AgoClient {
   /** POST the stop for a turn, once, never letting the failure escape. */
   private async postStopForTurn(
     turn: ActiveTurn,
-    messageId: string
+    messageId: string,
   ): Promise<StopMessageResult | null> {
     if (!messageId || turn.stopPosted) return null;
     turn.stopPosted = true;
@@ -732,7 +766,7 @@ export class AgoClient {
   // ─────────────────────────────────────────────────────────────────
 
   private resolveClientFunctionsMode(
-    options?: SendMessageOptions
+    options?: SendMessageOptions,
   ): ClientFunctionsMode {
     return (
       options?.clientFunctionsMode ?? this.config.clientFunctionsMode ?? "pause"
@@ -786,8 +820,8 @@ export class AgoClient {
       this.httpClient.postStream(
         `/api/sdk/v1/messages/${messageId}/continue`,
         body,
-        { signal: turn.controller.signal }
-      )
+        { signal: turn.controller.signal },
+      ),
     );
     if (!response) return this.buildStoppedMessage(turn);
     return this.processSSEResponse(response, turn);
@@ -800,7 +834,7 @@ export class AgoClient {
   private markResumeSignal(
     messageId: string,
     conversationId: string,
-    signal: "waitingConfirmed" | "resultsReady"
+    signal: "waitingConfirmed" | "resultsReady",
   ): void {
     if (!messageId) return;
     const pending: PendingResume = this.pendingResumes.get(messageId) ?? {
@@ -822,7 +856,7 @@ export class AgoClient {
 
   private async runAutoResume(
     messageId: string,
-    conversationId: string
+    conversationId: string,
   ): Promise<void> {
     try {
       if (this.resumeGate) {
@@ -860,7 +894,10 @@ export class AgoClient {
    * must not race. TEMPORARY heuristic: remove once the backend returns an
    * explicit error for unknown agents (see TODOS.md, backend issue).
    */
-  private maybeFlagEmptyReply(message: AgoMessage, sawClientFunction: boolean): void {
+  private maybeFlagEmptyReply(
+    message: AgoMessage,
+    sawClientFunction: boolean,
+  ): void {
     const isEmpty =
       message.status === "DONE" &&
       (message.content ?? "").trim() === "" &&
@@ -889,10 +926,12 @@ export class AgoClient {
         // envelope), so name both causes when an agent is configured.
         console.warn(
           "[AGO] The stream completed without any message data. Possible causes: " +
-            (agent ? `the agent "${agent}" may not exist for this tenant, or ` : "") +
+            (agent
+              ? `the agent "${agent}" may not exist for this tenant, or `
+              : "") +
             "`baseUrl` does not point at an AGO endpoint that returns server-sent " +
             "events. Listen for the `message:empty` event to handle this in your " +
-            "app; silence this warning with `warnOnEmptyReply: false`."
+            "app; silence this warning with `warnOnEmptyReply: false`.",
         );
       } else {
         console.warn(
@@ -902,7 +941,7 @@ export class AgoClient {
               : "an unknown `agent` slug, ") +
             "or the agent replied with no text. Listen for the `message:empty` " +
             "event to handle this in your app; silence this warning with " +
-            "`warnOnEmptyReply: false`."
+            "`warnOnEmptyReply: false`.",
         );
       }
     }, 0);
@@ -918,7 +957,10 @@ export class AgoClient {
     let error: string | undefined;
 
     try {
-      result = await this.functionRegistry.execute(data.functionName, data.arguments);
+      result = await this.functionRegistry.execute(
+        data.functionName,
+        data.arguments,
+      );
     } catch (err) {
       error = err instanceof Error ? err.message : "Unknown error";
       logger.error("Client function execution failed:", err);
@@ -941,7 +983,7 @@ export class AgoClient {
           this.markResumeSignal(
             submitResult.resume.message_id,
             data.conversationId,
-            "resultsReady"
+            "resultsReady",
           );
         }
       } catch (submitError) {
@@ -971,7 +1013,10 @@ export class AgoClient {
         logger.warn("approvalPolicy threw; not gating this call:", err);
       }
     }
-    return this.functionRegistry.get(invocation.functionName)?.requiresApproval === true;
+    return (
+      this.functionRegistry.get(invocation.functionName)?.requiresApproval ===
+      true
+    );
   }
 
   /**
@@ -1006,7 +1051,7 @@ export class AgoClient {
         this.markResumeSignal(
           submitResult.resume.message_id,
           data.conversationId,
-          "resultsReady"
+          "resultsReady",
         );
       }
     } catch (submitError) {
@@ -1017,6 +1062,40 @@ export class AgoClient {
       invocationId,
       result: rejection,
     });
+  }
+
+  /**
+   * @internal Run a function for a caller outside the agent loop (the WebMCP
+   * bridge). Runs immediately, since the approval gate covers the agent loop
+   * only. Emits `function:invoke` and `function:result` like an agent call.
+   */
+  async runExternalFunction(
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<unknown> {
+    const invocation: ClientFunctionInvocation = {
+      // Not a backend tool-call id: nothing is submitted for these.
+      invocationId: `webmcp-${generateUuid()}`,
+      functionName: name,
+      arguments: args,
+      conversationId: "",
+    };
+    const { invocationId } = invocation;
+
+    this.eventEmitter.emit("function:invoke", invocation);
+
+    try {
+      const result = await this.functionRegistry.execute(name, args);
+      this.eventEmitter.emit("function:result", { invocationId, result });
+      return result;
+    } catch (error) {
+      this.eventEmitter.emit("function:result", {
+        invocationId,
+        result: null,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -1089,7 +1168,7 @@ export class AgoClient {
       id: response.id,
       title: response.title,
       lastMessageDate: new Date(
-        response.last_message_at ?? response.created_at ?? 0
+        response.last_message_at ?? response.created_at ?? 0,
       ),
       messages: response.messages.map((m) => ({
         id: m.id,
@@ -1127,7 +1206,7 @@ export class AgoClient {
    * `SSEHandler.parseToolCall` so persisted and streamed tool calls match.
    */
   private static mapPersistedToolCalls(
-    raw?: Array<Record<string, unknown>>
+    raw?: Array<Record<string, unknown>>,
   ): ToolCallData[] | undefined {
     if (!raw || raw.length === 0) return undefined;
     return raw.map((tc) => ({
@@ -1173,7 +1252,9 @@ export class AgoClient {
           id: a.id,
           name: a.name ?? undefined,
         })),
-        ticketForm: p.ticket_form ? AgoClient.mapTicketForm(p.ticket_form) : undefined,
+        ticketForm: p.ticket_form
+          ? AgoClient.mapTicketForm(p.ticket_form)
+          : undefined,
         homePage: p.home_page ? AgoClient.mapHomePage(p.home_page) : undefined,
         fileAttachmentsEnabled: !!p.file_attachments_enabled,
         voiceEnabled: !!p.voice_enabled,
@@ -1270,14 +1351,18 @@ export class AgoClient {
     fd.append("body", input.body);
     if (input.priority) fd.append("priority", input.priority);
     if (input.typology) fd.append("typology", input.typology);
-    if (input.conversationId) fd.append("conversation_id", input.conversationId);
+    if (input.conversationId)
+      fd.append("conversation_id", input.conversationId);
     if (input.email) fd.append("email", input.email);
     if (input.customFields && input.customFields.length > 0) {
       fd.append("custom_fields", JSON.stringify(input.customFields));
     }
     for (const file of input.files ?? []) fd.append("files", file, file.name);
     if (input.ticketFormId) fd.append("ticket_form_id", input.ticketFormId);
-    const response = await this.httpClient.postFormData("/api/sdk/v1/tickets", fd);
+    const response = await this.httpClient.postFormData(
+      "/api/sdk/v1/tickets",
+      fd,
+    );
     const json = (await response.json()) as { id?: unknown; url?: unknown };
     return {
       id: String(json.id ?? ""),
@@ -1310,7 +1395,7 @@ export class AgoClient {
    * `rejectFunction` and the turn stays paused, exactly as on the live stream).
    */
   async resumePendingClientFunctions(
-    conversation: Conversation
+    conversation: Conversation,
   ): Promise<AgoMessage | null> {
     const paused = [...(conversation.messages ?? [])]
       .reverse()
@@ -1321,17 +1406,19 @@ export class AgoClient {
       (tc) =>
         tc.type === "client_function" &&
         tc.status === "waiting_input" &&
-        tc.functionName
+        tc.functionName,
     );
 
     const registered = new Set(
-      this.functionRegistry.getSchemas().map((f) => f.name)
+      this.functionRegistry.getSchemas().map((f) => f.name),
     );
-    const missing = waitingCalls.filter((tc) => !registered.has(tc.functionName!));
+    const missing = waitingCalls.filter(
+      (tc) => !registered.has(tc.functionName!),
+    );
     if (missing.length > 0) {
       logger.warn(
         "Cannot resume paused turn: function(s) not registered on this page:",
-        missing.map((tc) => tc.functionName)
+        missing.map((tc) => tc.functionName),
       );
       return null;
     }
@@ -1368,7 +1455,7 @@ export class AgoClient {
       try {
         result = await this.functionRegistry.execute(
           call.functionName!,
-          call.arguments ?? {}
+          call.arguments ?? {},
         );
       } catch (err) {
         error = err instanceof Error ? err.message : "Unknown error";
@@ -1401,11 +1488,11 @@ export class AgoClient {
    */
   async submitToolCallForm(
     toolCallId: string,
-    formData: Record<string, unknown>
+    formData: Record<string, unknown>,
   ): Promise<SubmitToolCallResult> {
     return this.httpClient.post<SubmitToolCallResult>(
       `/api/sdk/v1/tool-calls/${toolCallId}/submit`,
-      { formData }
+      { formData },
     );
   }
 
@@ -1460,7 +1547,7 @@ export class AgoClient {
    */
   async submitFormCollector(
     name: string,
-    values: Record<string, unknown>
+    values: Record<string, unknown>,
   ): Promise<unknown> {
     return this.httpClient.post("/api/sdk/v1/forms/submit", {
       name,
@@ -1489,7 +1576,7 @@ export class AgoClient {
   async submitFeedback(
     messageId: string,
     rating: FeedbackRating,
-    details?: FeedbackDetails
+    details?: FeedbackDetails,
   ): Promise<void> {
     const comment = details?.comment?.trim();
     // De-duplicated because the backend bounds the list before it looks at what
@@ -1527,7 +1614,7 @@ export class AgoClient {
   async submitConversationFeedback(
     conversationId: string,
     rating: FeedbackRating,
-    details?: FeedbackDetails & { lastMessageId?: string }
+    details?: FeedbackDetails & { lastMessageId?: string },
   ): Promise<string> {
     let messageId = details?.lastMessageId;
 
@@ -1544,14 +1631,14 @@ export class AgoClient {
             !message.hidden &&
             !!message.content &&
             message.status !== "IN_PROGRESS" &&
-            message.status !== "WAITING_CLIENT"
+            message.status !== "WAITING_CLIENT",
         );
 
       if (!lastAnswer) {
         throw new AgoError(
           `Conversation ${conversationId} has no finished answer to report feedback on. ` +
             "Wait for the turn to complete, or pass `lastMessageId`.",
-          "feedback_no_message"
+          "feedback_no_message",
         );
       }
       messageId = lastAnswer.id;
@@ -1586,12 +1673,12 @@ export class AgoClient {
   registerFunction(
     name: string,
     handler: ClientFunctionHandler,
-    schema: ClientFunctionRegisterOptions
+    schema: ClientFunctionRegisterOptions,
   ): void;
   registerFunction(
     nameOrDef: string | ClientFunctionDefinition,
     handler?: ClientFunctionHandler,
-    schema?: ClientFunctionRegisterOptions
+    schema?: ClientFunctionRegisterOptions,
   ): void {
     if (typeof nameOrDef === "object") {
       this.functionRegistry.register(nameOrDef);
@@ -1609,7 +1696,7 @@ export class AgoClient {
    * ```
    */
   register(
-    definition: ClientFunctionDefinition | ClientFunctionDefinition[]
+    definition: ClientFunctionDefinition | ClientFunctionDefinition[],
   ): void {
     if (Array.isArray(definition)) {
       for (const def of definition) {
@@ -1634,6 +1721,19 @@ export class AgoClient {
     return this.functionRegistry.getSchemas();
   }
 
+  /** The callback form of `functions:changed`. Returns an unsubscribe. */
+  onFunctionsChanged(listener: () => void): () => void {
+    return this.functionRegistry.onChange(listener);
+  }
+
+  /**
+   * @internal Every registration with the SDK-side settings
+   * {@link getRegisteredFunctions} drops (`requiresApproval`, WebMCP metadata).
+   */
+  getFunctionRegistrations(): Array<RegisteredFunction & { name: string }> {
+    return this.functionRegistry.getAll();
+  }
+
   /**
    * Execute a registered client function locally, through the same
    * FunctionRegistry path (result-size guard, error wrapping) as agent-invoked
@@ -1643,7 +1743,7 @@ export class AgoClient {
    */
   async executeClientFunction(
     name: string,
-    args: Record<string, unknown>
+    args: Record<string, unknown>,
   ): Promise<unknown> {
     return this.functionRegistry.execute(name, args);
   }
@@ -1667,7 +1767,7 @@ export class AgoClient {
    */
   registerNavigationFunction(
     navigate: (path: string) => void,
-    routes: Array<{ name: string; path: string; description: string }>
+    routes: Array<{ name: string; path: string; description: string }>,
   ): void {
     const routeNames = routes.map((r) => r.name);
     const routeDescriptions = routes
@@ -1700,7 +1800,7 @@ export class AgoClient {
     for (const [param, usedBy] of paramUsage) {
       if (param === "page") {
         logger.error(
-          'registerNavigationFunction: a ":page" placeholder collides with the "page" argument and is ignored. Rename the placeholder.'
+          'registerNavigationFunction: a ":page" placeholder collides with the "page" argument and is ignored. Rename the placeholder.',
         );
         continue;
       }
@@ -1760,7 +1860,7 @@ export class AgoClient {
           properties,
           required: ["page"],
         },
-      }
+      },
     );
 
     // Report the current page (by route name) as dynamic context, re-evaluated
@@ -1769,7 +1869,8 @@ export class AgoClient {
     this.addDynamicContext("current-page", () => {
       if (typeof window === "undefined" || !window.location) return null;
       const url = window.location.href;
-      const title = typeof document !== "undefined" ? document.title : undefined;
+      const title =
+        typeof document !== "undefined" ? document.title : undefined;
       const match = matchRoute(window.location.pathname, routes);
 
       const data: Record<string, unknown> = { url };
@@ -1824,7 +1925,7 @@ export class AgoClient {
    */
   registerPageStateFunction(
     controls: AgoStateControl[],
-    opts?: AgoPageStateOptions
+    opts?: AgoPageStateOptions,
   ): void {
     const fnName = opts?.functionName ?? "setPageState";
     const dataSource = opts?.data;
@@ -1846,11 +1947,11 @@ export class AgoClient {
                   fnName,
                   await this.readPageData(fnName, dataSource, opts),
                   this.pageDataBudget(dataSource) -
-                    this.envelopeBytes(envelope)
+                    this.envelopeBytes(envelope),
                 ),
             }
           : undefined,
-      })
+      }),
     );
 
     const companion = readDataFunctionName(fnName);
@@ -1862,14 +1963,14 @@ export class AgoClient {
           data: truncatePageData(
             fnName,
             await this.readPageData(fnName, dataSource, opts),
-            this.pageDataBudget(dataSource) - this.envelopeBytes({})
+            this.pageDataBudget(dataSource) - this.envelopeBytes({}),
           ),
         }),
         {
           description: `Read what the current page is displaying, without changing anything: ${dataSource.description}`,
           parameters: { type: "object", properties: {} },
           maxResultBytes: dataSource.maxResultBytes,
-        }
+        },
       );
       this.pageDataCompanions.add(companion);
     } else if (this.pageDataCompanions.delete(companion)) {
@@ -1937,11 +2038,11 @@ export class AgoClient {
   private readPageData(
     fnName: string,
     source: AgoPageDataSource,
-    opts?: AgoPageStateOptions
+    opts?: AgoPageStateOptions,
   ): Promise<unknown> {
     return readWhenSettled(
       () => source,
-      opts?.settleTimeoutMs ?? DEFAULT_SETTLE_TIMEOUT_MS
+      opts?.settleTimeoutMs ?? DEFAULT_SETTLE_TIMEOUT_MS,
     ).catch((error) => {
       logger.warn(`Reading page data for "${fnName}" failed:`, error);
       // Returning undefined would drop the `data` key entirely on the way to
@@ -1968,7 +2069,7 @@ export class AgoClient {
       `"${fnName}" declares a data source, but clientFunctionsMode is ` +
         `"placeholder": the agent will not see that data during the turn it ` +
         `calls the function. Switch to "pause" (the default) for the data to ` +
-        "come back as the result of its own call."
+        "come back as the result of its own call.",
     );
   }
 
@@ -2037,7 +2138,10 @@ export class AgoClient {
    * call it when their store updates so observers like the dev panel stay live.
    */
   notifyContextChanged(): void {
-    this.eventEmitter.emit("context:changed", this.contextRegistry.getSnapshot());
+    this.eventEmitter.emit(
+      "context:changed",
+      this.contextRegistry.getSnapshot(),
+    );
   }
 
   /**
@@ -2060,7 +2164,11 @@ export class AgoClient {
    * exposing a generic `emit`.
    */
   emitProactiveEvent<
-    K extends "nudge:ready" | "nudge:shown" | "nudge:dismissed" | "nudge:accepted",
+    K extends
+      | "nudge:ready"
+      | "nudge:shown"
+      | "nudge:dismissed"
+      | "nudge:accepted",
   >(event: K, data: AgoClientEvents[K]): void {
     this.eventEmitter.emit(event, data);
   }
@@ -2097,8 +2205,10 @@ export class AgoClient {
    */
   enableAutoPageContext(): void {
     this.addDynamicContext("browser-page", () => {
-      const url = typeof window !== "undefined" ? window.location.href : undefined;
-      const title = typeof document !== "undefined" ? document.title : undefined;
+      const url =
+        typeof window !== "undefined" ? window.location.href : undefined;
+      const title =
+        typeof document !== "undefined" ? document.title : undefined;
       if (!url && !title) return null;
       return {
         name: "Browser page",
@@ -2122,7 +2232,7 @@ export class AgoClient {
     const entries = snapshot?.entries ?? {};
     const { changes, baseline } = computePageStateDelta(
       this.lastSentPageState,
-      entries
+      entries,
     );
     this.lastSentPageState = baseline;
     if (changes.length === 0) return snapshot;
@@ -2175,7 +2285,9 @@ export class AgoClient {
     if (fn === "navigateToPage") {
       const page = args?.page;
       name = "agent.navigate";
-      summary = page ? `Agent navigated to "${String(page)}"` : "Agent navigated";
+      summary = page
+        ? `Agent navigated to "${String(page)}"`
+        : "Agent navigated";
     } else if (fn === "setPageState") {
       name = "agent.page_state";
       summary = "Agent changed the page state";
@@ -2187,7 +2299,9 @@ export class AgoClient {
       actor: "agent",
       name,
       summary,
-      ...(args && Object.keys(args).length > 0 ? { data: { arguments: args } } : {}),
+      ...(args && Object.keys(args).length > 0
+        ? { data: { arguments: args } }
+        : {}),
     });
   }
 
@@ -2268,7 +2382,7 @@ export class AgoClient {
   reportError(error: unknown, context?: Record<string, unknown>): void {
     if (!this.errorWatcher) {
       logger.warn(
-        "reportError() ignored: enable the error watcher first (errorWatcher: true)."
+        "reportError() ignored: enable the error watcher first (errorWatcher: true).",
       );
       return;
     }
@@ -2318,7 +2432,7 @@ export class AgoClient {
    */
   waitFor<K extends AgoEventName>(
     event: K,
-    options?: { timeout?: number }
+    options?: { timeout?: number },
   ): Promise<AgoClientEvents[K]> {
     return this.eventEmitter.waitFor(event, options);
   }
@@ -2361,14 +2475,14 @@ export class AgoClient {
 
     if (cleaned.maxFunctionResultBytes !== undefined) {
       this.functionRegistry.setDefaultMaxResultBytes(
-        cleaned.maxFunctionResultBytes
+        cleaned.maxFunctionResultBytes,
       );
     }
 
     if (cleaned.errorWatcher !== undefined) {
       if (cleaned.errorWatcher) {
         this.enableErrorWatcher(
-          cleaned.errorWatcher === true ? undefined : cleaned.errorWatcher
+          cleaned.errorWatcher === true ? undefined : cleaned.errorWatcher,
         );
       } else {
         this.disableErrorWatcher();
@@ -2384,6 +2498,8 @@ export class AgoClient {
     this.proactive = null;
     this.errorWatcher?.destroy();
     this.errorWatcher = null;
+    this.detachWebMCP?.();
+    this.detachWebMCP = null;
     // Close any stream still open, so a destroyed client stops reading (and its
     // in-flight sendMessage resolves) instead of streaming into nothing.
     this.activeTurn?.controller.abort();
@@ -2405,18 +2521,21 @@ export class AgoClient {
    * React StrictMode's simulated unmount runs `useAgo`'s cleanup — which
    * destroys the memoized client — then remounts with the SAME instance.
    * Hooks re-register their functions, listeners and context on their own in
-   * their re-run effects; the error watcher and the proactive controller are
-   * the constructor-owned attachments, so they must be revived explicitly.
+   * their re-run effects; the constructor-owned attachments (the proactive
+   * controller, the WebMCP bridge) must be revived explicitly.
    */
   reviveAfterDestroy(): void {
     this.registerActivityContext();
     if (this.config.errorWatcher && !this.errorWatcher) {
       this.enableErrorWatcher(
-        this.config.errorWatcher === true ? undefined : this.config.errorWatcher
+        this.config.errorWatcher === true
+          ? undefined
+          : this.config.errorWatcher,
       );
     }
     if (this.config.proactive && !this.proactive) {
       createAgoProactive(this, this.config.proactive);
     }
+    this.attachWebMCPBridge();
   }
 }
