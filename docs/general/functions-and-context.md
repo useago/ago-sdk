@@ -450,6 +450,56 @@ user declined, then lets the turn resume. This is a no-op in placeholder mode
 In React, `useAgoActivity` surfaces awaiting items with ready-made `approve` /
 `reject` controls (see the [React guide](../frameworks/react.md)).
 
+### WebMCP bridge (share your functions with browser agents)
+
+[WebMCP](https://github.com/webmachinelearning/webmcp) is a browser API that lets
+a page hand tools to whatever agent the user brings: an agentic browser, an
+extension. Set `webmcp` and every function you register becomes a WebMCP tool as
+well, so the same definitions serve both your agent and theirs.
+
+```ts
+const client = new AgoClient({
+  baseUrl: "https://playground.api.useago.com",
+  agent: "your-agent",
+  webmcp: true,
+});
+
+client.registerFunction({
+  name: "listFlights",
+  description: "The flights currently on screen, after filtering.",
+  parameters: { type: "object", properties: {} },
+  handler: () => visibleFlights(),
+  // Optional, WebMCP only: MCP behavior hints.
+  webmcp: { annotations: { readOnlyHint: true } },
+});
+```
+
+In React it is a prop, because `AgoProvider` takes the whole config:
+
+```tsx
+<AgoProvider baseUrl="https://playground.api.useago.com" agent="your-agent" webmcp>
+  <App />
+</AgoProvider>
+```
+
+Tools track your registrations, so a function that a page registers on mount
+disappears from the browser's tool list when that page unmounts. Verify what is
+exposed from the console:
+
+```js
+(await document.modelContext.getTools()).map((t) => t.name);
+```
+
+It is off by default because registering tools changes page-global state, and it
+no-ops in browsers that do not implement WebMCP. Calls arrive as
+`function:invoke` and `function:result` like any other, so your logging and the
+dev panel already cover them.
+
+**There is no approval gate on a WebMCP call.** `requiresApproval` and
+`approvalPolicy` hold a call in the agent loop, which a WebMCP call never
+enters: a mirrored function runs as soon as the external agent asks. Set
+`webmcp: false` on a definition to keep that function private to your own agent.
+
 ---
 
 ## Pre-built helpers

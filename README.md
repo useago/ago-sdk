@@ -232,6 +232,24 @@ Whenever the agent calls the tool, the SDK runs your handler in the browser
 with the generated arguments and sends its return value back to the agent. Keep
 the return value small and structured so the agent can use it reliably.
 
+## Share the same tools with the user's own browser agent
+
+[WebMCP](https://github.com/webmachinelearning/webmcp) lets a page hand tools to
+whatever agent the user brings, such as an agentic browser or an extension. Set
+`webmcp` and every function you register is offered there too, so one definition
+serves both agents:
+
+```tsx
+<AgoProvider baseUrl="https://api.example.com" agent="support-agent" webmcp>
+  <ChatWidget />
+</AgoProvider>
+```
+
+Off by default, and a no-op where the browser has no WebMCP. A mirrored function
+runs as soon as the external agent calls it, with no approval gate, so set
+`webmcp: false` on anything that must not run unattended. See
+[functions and context](docs/general/functions-and-context.md#webmcp-bridge-share-your-functions-with-browser-agents).
+
 ## Let the user stop a long answer
 
 `<ChatWidget>` already does this: while the agent answers, its send button turns

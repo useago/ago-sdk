@@ -328,6 +328,11 @@ export function initDevPanel(options: DevPanelOptions): () => void {
     renderFunctions();
   }
 
+  function onFunctionsChanged(): void {
+    if (disposed) return;
+    renderFunctions();
+  }
+
   function onConversationLoaded(conversation: AgoClientEvents["conversation:loaded"]): void {
     if (disposed) return;
     const toolCalls = (conversation.messages ?? []).flatMap(
@@ -348,6 +353,9 @@ export function initDevPanel(options: DevPanelOptions): () => void {
   client.on("function:result", onFunctionResult);
   client.on("context:changed", onContextChanged);
   client.on("conversation:loaded", onConversationLoaded);
+  // Functions come and go with the page, so repaint as they change rather than
+  // only on demand.
+  client.on("functions:changed", onFunctionsChanged);
 
   // --- Optional local function runner ---
   if (enableFunctionRunner) {
@@ -510,6 +518,7 @@ export function initDevPanel(options: DevPanelOptions): () => void {
     client.off("function:result", onFunctionResult);
     client.off("context:changed", onContextChanged);
     client.off("conversation:loaded", onConversationLoaded);
+    client.off("functions:changed", onFunctionsChanged);
 
     panel.remove();
     eventsPanel.remove();

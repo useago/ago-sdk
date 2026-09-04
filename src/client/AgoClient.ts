@@ -22,11 +22,13 @@ import type {
   ClientFunctionHandler,
   ClientFunctionRegisterOptions,
   ClientFunctionSchema,
+  RegisteredFunction,
 } from "../functions/types";
 import { byteLength } from "../utils/jsonBytes";
 import { createAgoProactive } from "../proactive/createAgoProactive";
 import type { ProactiveController } from "../proactive/types";
 import { ClientContextRegistry } from "../state/ClientContextRegistry";
+import { attachWebMCP } from "../webmcp/attachWebMCP";
 import type {
   ContextEntry,
   ContextSnapshot,
@@ -38,6 +40,7 @@ import { SSEHandler } from "../streaming/SSEHandler";
 import { mapAttachment } from "../utils/attachments";
 import { EventEmitter } from "../utils/eventEmitter";
 import { logger } from "../utils/logger";
+import { generateUuid } from "../utils/uuid";
 import { AgoError } from "./errors";
 import { validateConfig } from "./validateConfig";
 import type {
@@ -291,6 +294,9 @@ export class AgoClient {
    */
   proactive: ProactiveController | null = null;
 
+  /** Removes the mirrored WebMCP tools; `null` when the bridge is off. */
+  private detachWebMCP: (() => void) | null = null;
+
   constructor(config: AgoConfig) {
     validateConfig(config, "AgoClient");
     this.config = config;
@@ -303,6 +309,15 @@ export class AgoClient {
     this.eventEmitter = new EventEmitter();
     this.registerActivityContext();
 
+    // Re-broadcast registry changes on the same `on`/`off` surface as
+    // everything else.
+    this.functionRegistry.onChange(() => {
+      this.eventEmitter.emit(
+        "functions:changed",
+        this.functionRegistry.getSchemas()
+      );
+    });
+
     if (config.debug) {
       logger.enable();
     }
@@ -311,7 +326,15 @@ export class AgoClient {
       createAgoProactive(this, config.proactive);
     }
 
+    this.attachWebMCPBridge();
+
     logger.log("AgoClient initialized");
+  }
+
+  /** Mirror registered functions into WebMCP, when the config asks for it. */
+  private attachWebMCPBridge(): void {
+    if (!this.config.webmcp || this.detachWebMCP) return;
+    this.detachWebMCP = attachWebMCP(this);
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -966,6 +989,41 @@ export class AgoClient {
     });
   }
 
+  /**
+   * @internal Run a function for a caller outside the agent loop (the WebMCP
+   * bridge). Runs immediately, since the approval gate covers the agent loop
+   * only. Emits `function:invoke` and `function:result`, so external calls show
+   * up wherever agent calls do.
+   */
+  async runExternalFunction(
+    name: string,
+    args: Record<string, unknown>
+  ): Promise<unknown> {
+    const invocation: ClientFunctionInvocation = {
+      // Not a backend tool-call id: nothing is submitted for these.
+      invocationId: `webmcp-${generateUuid()}`,
+      functionName: name,
+      arguments: args,
+      conversationId: "",
+    };
+    const { invocationId } = invocation;
+
+    this.eventEmitter.emit("function:invoke", invocation);
+
+    try {
+      const result = await this.functionRegistry.execute(name, args);
+      this.eventEmitter.emit("function:result", { invocationId, result });
+      return result;
+    } catch (error) {
+      this.eventEmitter.emit("function:result", {
+        invocationId,
+        result: null,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  }
+
   // ─────────────────────────────────────────────────────────────────
   // Conversations
   // ─────────────────────────────────────────────────────────────────
@@ -1532,6 +1590,22 @@ export class AgoClient {
    */
   getRegisteredFunctions(): ClientFunctionSchema[] {
     return this.functionRegistry.getSchemas();
+  }
+
+  /**
+   * Subscribe to changes in the registered function set. Returns an
+   * unsubscribe function. The callback form of `functions:changed`.
+   */
+  onFunctionsChanged(listener: () => void): () => void {
+    return this.functionRegistry.onChange(listener);
+  }
+
+  /**
+   * @internal Every registration with the SDK-side settings
+   * {@link getRegisteredFunctions} drops (`requiresApproval`, WebMCP metadata).
+   */
+  getFunctionRegistrations(): Array<RegisteredFunction & { name: string }> {
+    return this.functionRegistry.getAll();
   }
 
   /**
@@ -2195,6 +2269,8 @@ export class AgoClient {
   destroy(): void {
     this.proactive?.destroy();
     this.proactive = null;
+    this.detachWebMCP?.();
+    this.detachWebMCP = null;
     // Close any stream still open, so a destroyed client stops reading (and its
     // in-flight sendMessage resolves) instead of streaming into nothing.
     this.activeTurn?.controller.abort();
@@ -2216,13 +2292,14 @@ export class AgoClient {
    * React StrictMode's simulated unmount runs `useAgo`'s cleanup — which
    * destroys the memoized client — then remounts with the SAME instance.
    * Hooks re-register their functions, listeners and context on their own in
-   * their re-run effects; the proactive controller is the only
-   * constructor-owned attachment, so it must be revived explicitly.
+   * their re-run effects; the constructor-owned attachments (the proactive
+   * controller, the WebMCP bridge) must be revived explicitly.
    */
   reviveAfterDestroy(): void {
     this.registerActivityContext();
     if (this.config.proactive && !this.proactive) {
       createAgoProactive(this, this.config.proactive);
     }
+    this.attachWebMCPBridge();
   }
 }

@@ -26,10 +26,33 @@ export interface FunctionRegistryOptions {
 export class FunctionRegistry {
   private functions: Map<string, RegisteredFunction> = new Map();
   private defaultMaxResultBytes: number;
+  private changeListeners = new Set<() => void>();
 
   constructor(options?: FunctionRegistryOptions) {
     this.defaultMaxResultBytes =
       options?.maxResultBytes ?? DEFAULT_MAX_RESULT_BYTES;
+  }
+
+  /**
+   * Subscribe to registrations, unregistrations and clears. Returns an
+   * unsubscribe function.
+   */
+  onChange(listener: () => void): () => void {
+    this.changeListeners.add(listener);
+    return () => {
+      this.changeListeners.delete(listener);
+    };
+  }
+
+  private emitChange(): void {
+    for (const listener of this.changeListeners) {
+      try {
+        listener();
+      } catch (error) {
+        // A misbehaving observer must never break a registration.
+        logger.error("Function registry change listener failed:", error);
+      }
+    }
   }
 
   /** Update the client-level result-size ceiling at runtime. */
@@ -69,12 +92,14 @@ export class FunctionRegistry {
         parameters,
         maxResultBytes,
         requiresApproval,
+        webmcp,
       } = nameOrDef;
       return this.register(name, h, {
         description,
         parameters,
         maxResultBytes,
         requiresApproval,
+        webmcp,
       });
     }
 
@@ -91,17 +116,19 @@ export class FunctionRegistry {
       logger.warn(`Function "${name}" is being overwritten`);
     }
 
-    // maxResultBytes and requiresApproval are SDK-side settings: keep them out
-    // of the schema sent to the backend.
-    const { maxResultBytes, requiresApproval, ...schemaRest } = schema;
+    // maxResultBytes, requiresApproval and webmcp are SDK-side settings: keep
+    // them out of the schema sent to the backend.
+    const { maxResultBytes, requiresApproval, webmcp, ...schemaRest } = schema;
     this.functions.set(name, {
       schema: { ...schemaRest, name },
       handler,
       maxResultBytes,
       requiresApproval,
+      webmcp,
     });
 
     logger.log(`Registered function: ${name}`);
+    this.emitChange();
   }
 
   /**
@@ -111,6 +138,7 @@ export class FunctionRegistry {
     const deleted = this.functions.delete(name);
     if (deleted) {
       logger.log(`Unregistered function: ${name}`);
+      this.emitChange();
     }
     return deleted;
   }
@@ -134,6 +162,17 @@ export class FunctionRegistry {
    */
   getSchemas(): ClientFunctionSchema[] {
     return Array.from(this.functions.values()).map((f) => f.schema);
+  }
+
+  /**
+   * Every registration, name included, with the SDK-side settings
+   * {@link getSchemas} drops.
+   */
+  getAll(): Array<RegisteredFunction & { name: string }> {
+    return Array.from(this.functions.entries()).map(([name, fn]) => ({
+      ...fn,
+      name,
+    }));
   }
 
   /**
@@ -229,8 +268,12 @@ export class FunctionRegistry {
    * Clear all registered functions
    */
   clear(): void {
+    const had = this.functions.size > 0;
     this.functions.clear();
     logger.log("Cleared all registered functions");
+    if (had) {
+      this.emitChange();
+    }
   }
 
   /**

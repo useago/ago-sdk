@@ -5,6 +5,30 @@ All notable changes to `@useago/sdk` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **WebMCP bridge (`webmcp` config).** Set `webmcp: true` and every registered
+  client function is also registered as a
+  [WebMCP](https://github.com/webmachinelearning/webmcp) tool on
+  `document.modelContext`, so the tools you wrote for your own agent are offered
+  to whatever agent the user brings. Tools track registrations, so one a page
+  registers on mount is withdrawn when that page unmounts. In React it is a prop
+  on `AgoProvider`, since the provider takes the whole config. Off by default
+  (registering tools changes page-global state), and a no-op in browsers without
+  WebMCP. Calls emit `function:invoke` and `function:result` like any other.
+  There is no approval gate on them: `requiresApproval` and `approvalPolicy`
+  hold a call in the agent loop, which a WebMCP call never enters.
+- **`webmcp` on a function definition.** WebMCP-only metadata the AGO schema has
+  no room for: `annotations` (`readOnlyHint`, `untrustedContentHint`).
+  `webmcp: false` keeps one function private to your own agent while the bridge
+  is on.
+- **`functions:changed` event** and `client.onFunctionsChanged(listener)`, fired
+  when a function is registered, unregistered, or the registry is cleared. The
+  dev panel now repaints its function list from it instead of waiting for a
+  manual refresh.
+
 ## [1.10.0] - 2026-09-03
 
 ### Added

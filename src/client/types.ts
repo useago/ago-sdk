@@ -1,4 +1,5 @@
 import type { ActivityEntry } from "../activity/ActivityLedger";
+import type { ClientFunctionSchema } from "../functions/types";
 import type { ContextSnapshot } from "../state/ClientContextRegistry";
 import type {
   ProactiveNudgeInstance,
@@ -82,6 +83,17 @@ export interface AgoConfig {
    * default otherwise.
    */
   proactive?: ProactiveOptions;
+  /**
+   * Mirror every registered client function into the browser's WebMCP registry
+   * (`document.modelContext`), so an external agent can call the same functions
+   * the in-app agent calls. Off by default; no-ops without WebMCP.
+   *
+   * A mirrored function runs immediately: the approval gate
+   * ({@link approvalPolicy}, `requiresApproval`) covers the agent loop only.
+   * Keep anything that must not run unattended out with `webmcp: false` on its
+   * definition.
+   */
+  webmcp?: boolean;
 }
 
 /** See {@link AgoConfig.clientFunctionsMode}. */
@@ -621,6 +633,11 @@ export interface AgoClientEvents {
    * call running immediately.
    */
   "function:awaiting-approval": ClientFunctionInvocation;
+  /**
+   * A function was registered or unregistered, or the registry was cleared.
+   * Carries the fresh schema list, so observers repaint without polling.
+   */
+  "functions:changed": ClientFunctionSchema[];
   "function:result": {
     invocationId: string;
     result: unknown;

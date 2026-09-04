@@ -89,6 +89,7 @@ export type {
   ClientFunctionRegisterOptions,
   ClientFunctionSchema,
   RegisteredFunction,
+  WebMCPToolMeta,
 } from "./functions/types";
 
 // Form collector
