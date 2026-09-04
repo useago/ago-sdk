@@ -5,6 +5,28 @@ All notable changes to `@useago/sdk` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0] - 2026-09-04
+
+### Added
+
+- **`loadHomeConfig` on the bubble widget: the home screen from the AGO
+  dashboard.** `mountChatWidget(el, { placement: "bubble", loadHomeConfig: true })`
+  takes the home title, the markdown subtitle and the starter cards from
+  `GET /config` instead of the options, the way the hosted widget does. One
+  request on mount, off the critical path: the panel renders with whatever the
+  options set and re-renders when the config lands, and a failed request leaves
+  the options in place. Each part is replaced only when the dashboard has a
+  value for it, and the header keeps the `title` option. The dashboard's
+  *widget starter* (an opening message the agent sends by itself) fires when the
+  panel is first opened, on a fresh visit only, never over a resumed thread.
+- **`agentId` on `ConversationStarter`.** A starter card can name the agent
+  that answers it. Dashboard starters carry their own.
+- **`SdkPermissionConfig.homePage`.** `AgoClient.getConfig()` now maps the
+  `home_page` block (`title`, `subtitle`, `home_starters`, `widget_starter`)
+  when the backend sends one. A starter card shows its `description` and sends
+  its `initial_message`; one with neither is dropped. New types
+  `SdkHomePageConfig`, `SdkHomeStarter`, `SdkWidgetStarter`.
+
 ## [1.10.0] - 2026-09-03
 
 ### Added

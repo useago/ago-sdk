@@ -7,6 +7,8 @@ import type {
   Conversation,
   FeedbackRating,
   FeedbackReason,
+  SdkHomePageConfig,
+  SdkWidgetStarter,
   TicketForm,
   ToolCallData,
 } from "../client/types";
@@ -250,6 +252,7 @@ export function mountChatWidget(
     conversationStarters = [],
     autoResume = true,
     hideFooter = false,
+    loadHomeConfig = false,
   } = options;
   const title = options.title ?? (isBubble ? "AGO Chatbot" : "Chat");
   const width = options.width ?? (isBubble ? 550 : 400);
@@ -696,6 +699,8 @@ export function mountChatWidget(
   let threadLoading = false;
   // The load-time resume runs at most once.
   let resumeChecked = false;
+  // The dashboard's opening message, held until the resume decision is in.
+  let widgetStarter: SdkWidgetStarter | undefined;
 
   if (isBubble) {
     wrapper = div({
@@ -764,9 +769,9 @@ export function mountChatWidget(
       starters: conversationStarters,
       onStarter: (starter: ConversationStarter) => {
         homeScreen?.setPending(starter);
-        void send(starter.message ?? starter.label).finally(() =>
-          homeScreen?.setPending(null),
-        );
+        void send(starter.message ?? starter.label, undefined, {
+          agentId: starter.agentId,
+        }).finally(() => homeScreen?.setPending(null));
       },
     });
     const hostBackground = options.colors?.background;
@@ -1696,7 +1701,11 @@ export function mountChatWidget(
   }
 
   // ── Send path ──────────────────────────────────────────────────────
-  async function send(content: string, files?: File[]): Promise<void> {
+  async function send(
+    content: string,
+    files?: File[],
+    sendOptions?: { agentId?: string },
+  ): Promise<void> {
     const trimmed = content.trim();
     if ((!trimmed && !files?.length) || isLoading) return;
     // Sending from the home screen (composer or a starter card) lands the
@@ -1750,6 +1759,9 @@ export function mountChatWidget(
       const response = await client.sendMessage(trimmed, {
         conversationId,
         files,
+        // A dashboard starter can name the agent that answers it; without one
+        // the client falls back to the configured default.
+        ...(sendOptions?.agentId ? { agentId: sendOptions.agentId } : {}),
       });
       if (response.conversationId) {
         if (!conversationId) conversationId = response.conversationId;
@@ -1948,10 +1960,74 @@ export function mountChatWidget(
       messages.length > 0 ||
       conversationId
     ) {
+      maybeSendWidgetStarter();
       return;
     }
     const thread = pickResumableThread(threads);
     if (thread) void openThread(thread.id);
+    // Nothing to resume: this is the fresh visit the widget starter is for.
+    maybeSendWidgetStarter();
+  }
+
+  /**
+   * The dashboard's home screen content (`loadHomeConfig`), fetched once on
+   * mount. The home screen is already up with whatever the options set, so
+   * this is a silent upgrade: each part is replaced only when the dashboard
+   * has a value for it, and a failed request leaves the options in place.
+   */
+  async function applyHomeConfig(): Promise<void> {
+    let home: SdkHomePageConfig | undefined;
+    try {
+      const config = await client.getConfig();
+      // The hosted widget reads the first permission's home page too.
+      home = config.permissions[0]?.homePage;
+    } catch {
+      return;
+    }
+    if (destroyed || !home) return;
+    homeScreen?.setContent({
+      title: home.title || undefined,
+      subtitle: home.subtitle || undefined,
+      starters: home.starters.length
+        ? home.starters.map((s) => ({
+            label: s.label,
+            message: s.message,
+            agentId: s.agentId,
+          }))
+        : undefined,
+    });
+    if (home.widgetStarter) {
+      widgetStarter = home.widgetStarter;
+      maybeSendWidgetStarter();
+    }
+  }
+
+  /**
+   * Send the dashboard's widget starter, the opening message the agent makes
+   * by itself. Fresh visits only: it waits for the load-time resume to decide
+   * (a resumed thread cancels it), and never fires once the visitor has
+   * navigated or written anything.
+   */
+  function maybeSendWidgetStarter(): void {
+    const starter = widgetStarter;
+    if (!starter || destroyed) return;
+    // Nobody has opened the panel: hold it rather than spend a turn on a
+    // visitor who never clicks the launcher. openPanel() calls back here.
+    if (!panelOpen) return;
+    // The thread list is still in flight: the resume may yet reopen a thread,
+    // and tryAutoResume calls back here once it has decided.
+    if (threadsLoading && !resumeChecked) return;
+    widgetStarter = undefined;
+    if (
+      navigatedByUser ||
+      conversationId ||
+      messages.length > 0 ||
+      isLoading ||
+      screen !== "home"
+    ) {
+      return;
+    }
+    void send(starter.message, undefined, { agentId: starter.agentId });
   }
 
   function showTeaser(): void {
@@ -2025,6 +2101,7 @@ export function mountChatWidget(
   if (isBubble) {
     showScreen("home");
     render();
+    if (loadHomeConfig) void applyHomeConfig();
     if (options.conversationId) {
       // An explicit thread opens straight into the conversation, and counts
       // as the visitor's own navigation (no load-time redirect on top).
@@ -2262,6 +2339,9 @@ export function mountChatWidget(
     // host page). On desktop, keep focusing the input as before.
     if (isCompact()) container.focus({ preventScroll: true });
     else focus();
+    // The hosted widget only creates its iframe on the first open, so its
+    // opening message costs nothing on a page nobody clicks. Same here.
+    maybeSendWidgetStarter();
     onOpen?.();
   }
   function closePanel(): void {

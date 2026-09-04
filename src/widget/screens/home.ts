@@ -26,6 +26,15 @@ export interface HomeScreenHandle {
   syncColumns: () => void;
   /** Mark a starter as pending (dims the others) or clear it with `null`. */
   setPending: (starter: ConversationStarter | null) => void;
+  /**
+   * Replace the title, subtitle and starter cards (the dashboard's home page
+   * config, which arrives after mount). Anything omitted is left as it is.
+   */
+  setContent: (content: {
+    title?: string;
+    subtitle?: string;
+    starters?: ConversationStarter[];
+  }) => void;
 }
 
 export function buildHomeScreen(opts: HomeScreenOptions): HomeScreenHandle {
@@ -72,23 +81,33 @@ export function buildHomeScreen(opts: HomeScreenOptions): HomeScreenHandle {
     color: TEXT_COLOR,
   });
   titleEl.className = "ago-chat-widget__home-title";
-  for (const line of opts.title.split("\n")) {
-    const row = div({});
-    row.textContent = line;
-    titleEl.appendChild(row);
-  }
   top.appendChild(titleEl);
-  if (opts.subtitle) {
-    const subtitle = div({
-      fontSize: "14px",
-      lineHeight: "20px",
-      textAlign: "center",
-      maxWidth: "512px",
-    });
-    subtitle.className = "ago-chat-widget__home-subtitle";
-    subtitle.appendChild(renderMarkdown(opts.subtitle));
-    top.appendChild(subtitle);
-  }
+
+  const subtitleEl = div({
+    fontSize: "14px",
+    lineHeight: "20px",
+    textAlign: "center",
+    maxWidth: "512px",
+  });
+  subtitleEl.className = "ago-chat-widget__home-subtitle";
+  top.appendChild(subtitleEl);
+
+  const renderTitle = (title: string): void => {
+    titleEl.replaceChildren();
+    for (const line of title.split("\n")) {
+      const row = div({});
+      row.textContent = line;
+      titleEl.appendChild(row);
+    }
+  };
+  const renderSubtitle = (subtitle: string | undefined): void => {
+    subtitleEl.replaceChildren();
+    // An empty subtitle must not leave the title's 32px gap hanging above it.
+    subtitleEl.style.display = subtitle ? "" : "none";
+    if (subtitle) subtitleEl.appendChild(renderMarkdown(subtitle));
+  };
+  renderTitle(opts.title);
+  renderSubtitle(opts.subtitle);
 
   const middle = div({
     flex: "1",
@@ -115,7 +134,20 @@ export function buildHomeScreen(opts: HomeScreenOptions): HomeScreenHandle {
     [];
   let pending: ConversationStarter | null = null;
 
-  for (const starter of opts.starters) {
+  const renderStarters = (starters: ConversationStarter[]): void => {
+    grid.replaceChildren();
+    cards.length = 0;
+    for (const starter of starters) buildCard(starter);
+    // The grid is only in the tree when there is something to show, so an
+    // empty one never eats the composer's vertical space.
+    if (starters.length > 0) {
+      if (!grid.parentNode) middle.insertBefore(grid, composerSlot);
+    } else {
+      grid.remove();
+    }
+  };
+
+  function buildCard(starter: ConversationStarter): void {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "ago-chat-widget__starter";
@@ -179,11 +211,10 @@ export function buildHomeScreen(opts: HomeScreenOptions): HomeScreenHandle {
     cards.push({ starter, btn });
     grid.appendChild(btn);
   }
-  if (opts.starters.length > 0) middle.appendChild(grid);
-
   const composerSlot = div({ width: "100%" });
   composerSlot.className = "ago-chat-widget__home-composer";
   middle.appendChild(composerSlot);
+  renderStarters(opts.starters);
 
   const bottom = div({ flex: "1" });
   inner.append(top, middle, bottom);
@@ -213,7 +244,22 @@ export function buildHomeScreen(opts: HomeScreenOptions): HomeScreenHandle {
     }
   };
 
-  return { el: root, composerSlot, syncColumns, setPending };
+  const setContent = (content: {
+    title?: string;
+    subtitle?: string;
+    starters?: ConversationStarter[];
+  }): void => {
+    if (content.title !== undefined) renderTitle(content.title);
+    if (content.subtitle !== undefined) renderSubtitle(content.subtitle);
+    if (content.starters) {
+      renderStarters(content.starters);
+      syncColumns();
+      // Cards rebuilt under a pending starter would come back enabled.
+      if (pending) setPending(pending);
+    }
+  };
+
+  return { el: root, composerSlot, syncColumns, setPending, setContent };
 }
 
 /** Muted color shared by the home and history empty states. */
