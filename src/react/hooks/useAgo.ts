@@ -51,7 +51,7 @@ export function useAgo(
       // re-running with the SAME instance — React StrictMode's simulated
       // unmount/remount. Hooks re-register their own functions/listeners/
       // context in their re-run effects; revive the constructor-owned
-      // attachments (the proactive controller).
+      // attachments (the proactive controller, the WebMCP bridge).
       clientRef.current = client;
       client.reviveAfterDestroy();
     }

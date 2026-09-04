@@ -5,6 +5,28 @@ All notable changes to `@useago/sdk` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **WebMCP bridge (`webmcp` config).** Set `webmcp: true` and every registered
+  client function is also registered as a
+  [WebMCP](https://github.com/webmachinelearning/webmcp) tool on
+  `document.modelContext`, so the tools written for AGO's agent are offered to
+  whatever agent the user brings. A tool a page registers on mount is withdrawn
+  when that page unmounts. In React it is a prop on `AgoProvider`. Off by
+  default, and a no-op in browsers without WebMCP. Calls emit `function:invoke`
+  and `function:result` like any other. There is no approval gate on them, and
+  cancelling a call does not stop the handler.
+- **`webmcp` on a function definition.** WebMCP-only metadata the AGO schema has
+  no room for: `annotations` (`readOnlyHint`, `untrustedContentHint`).
+  `webmcp: false` keeps one function private to your own agent while the bridge
+  is on.
+- **`functions:changed` event** and `client.onFunctionsChanged(listener)`, fired
+  when a function is registered, unregistered, or the registry is cleared. The
+  dev panel now repaints its function list from it instead of waiting for a
+  manual refresh.
+
 ## [1.12.0] - 2026-09-07
 
 ### Added
@@ -59,7 +81,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   options set and re-renders when the config lands, and a failed request leaves
   the options in place. Each part is replaced only when the dashboard has a
   value for it, and the header keeps the `title` option. The dashboard's
-  *widget starter* (an opening message the agent sends by itself) fires when the
+  _widget starter_ (an opening message the agent sends by itself) fires when the
   panel is first opened, on a fresh visit only, never over a resumed thread.
 - **`agentId` on `ConversationStarter`.** A starter card can name the agent
   that answers it. Dashboard starters carry their own.
@@ -68,7 +90,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when the backend sends one. A starter card shows its `description` and sends
   its `initial_message`; one with neither is dropped. New types
   `SdkHomePageConfig`, `SdkHomeStarter`, `SdkWidgetStarter`.
-
 
 ## [1.10.0] - 2026-09-03
 
@@ -232,9 +253,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also registers a read-only `readPageData` companion (no parameters, changes
   nothing, returns `{ data }`) for "what's on screen?" questions; it is removed
   by `unregisterPageStateFunction`.
+
 - The SDK waits for the work a control change triggered before reading the
   snapshot. Two ways to tell it when that work is done:
-  - **`get()` returns a promise** (preferred): awaiting it *is* the completion
+  - **`get()` returns a promise** (preferred): awaiting it _is_ the completion
     signal, so the SDK is exact. `get: () => queryClient.ensureQueryData({...})`
     shares the single in-flight request with the UI.
   - **`isLoading` is declared**: the SDK polls it every 50 ms and treats two
@@ -245,6 +267,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Both are capped by `settleTimeoutMs` (10 s by default); a promise that never
   settles no longer holds the turn open, and a rejected `get()` is reported to
   the agent as a failed read instead of an empty page.
+
 - Oversized snapshots are truncated **by item**: the first whole items that fit
   the budget (`data.maxResultBytes`, defaulting to `maxFunctionResultBytes`) plus
   a `truncation` field carrying `{ truncated, returnedItems, totalItems, hint }`.
@@ -319,7 +342,7 @@ declared in `"placeholder"` mode.
   second call with identical arguments was swallowed: its result was never
   submitted, the backend never saw every result, and the paused turn stayed in
   `WAITING_CLIENT` forever. It now uses the invocation id to tell a repeat call
-  apart from a repeat *emission* of the same call. Zero-argument functions (such
+  apart from a repeat _emission_ of the same call. Zero-argument functions (such
   as the new `readPageData`) hit this every time.
 - Vue's `useAgoPageState` no longer drops `requiresApproval` (and now forwards
   every option, matching React and Angular).
