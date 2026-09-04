@@ -189,13 +189,27 @@ export interface AgoPageStateOptions {
 }
 
 /**
- * Schema-plus-settings object accepted when registering a function: the schema
- * (minus `name`) and SDK-side options that are NOT sent to the backend.
+ * The MCP behavior hints AGO has no equivalent for, used when the WebMCP bridge
+ * is on (`AgoConfig.webmcp`).
+ *
+ * ```ts
+ * webmcp: { annotations: { readOnlyHint: true } }
+ * ```
  */
-export type ClientFunctionRegisterOptions = Omit<
-  ClientFunctionSchema,
-  "name"
-> & {
+export interface WebMCPToolMeta {
+  /**
+   * Both default to `false`, so only set what is true: `readOnlyHint` marks a
+   * function that changes nothing, `untrustedContentHint` one whose result may
+   * carry third-party text.
+   */
+  annotations?: {
+    readOnlyHint?: boolean;
+    untrustedContentHint?: boolean;
+  };
+}
+
+/** SDK-side function settings that are never sent to the backend. */
+interface ClientFunctionSettings {
   /**
    * Max serialized result size in bytes before the SDK truncates it to a
    * flagged preview. Overrides the client-level default
@@ -208,18 +222,27 @@ export type ClientFunctionRegisterOptions = Omit<
    * {@link AgoConfig.approvalPolicy} — pause mode only. ORs with the policy.
    */
   requiresApproval?: boolean;
-};
+  /**
+   * WebMCP metadata, read only when the bridge is on (`AgoConfig.webmcp`).
+   * `false` keeps this function out of WebMCP while leaving it available to the
+   * in-app agent.
+   */
+  webmcp?: WebMCPToolMeta | false;
+}
+
+/**
+ * Schema-plus-settings object accepted when registering a function: the schema
+ * (minus `name`) and SDK-side options that are NOT sent to the backend.
+ */
+export type ClientFunctionRegisterOptions = Omit<ClientFunctionSchema, "name"> &
+  ClientFunctionSettings;
 
 /**
  * Registered function with handler
  */
-export interface RegisteredFunction {
+export interface RegisteredFunction extends ClientFunctionSettings {
   schema: ClientFunctionSchema;
   handler: ClientFunctionHandler;
-  /** Per-function result-size ceiling; falls back to the registry default. */
-  maxResultBytes?: number;
-  /** Require explicit user approval before running (pause mode only). */
-  requiresApproval?: boolean;
 }
 
 /**
@@ -235,20 +258,9 @@ export interface RegisteredFunction {
  * client.registerFunction(fn);
  * ```
  */
-export interface ClientFunctionDefinition {
+export interface ClientFunctionDefinition extends ClientFunctionSettings {
   name: string;
   description: string;
   parameters: ClientFunctionSchema["parameters"];
   handler: ClientFunctionHandler;
-  /**
-   * Max serialized result size in bytes before the SDK truncates it to a
-   * flagged preview (default: `AgoConfig.maxFunctionResultBytes`, 50 000).
-   * `Infinity` disables the guard for this function.
-   */
-  maxResultBytes?: number;
-  /**
-   * Require explicit user approval before this function runs. See
-   * {@link AgoConfig.approvalPolicy} — pause mode only. ORs with the policy.
-   */
-  requiresApproval?: boolean;
 }
