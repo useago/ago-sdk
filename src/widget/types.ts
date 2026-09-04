@@ -129,6 +129,11 @@ export interface ConversationStarter {
   label: string;
   /** Message sent when clicked. Defaults to `label`. */
   message?: string;
+  /**
+   * Answer this starter with a specific agent (id or slug) instead of the
+   * client's default. Dashboard starters (`loadHomeConfig`) carry their own.
+   */
+  agentId?: string;
 }
 
 /**
@@ -361,6 +366,21 @@ export interface MountChatWidgetOptions {
    * conversation with a preset message.
    */
   conversationStarters?: ConversationStarter[];
+  /**
+   * `placement: "bubble"` only. Take the home screen's title, subtitle and
+   * starter cards from the AGO dashboard (`GET /config`) instead of the
+   * options above, the way the hosted widget does. One request on mount; the
+   * home screen renders immediately with whatever was passed in code and
+   * re-renders when the config lands.
+   *
+   * Each part is replaced only when the dashboard has a value for it, so
+   * anything the dashboard leaves empty keeps what the code set. Off by
+   * default: without it the widget makes no config request on mount.
+   *
+   * The dashboard's *widget starter* (a first message the agent sends by
+   * itself) is honored too, on a fresh visit only.
+   */
+  loadHomeConfig?: boolean;
   /**
    * `placement: "bubble"` only. On open, reopen the visitor's most recent
    * conversation if its last message is under two hours old. Defaults to `true`.

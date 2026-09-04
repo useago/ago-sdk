@@ -233,6 +233,39 @@ export interface TicketForm {
   fields: TicketField[];
 }
 
+/**
+ * A conversation starter card configured in the AGO dashboard. `label` is what
+ * the card shows; clicking it sends `message`.
+ */
+export interface SdkHomeStarter {
+  id: string;
+  /** The card's text (the starter's `description` in the dashboard). */
+  label: string;
+  /** What is sent when the card is clicked. */
+  message: string;
+  /** Answer with this agent instead of the configured default. */
+  agentId?: string;
+}
+
+/**
+ * The starter the dashboard sends by itself on a fresh visit, before the
+ * visitor types anything.
+ */
+export interface SdkWidgetStarter {
+  id: string;
+  message: string;
+  agentId?: string;
+}
+
+/** The dashboard's home screen content (title, subtitle, starter cards). */
+export interface SdkHomePageConfig {
+  title?: string;
+  /** Markdown. */
+  subtitle?: string;
+  starters: SdkHomeStarter[];
+  widgetStarter?: SdkWidgetStarter;
+}
+
 /** One permission's configuration in {@link SdkConfig}. */
 export interface SdkPermissionConfig {
   id?: string;
@@ -240,6 +273,8 @@ export interface SdkPermissionConfig {
   displayName?: string;
   agents: Array<{ id: string; name?: string }>;
   ticketForm?: TicketForm;
+  /** Home screen content, when the tenant configured one. */
+  homePage?: SdkHomePageConfig;
   fileAttachmentsEnabled: boolean;
   voiceEnabled: boolean;
 }

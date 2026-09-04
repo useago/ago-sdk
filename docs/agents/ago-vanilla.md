@@ -202,7 +202,10 @@ widget.destroy(); // removes listeners, uninstalls forms, clears the DOM
 While the agent answers, the send button becomes a Stop button that interrupts
 the turn; pass `allowStop: false` to keep a disabled spinner instead.
 Set `placement: "left"` or `"right"` for a fixed full-height side panel with a
-launcher button. Set `persistConversation: true` to resume the visitor's last
+launcher button, or `placement: "bubble"` for the hosted widget's floating
+bubble (home / chat / history screens); with `loadHomeConfig: true` the bubble's
+home title, subtitle and starter cards come from the AGO dashboard.
+Set `persistConversation: true` to resume the visitor's last
 thread across reloads. Set `feedback: true` to put thumbs under each answer,
 with a "what went wrong?" panel on a thumbs-down. Theme it with the `theme` option or `--ago-*` CSS variables
 on `.ago-chat-widget`. Message text renders as GitHub-flavored markdown and is

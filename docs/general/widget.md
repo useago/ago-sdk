@@ -102,6 +102,33 @@ relative time (`5min ago`, `2h ago`, `3d ago`); a row reopens that thread, and
 the floating "New conversation" pill starts over. `hideFooter: true` drops the
 tab bar.
 
+**Home screen from the dashboard.** By default the home screen shows what you
+pass in code. Set `loadHomeConfig: true` and it takes the title, the subtitle
+and the starter cards from your AGO dashboard instead, like the hosted widget:
+
+```ts
+mountChatWidget(document.body, {
+  config: { baseUrl: "https://YOUR-DOMAIN.api.useago.com" },
+  placement: "bubble",
+  loadHomeConfig: true,
+  title: "Support", // still the header title, and the home title until the config lands
+});
+```
+
+It costs one `GET /config` on mount. The panel opens right away with whatever
+the options set, and re-renders when the config arrives, so nothing waits on
+the request; if it fails, the options stay. Each part is replaced only when the
+dashboard has a value for it, so a dashboard with a title but no starters keeps
+your `conversationStarters`. The header keeps the `title` option either way.
+
+A dashboard starter can name the agent that answers it, and so can yours
+(`{ label: "Billing", message: "I have a billing question", agentId: "billing-bot" }`).
+The dashboard's **widget starter**, an opening message the agent sends by
+itself, is honored too. It fires when the visitor first opens the panel, and
+only on a fresh visit: never over a resumed thread, and never on a page where
+nobody clicks the launcher (the hosted widget builds its iframe on first open,
+so it costs the same nothing there).
+
 **Reopening the last thread.** On load the widget reopens the visitor's most
 recent conversation if its last message is under two hours old, first from the
 front-side cache (`persistConversation` is on by default here, under the usual
@@ -186,8 +213,9 @@ and `showAgentName` (its layout is the hosted widget's), defaults `title` to
 | `colors?`               | `AgoWidgetColors`                                                                         | — (bubble only)                                            |
 | `hideFooter?`           | `boolean`                                                                                 | `false` (bubble only)                                      |
 | `subtitle?`             | `string` (markdown)                                                                       | — (bubble home screen)                                     |
-| `conversationStarters?` | `Array<{ label: string; message?: string }>`                                              | — (bubble home screen)                                     |
+| `conversationStarters?` | `Array<{ label: string; message?: string; agentId?: string }>`                            | — (bubble home screen)                                     |
 | `autoResume?`           | `boolean`                                                                                 | `true` (bubble only)                                       |
+| `loadHomeConfig?`       | `boolean`                                                                                 | `false` (bubble only; home title/subtitle/cards from the dashboard) |
 | `labels?`               | `Partial<WidgetLabels>`                                                                   | English strings (bubble only)                              |
 | `mobile?`               | `{ breakpoint?: number; trigger?: "tap" \| "focus" \| "manual" }`                         | — (automatic; see [Mobile fullscreen](#mobile-fullscreen)) |
 | `logoUrl?`              | `string`                                                                                  | —                                                          |
