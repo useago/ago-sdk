@@ -6,7 +6,8 @@ reference, and the framework guides show the idiomatic wrappers.
 
 - [Client-side functions](#client-side-functions): the agent runs code in the browser
 - [Pre-built helpers](#pre-built-helpers): a catalogue of ready-made functions
-- [Client context](#client-context): tell the agent what the user is doing
+- [Client context](#client-context): tell the agent what the user is doing,
+  including the [JavaScript errors](#javascript-errors) the page hit
 
 ---
 
@@ -605,11 +606,94 @@ event can't bloat the context. Read or clear the log with
 `client.getRecentActivity()` / `client.clearActivity()`, observe it via
 `client.on("activity:recorded", …)`, or use the React `useAgoActivityLog()` hook.
 
+### JavaScript errors
+
+"The button does nothing" is much easier to answer when the agent can see the
+exception behind it. Turn the error watcher on and the page's recent JavaScript
+errors ride along with every message:
+
+```ts
+const client = new AgoClient({
+  baseUrl: "https://playground.api.useago.com",
+  agent: "generic-guide",
+  errorWatcher: true,
+});
+```
+
+(`<AgoProvider errorWatcher>`, the Vue plugin and `provideAgo` take the same
+option, and so does `mountChatWidget({ config: { errorWatcher: true } })`.)
+
+With it on, the SDK captures:
+
+- uncaught exceptions (the `window` `error` event), with file, line and stack;
+- unhandled promise rejections;
+- every `console.error` call (see the note below);
+- errors your app caught itself and hands over with `client.reportError()`.
+
+They go out as the `errors:recent` context entry: at most 10 distinct errors,
+deduplicated with a `count`, each with how long ago it last fired, pruned after
+10 minutes. Messages are cut at 500 characters and stacks at 2000, so one crash
+cannot flood the context. The entry is absent when nothing happened.
+
+Report the errors you already catch, so the agent sees them too:
+
+```tsx
+// React error boundary
+componentDidCatch(error, info) {
+  this.props.client.reportError(error, { componentStack: info.componentStack });
+}
+
+// Vue
+app.config.errorHandler = (err, _instance, info) => client.reportError(err, { info });
+
+// Angular
+@Injectable() class AgoErrorHandler implements ErrorHandler {
+  constructor(private ago: AgoService) {}
+  handleError(error: unknown) { this.ago.getClient().reportError(error); }
+}
+```
+
+Tune the caps or redact what leaves the page with options instead of `true`:
+
+```ts
+new AgoClient({
+  baseUrl: "https://playground.api.useago.com",
+  errorWatcher: {
+    maxErrors: 5,          // distinct errors kept (default 10)
+    maxAgeMs: 120_000,     // forget errors older than 2 min (default 10 min)
+    maxStackChars: 1000,   // default 2000
+    // Return null to drop an error, or an edited copy to redact it.
+    filter: (e) => (e.message.includes("token") ? null : e),
+  },
+});
+```
+
+Things to know:
+
+- **It is off by default.** Error messages can contain emails, ids or internal
+  URLs. Enabling it is your call; use `filter` if some of them must stay home.
+- **`console.error` is wrapped.** The SDK never touches globals otherwise, but
+  most caught errors (React render errors included) only surface there. The
+  wrapper calls the original every time and is restored on `destroy()`.
+- **Cross-origin scripts** without a `crossorigin` attribute only yield
+  `Script error.` with no details. That is the browser, not the SDK.
+- Errors also count as friction for the proactive mode: a trigger can use
+  `when: { jsErrors: 1 }` to nudge right after a crash.
+
+Observe or inspect it with `client.on("error:captured", …)`,
+`client.getRecentErrors()`, `client.clearErrors()`, or toggle it at runtime
+with `client.updateConfig({ errorWatcher: false })`.
+
+To see it work, `examples/simple-html/error-watcher.html` is an order page
+with three planted bugs (a `TypeError`, an unhandled rejection, a swallowed
+error logged with `console.error`) and the bubble widget wired to the same
+client. Build the SDK, serve the repo, click a button, ask the agent what broke.
+
 ### Per framework
 
 | Framework | Idiomatic API |
 | --- | --- |
-| Core | `setContext` / `addDynamicContext` / `enableAutoPageContext` |
+| Core | `setContext` / `addDynamicContext` / `enableAutoPageContext` / `errorWatcher` |
 | React | `useAgoContext(entryOrFn, key?)` + `pageContext="auto"` |
 | Vue | core API inside `onMounted` / `onUnmounted` |
 | Angular | `agoService.getClient().setContext(…)` |

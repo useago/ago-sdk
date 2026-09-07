@@ -23,6 +23,7 @@ idiomatic binding (hook / composable / service / component) is also provided.
 | Auto-continue after navigation | ✅ `attachAutoContinueAfterNavigation` | ✅ `useAgoAutoContinueAfterNavigation` | ➖ core API | ✅ `enableAutoContinueAfterNavigation` |
 | Client context | ✅ `setContext` / `addDynamicContext` | ✅ `useAgoContext` | ✅ core API | ✅ core API |
 | Auto page context | ✅ `enableAutoPageContext()` | ✅ `pageContext="auto"` | ✅ core API | ✅ core API |
+| JS errors as context | ✅ `errorWatcher: true` / `reportError` | ✅ `errorWatcher` prop | ✅ plugin option | ✅ `provideAgo` option |
 | Events (`on`/`off`/`once`/`waitFor`) | ✅ | ✅ (via client) | ✅ `useAgoEvents` | ✅ `messages$` Observables |
 | Streaming helpers / async generator | ✅ | ✅ | ✅ | ✅ |
 | Tool calls (form/confirm/reject) | ✅ | ✅ | ✅ | ✅ `AgoService` |

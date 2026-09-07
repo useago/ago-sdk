@@ -267,6 +267,9 @@ ago.addDynamicContext("cart", () => ({
 
 // One-liner to attach the current URL + page title:
 ago.enableAutoPageContext();
+
+// Send the page's recent JavaScript errors too (opt-in, see the config):
+const ago2 = new AgoClient({ baseUrl: "https://playground.api.useago.com", errorWatcher: true });
 ```
 
 Full details in [Client context](functions-and-context.md#client-context).
@@ -471,6 +474,8 @@ Prefer callbacks over raw events? See the
 - `setContext(key, entry)` · `removeContext(key)`
 - `addDynamicContext(key, provider)` · `removeDynamicContext(key)`
 - `enableAutoPageContext()`
+- `enableErrorWatcher(options?)` · `disableErrorWatcher()` · `reportError(error, context?)`
+  · `getRecentErrors()` · `clearErrors()`
 - `getContextSnapshot()` → `ContextSnapshot | null`
 - `notifyContextChanged()`: re-emit `context:changed` with a fresh snapshot
   (for stateful helpers that mutate their own store)

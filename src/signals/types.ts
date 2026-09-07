@@ -8,7 +8,8 @@ export type SignalType =
   | "route_change"
   | "route_bounce"
   | "rage_click"
-  | "field_error";
+  | "field_error"
+  | "js_error";
 
 /** One entry of the collector's ring buffer. */
 export interface Signal {
@@ -38,6 +39,12 @@ export interface SignalsSnapshot {
   idleMs: number;
   /** Rage-click bursts detected on the current route. */
   rageClicks: number;
+  /**
+   * JavaScript errors captured on the current route (count only; the messages
+   * travel in `client_context` under `errors:recent`). Always `0` unless the
+   * client has `errorWatcher` enabled.
+   */
+  jsErrors: number;
   /**
    * A→B→A→B route oscillations detected in the recent route sequence. Rolling
    * session counter (cross-route by nature); trigger cooldowns and dismissal

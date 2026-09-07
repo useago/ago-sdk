@@ -1,4 +1,5 @@
 import type { AgoClient } from "../client/AgoClient";
+import type { CapturedError } from "../errors/ErrorWatcher";
 import { SignalCollector } from "../signals/SignalCollector";
 import { logger } from "../utils/logger";
 import { NudgeGovernor } from "./NudgeGovernor";
@@ -66,6 +67,14 @@ export function createAgoProactive(
   });
   collector.start();
 
+  // JS errors captured by the client's ErrorWatcher (when enabled) count as
+  // friction on the current route. Kind + counter only: the messages already
+  // travel in client_context under `errors:recent`.
+  const onErrorCaptured = (error: CapturedError) => {
+    collector.signalJsError(error.type);
+  };
+  client.on("error:captured", onErrorCaptured);
+
   // Ride-along context: the snapshot goes out as client_context with every
   // message. pageState is excluded — it already travels under its own
   // `page-state:*` entries (and reading it here would recurse through
@@ -77,7 +86,8 @@ export function createAgoProactive(
       name: "Friction signals",
       description:
         "Behavioral friction observed on the current page: dwell/idle times, " +
-        "rage clicks, route bounces, repeated field errors (names and counters only).",
+        "rage clicks, route bounces, repeated field errors, JavaScript error " +
+        "count (names and counters only).",
       data,
     };
   });
@@ -117,6 +127,7 @@ export function createAgoProactive(
     destroy: () => {
       engine.stop();
       tracker.destroy();
+      client.off("error:captured", onErrorCaptured);
       collector.destroy();
       client.removeDynamicContext(FRICTION_CONTEXT_KEY);
       if (client.proactive === controller) {

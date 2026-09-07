@@ -75,6 +75,9 @@ export function matchesWhen(
   if (when.rageClicks !== undefined && snapshot.rageClicks < when.rageClicks) {
     return false;
   }
+  if (when.jsErrors !== undefined && (snapshot.jsErrors ?? 0) < when.jsErrors) {
+    return false;
+  }
   if (
     when.routeBounces !== undefined &&
     snapshot.routeBounces < when.routeBounces

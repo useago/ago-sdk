@@ -5,6 +5,27 @@ All notable changes to `@useago/sdk` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **JavaScript errors as agent context.** Set `errorWatcher: true` (or options)
+  on the client config and the page's recent JS errors ride along with every
+  message as the `errors:recent` context entry: uncaught exceptions with file,
+  line and stack, unhandled promise rejections, `console.error` calls (the
+  method is wrapped, calls through, and is restored on `destroy()`), and
+  errors the app hands over with `client.reportError(error, context?)`.
+  Deduplicated with a `count`, capped at 10, pruned after 10 minutes, messages
+  and stacks truncated. Options `maxErrors`, `maxAgeMs`, `maxStackChars`,
+  `filter`. New client methods `enableErrorWatcher`, `disableErrorWatcher`,
+  `reportError`, `getRecentErrors`, `clearErrors`; new event `error:captured`;
+  new exports `ErrorWatcher`, `CapturedError`, `ErrorWatcherOptions`. Off by
+  default: error messages can carry PII.
+- **`jsErrors` proactive matcher.** Captured errors count as friction on the
+  current route (`SignalsSnapshot.jsErrors`, reset on navigation), so a
+  trigger can nudge right after a crash with `when: { jsErrors: 1 }`. Needs
+  `errorWatcher` on; counts only, the messages stay in `client_context`.
+
 ## [1.11.0] - 2026-09-04
 
 ### Added
@@ -26,6 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when the backend sends one. A starter card shows its `description` and sends
   its `initial_message`; one with neither is dropped. New types
   `SdkHomePageConfig`, `SdkHomeStarter`, `SdkWidgetStarter`.
+
 
 ## [1.10.0] - 2026-09-03
 

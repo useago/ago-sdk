@@ -74,6 +74,10 @@ export type {
 export { ActivityLedger, DEFAULT_MAX_ACTIVITY_ENTRIES } from "./activity/ActivityLedger";
 export type { ActivityEntry, ActivityInput } from "./activity/ActivityLedger";
 
+// JS error watcher (attached via `errorWatcher` in the config; usable standalone)
+export { ErrorWatcher, DEFAULT_MAX_ERRORS, DEFAULT_MAX_ERROR_AGE_MS } from "./errors/ErrorWatcher";
+export type { CapturedError, CapturedErrorType, ErrorWatcherOptions } from "./errors/ErrorWatcher";
+
 // Functions
 export { defineFunction } from "./functions/defineFunction";
 export { FunctionRegistry } from "./functions/FunctionRegistry";

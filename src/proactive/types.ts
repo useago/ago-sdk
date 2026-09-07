@@ -25,6 +25,12 @@ export interface ProactiveTriggerWhen {
   pageState?: Partial<Record<string, unknown>>;
   /** Min rage-click bursts on the current route. */
   rageClicks?: number;
+  /**
+   * Min JavaScript errors captured on the current route. Needs the client's
+   * `errorWatcher` enabled; without it the count stays at 0 and the matcher
+   * never passes.
+   */
+  jsErrors?: number;
   /** Min A→B→A→B route oscillations this session. */
   routeBounces?: number;
   /** Per-field minimum error counts (field NAME → min count). */

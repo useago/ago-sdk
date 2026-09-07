@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AGO SDK — JavaScript errors as agent context (errorWatcher)</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      max-width: 760px;
+      margin: 40px auto;
+      padding: 20px;
+      color: #1a1a1a;
+      line-height: 1.6;
+    }
+    .card {
+      background: #f5f5f5;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+    .card h2 { margin: 0 0 8px; font-size: 18px; }
+    .order { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+    .order code { background: #e9e9e9; padding: 2px 6px; border-radius: 4px; }
+    button {
+      padding: 10px 16px;
+      background: #03182f;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    button.secondary { background: #6b7280; }
+    .buttons { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+    .status { margin-top: 10px; min-height: 1.4em; color: #374151; }
+    pre {
+      background: #0b1020;
+      color: #d6e2ff;
+      padding: 14px;
+      border-radius: 8px;
+      overflow: auto;
+      font-size: 12px;
+      max-height: 320px;
+    }
+    .empty { color: #6b7280; font-style: italic; }
+  </style>
+</head>
+<body>
+  <h1>AGO — the agent sees what broke</h1>
+  <p>
+    A tiny order page with a few bugs planted in it. Each button triggers a
+    different kind of JavaScript error; the SDK's <code>errorWatcher</code>
+    captures them all, and they ride along with the next message as the
+    <code>errors:recent</code> context entry. Click a button, then open the chat
+    bottom right and ask <em>"why does the discount button not work?"</em>.
+  </p>
+
+  <div class="card">
+    <h2>Order #1042</h2>
+    <div class="order">
+      <span>Customer: <code>Ada Lovelace</code></span>
+      <span>Total: <code id="total">€ 120.00</code></span>
+      <span>Status: <code id="status-badge">pending</code></span>
+    </div>
+    <div class="buttons">
+      <button id="discount">Apply 10% discount</button>
+      <button id="invoice">Load invoice</button>
+      <button id="save">Save order</button>
+      <button id="ship" class="secondary">Mark as shipped (works)</button>
+    </div>
+    <div class="status" id="status"></div>
+  </div>
+
+  <div class="card">
+    <h2>What the watcher holds right now</h2>
+    <p style="margin:0 0 8px; font-size:14px; color:#4b5563">
+      <code>client.getRecentErrors()</code>, refreshed on every
+      <code>error:captured</code>. The same list, with relative ages, is what
+      the agent receives. Open the dev panel (right edge) to see the full
+      context snapshot.
+    </p>
+    <pre id="errors"><span class="empty">Nothing captured yet. Click a button above.</span></pre>
+    <div class="buttons">
+      <button id="clear" class="secondary">Clear captured errors</button>
+    </div>
+  </div>
+
+  <script type="module">
+    // This example runs against the LOCAL build, since it needs the current
+    // source. From the repo root:
+    //   npm run build && python3 -m http.server 8000
+    // then open http://localhost:8000/examples/simple-html/error-watcher.html
+    //
+    // Once the feature is published, the CDN imports work too:
+    //   import { AgoClient } from 'https://esm.sh/@useago/sdk@1';
+    //   import { mountChatWidget } from 'https://esm.sh/@useago/sdk@1/widget';
+    import { AgoClient } from '../../dist/index.js';
+    import { mountChatWidget } from '../../dist/widget.js';
+    import { initDevPanel } from '../../dist/devtools.js';
+
+    // ── 1. One client, error watcher on ─────────────────────────────
+    const client = new AgoClient({
+      baseUrl: 'https://playground.api.useago.com',
+      agent: 'generic-guide',
+      errorWatcher: true,
+      // Or tune it:
+      // errorWatcher: { maxErrors: 5, maxAgeMs: 120_000, filter: (e) => e },
+    });
+
+    // A little app context, so the agent knows what page this is.
+    client.setContext('order-page', {
+      name: 'Order detail',
+      description: 'The user is viewing an order',
+      data: { orderId: 1042, status: 'pending', total: 120 },
+    });
+
+    mountChatWidget(document.body, {
+      client,
+      placement: 'bubble',
+      title: 'Ask AGO',
+      prompt: 'Something not working? Ask me.',
+      conversationStarters: [
+        { label: 'Why does the discount button not work?' },
+        { label: 'What errors happened on this page?' },
+      ],
+    });
+
+    initDevPanel({ client, label: 'AGO context' });
+
+    // ── 2. The buggy page ───────────────────────────────────────────
+    const order = { id: 1042, total: 120, status: 'pending', customer: { name: 'Ada Lovelace' } };
+    const status = document.getElementById('status');
+    const say = (text) => { status.textContent = text; };
+
+    // Bug 1: an uncaught TypeError. The discount code reads a shipping
+    // address the order does not have.
+    document.getElementById('discount').addEventListener('click', () => {
+      say('Applying discount…');
+      const zip = order.customer.address.zip; // TypeError: cannot read 'zip' of undefined
+      say(`Discount applied for ${zip}`);
+    });
+
+    // Bug 2: an unhandled promise rejection. The invoice endpoint does not
+    // exist, the loader throws on the 404, and nobody catches the failure.
+    document.getElementById('invoice').addEventListener('click', () => {
+      say('Loading invoice…');
+      fetch(`/api/invoices/${order.id}`)
+        .then((res) => {
+          if (!res.ok) throw new Error(`GET /api/invoices/${order.id} responded ${res.status}`);
+          return res.json();
+        })
+        .then((invoice) => say(`Invoice ${invoice.number} loaded`));
+    });
+
+    // Bug 3: a caught error that only surfaces through console.error, the way
+    // most apps log failures they swallow.
+    document.getElementById('save').addEventListener('click', async () => {
+      say('Saving…');
+      try {
+        await saveOrder(order);
+        say('Saved');
+      } catch (err) {
+        console.error('Could not save order', order.id, err);
+        say('Save failed (see console)');
+      }
+    });
+
+    async function saveOrder(o) {
+      const res = await fetch('/api/orders/' + o.id, { method: 'PUT', body: JSON.stringify(o) });
+      if (!res.ok) throw new Error(`PUT /api/orders/${o.id} responded ${res.status}`);
+    }
+
+    // Not a bug: a control that works, so the agent can tell the difference.
+    document.getElementById('ship').addEventListener('click', () => {
+      order.status = 'shipped';
+      document.getElementById('status-badge').textContent = order.status;
+      client.setContext('order-page', {
+        name: 'Order detail',
+        description: 'The user is viewing an order',
+        data: { orderId: order.id, status: order.status, total: order.total },
+      });
+      client.recordActivity({ name: 'order.shipped', summary: 'User marked order #1042 as shipped' });
+      say('Order marked as shipped');
+    });
+
+    // ── 3. Show what was captured ───────────────────────────────────
+    const errorsEl = document.getElementById('errors');
+    function render() {
+      const errors = client.getRecentErrors();
+      if (errors.length === 0) {
+        errorsEl.innerHTML = '<span class="empty">Nothing captured yet. Click a button above.</span>';
+        return;
+      }
+      errorsEl.textContent = JSON.stringify(errors, null, 2);
+    }
+    client.on('error:captured', (e) => {
+      console.log('[demo] error:captured', e.type, e.message, 'x' + e.count);
+      render();
+    });
+    document.getElementById('clear').addEventListener('click', () => {
+      client.clearErrors();
+      render();
+    });
+  </script>
+</body>
+</html>

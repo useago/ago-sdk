@@ -9,7 +9,7 @@ Runnable example apps for `@useago/sdk`, one per stack.
 | `simple-vue/` | Vue 3 + Vite | `npm run dev` |
 | `simple-angular/` | Angular | `npm run dev` |
 | `simple-ts/` | Vanilla TypeScript; `/bubble.html` is the floating bubble | `npm run dev` |
-| `simple-html/` | Plain HTML (no build); `bubble-widget.html` is the floating bubble | open the `.html` file |
+| `simple-html/` | Plain HTML (no build); `bubble-widget.html` is the floating bubble; `error-watcher.html` plants three bugs and lets the agent see them (needs the local build, see the file header) | open the `.html` file |
 | `vue-widget/` | Embeddable widget in Vue | open `index.html` |
 
 The examples default to the public demo account, so they answer out of the box

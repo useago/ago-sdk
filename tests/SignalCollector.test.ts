@@ -42,6 +42,22 @@ describe("SignalCollector", () => {
     expect(snap.idleMs).toBe(1000);
   });
 
+  it("counts pushed JS errors per route and resets them on navigation", () => {
+    collector = new SignalCollector();
+    collector.start();
+
+    collector.signalJsError("error");
+    collector.signalJsError("console");
+    expect(collector.getSnapshot().jsErrors).toBe(2);
+    expect(collector.getSignals().filter((s) => s.type === "js_error")).toEqual([
+      expect.objectContaining({ type: "js_error", route: "/", count: 1, meta: { kind: "error" } }),
+      expect.objectContaining({ type: "js_error", route: "/", count: 2, meta: { kind: "console" } }),
+    ]);
+
+    goTo("/checkout", collector);
+    expect(collector.getSnapshot().jsErrors).toBe(0);
+  });
+
   it("tracks route changes: dwell resets, recentRoutes appends, per-route counters clear", () => {
     collector = new SignalCollector();
     collector.start();
