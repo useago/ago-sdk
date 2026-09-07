@@ -128,6 +128,37 @@ describe("getConversation", () => {
     expect(conv.messages?.[0].followUpReplies).toBeUndefined();
   });
 
+  it("maps the thumb already given so a reopened thread shows it", async () => {
+    stubFetchJson({
+      id: "c1",
+      title: "T",
+      messages: [
+        {
+          id: "m1",
+          content: "Rated",
+          role: "assistant",
+          status: "DONE",
+          created_at: "2026-07-20T10:00:00Z",
+          feedback: "negative",
+        },
+        {
+          id: "m2",
+          content: "Unrated",
+          role: "assistant",
+          status: "DONE",
+          created_at: "2026-07-20T10:00:01Z",
+          feedback: null,
+        },
+      ],
+    });
+    const client = new AgoClient({ baseUrl: "https://x.example.com" });
+
+    const conv = await client.getConversation("c1");
+
+    expect(conv.messages?.[0].feedback).toBe("negative");
+    expect(conv.messages?.[1].feedback).toBeUndefined();
+  });
+
   it("leaves followUpReplies undefined when the field is absent or empty", async () => {
     stubFetchJson({
       id: "c1",

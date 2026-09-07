@@ -142,6 +142,8 @@ export interface AgoMessage {
   sources?: AgoSource[];
   toolCalls?: ToolCallData[];
   followUpReplies?: string[];
+  /** The thumb this user already gave this answer, replayed with the thread. */
+  feedback?: FeedbackRating;
   /** Uploaded files on this message (usually the user's). */
   attachments?: AgoAttachment[];
   /**
