@@ -1076,7 +1076,7 @@ export function mountChatWidget(
           if (ticketForm) {
             hydrateTicketFormState(entry.state, entry.call.ticket, ticketForm);
           }
-          entry.view.rebuild({ ticketForm, configLoading: false });
+          entry.view.rebuild({ ticketForm, configLoading: false, allowFiles: allowFiles || fileAttachmentsEnabled });
         }
       });
   }

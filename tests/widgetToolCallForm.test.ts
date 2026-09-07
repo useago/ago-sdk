@@ -461,6 +461,97 @@ describe("ticket form tool call", () => {
     viaOption.cleanup();
   });
 
+  it("enables attachments when the form configuration arrives after rendering", async () => {
+    let resolveConfig!: (value: SdkConfig) => void;
+    const createTicket = vi.fn(async () => ({ id: "ticket" }));
+    const m = mount({}, { createTicket, getConfig: () => new Promise<SdkConfig>(resolve => { resolveConfig = resolve; }) });
+    await m.widget.sendMessage("help");
+    await flush();
+    expect(m.root.querySelector(".ago-ticket-form__config-loading")).not.toBeNull();
+    resolveConfig({ ...config, permissions: [{ ...config.permissions[0], fileAttachmentsEnabled: true }] });
+    await flush();
+    const files = m.input("ago-ticket-files");
+    expect(files).not.toBeNull();
+    const file = new File(["details"], "details.txt", { type: "text/plain" });
+    Object.defineProperty(files, "files", { value: [file] });
+    files.dispatchEvent(new Event("change"));
+    m.submitBtn().click();
+    await flush();
+    expect(createTicket).toHaveBeenCalledWith(expect.objectContaining({ files: [file] }));
+    m.cleanup();
+  });
+
+  it("updates conditional questions and choices, then submits only the selected branch", async () => {
+    const conditionalForm: TicketForm = {
+      ...ticketForm, showPriority: false, showTypology: false,
+      fields: [
+        ticketForm.fields[0],
+        { id: "account", title: "Account", required: true, hidden: false, position: 1, options: [],
+          conditionalFieldId: "f1", conditionalFieldValue: "app, mobile" },
+        { id: "version", title: "Version", required: true, hidden: false, position: 2, alwaysVisible: true,
+          options: [
+            { id: "app-v1", value: "app-v1", default: false, messageType: "info", conditionalFieldId: "product", conditionalFieldValues: ["app"] },
+            { id: "api-v2", value: "api-v2", default: false, messageType: "info", conditionalFieldId: "product", conditionalFieldValues: ["api"] },
+          ] },
+        { id: "internal", title: "Internal", required: false, hidden: true, position: 3,
+          options: [{ id: "sdk", value: "sdk", default: true, messageType: "info" }] },
+      ],
+    };
+    const createTicket = vi.fn(async () => ({ id: "t-1" }));
+    const m = mount({}, { createTicket, getConfig: async () => ({ ...config, permissions: [{ ...config.permissions[0], ticketForm: conditionalForm }] }) });
+    await m.widget.sendMessage("help");
+    await flush();
+    type(m.input("ago-ticket-field-account"), "Old account");
+    const version = m.select("ago-ticket-field-version");
+    expect([...version.options].map(o => o.value)).toEqual(["", "app-v1"]);
+    version.value = "app-v1";
+    version.dispatchEvent(new Event("change"));
+    const product = m.select("ago-ticket-field-product");
+    product.value = "api";
+    product.dispatchEvent(new Event("change"));
+    expect(m.input("ago-ticket-field-account")).toBeNull();
+    expect(m.select("ago-ticket-field-version").value).toBe("");
+    m.submitBtn().click();
+    await flush();
+    expect(createTicket).not.toHaveBeenCalled();
+    const nextVersion = m.select("ago-ticket-field-version");
+    nextVersion.value = "api-v2";
+    nextVersion.dispatchEvent(new Event("change"));
+    m.submitBtn().click();
+    await flush();
+    expect(createTicket).toHaveBeenCalledWith(expect.objectContaining({
+      customFields: expect.arrayContaining([{ id: "product", value: "api" }, { id: "version", value: "api-v2" }, { id: "internal", value: "sdk" }]),
+    }));
+    expect(createTicket.mock.calls[0][0].customFields).toHaveLength(3);
+    m.cleanup();
+  });
+
+  it("reveals missing required questions on submit and uses the configured success message", async () => {
+    const form: TicketForm = { ...ticketForm, fields: ticketForm.fields.map(f => ({ ...f, required: true })),
+      successMessageText: "Demande reçue", successMessageUrlLabel: "Voir le ticket" };
+    const createTicket = vi.fn(async () => ({ id: "ticket", url: "https://x.test/ticket" }));
+    const m = mount({}, { createTicket,
+      getConfig: async () => ({ ...config, permissions: [{ ...config.permissions[0], ticketForm: form }] }),
+      sendMessage: async () => answer({ toolCalls: [formCall({ ticket: { subject: "Help", body: "Details" } })] }),
+    });
+    await m.widget.sendMessage("help");
+    await flush();
+    expect(m.input("ago-ticket-field-f2")).toBeNull();
+    m.submitBtn().click();
+    await flush();
+    expect(createTicket).not.toHaveBeenCalled();
+    expect(m.input("ago-ticket-field-f2")).not.toBeNull();
+    const product = m.select("ago-ticket-field-product");
+    product.value = "app";
+    product.dispatchEvent(new Event("change"));
+    type(m.input("ago-ticket-field-f2"), "Europe");
+    m.submitBtn().click();
+    await flush();
+    expect(m.form()!.textContent).toContain("Demande reçue");
+    expect(m.form()!.textContent).toContain("Voir le ticket");
+    m.cleanup();
+  });
+
   it("renders the placeholder for a non-ticketing form tool call", async () => {
     const m = mount({}, {
       sendMessage: async () =>

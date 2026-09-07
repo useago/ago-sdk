@@ -88,6 +88,27 @@ describe("getConfig", () => {
     client.destroy();
   });
 
+  it("preserves conditional question and option metadata from the API", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ permissions: [{ ticket_form: {
+      id: "form", priority_typologies: ["Incident"], success_message_text: "Done",
+      success_message_url_label: "Open ticket", fields: [{
+        id: "question", active: false, always_visible: true, regexp_for_validation: "^[0-9]+$",
+        conditional_field_id: "parent", conditional_field_value: "one, two", conditional_field_values: ["one", "two"],
+        options: [{ id: "choice", position: 4, group: "Group", no_display: true,
+          conditional_field_id: "parent", conditional_field_values: ["two"] }],
+      }],
+    } }] })));
+    const client = new AgoClient({ baseUrl: "https://x.example.com" });
+    const form = (await client.getConfig()).permissions[0].ticketForm!;
+    expect(form).toMatchObject({ priorityTypologies: ["Incident"], successMessageText: "Done", successMessageUrlLabel: "Open ticket" });
+    expect(form.fields[0]).toMatchObject({ active: false, alwaysVisible: true, regexpForValidation: "^[0-9]+$",
+      conditionalFieldId: "parent", conditionalFieldValue: "one, two", conditionalFieldValues: ["one", "two"],
+      options: [{ id: "choice", position: 4, group: "Group", noDisplay: true,
+        conditionalFieldId: "parent", conditionalFieldValues: ["two"] }],
+    });
+    client.destroy();
+  });
+
   it("maps the home page config, using each starter's description as its label", async () => {
     vi.stubGlobal(
       "fetch",

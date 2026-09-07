@@ -74,6 +74,9 @@ interface RawTicketForm {
   show_body?: boolean;
   show_priority?: boolean;
   show_typology?: boolean;
+  priority_typologies?: string[] | null;
+  success_message_text?: string | null;
+  success_message_url_label?: string | null;
   fields?: Array<{
     id: string;
     external_id?: string | null;
@@ -81,17 +84,26 @@ interface RawTicketForm {
     type?: string | null;
     required?: boolean;
     hidden?: boolean;
+    active?: boolean;
+    always_visible?: boolean;
+    regexp_for_validation?: string | null;
     position?: number;
     options?: Array<{
       id: string;
       name?: string | null;
       value?: string | null;
       default?: boolean;
+      position?: number | null;
+      group?: string | null;
+      no_display?: boolean;
+      conditional_field_id?: string | null;
+      conditional_field_values?: string[] | null;
       message?: string | null;
       message_type?: "info" | "warning" | "danger" | null;
     }>;
     conditional_field_id?: string | null;
     conditional_field_value?: string | null;
+    conditional_field_values?: string[] | null;
   }>;
 }
 
@@ -1204,6 +1216,9 @@ export class AgoClient {
       showBody: raw.show_body ?? true,
       showPriority: raw.show_priority ?? true,
       showTypology: raw.show_typology ?? true,
+      priorityTypologies: raw.priority_typologies ?? undefined,
+      successMessageText: raw.success_message_text ?? undefined,
+      successMessageUrlLabel: raw.success_message_url_label ?? undefined,
       fields: (raw.fields ?? []).map((f) => ({
         id: f.id,
         externalId: f.external_id ?? undefined,
@@ -1211,17 +1226,26 @@ export class AgoClient {
         type: f.type ?? undefined,
         required: !!f.required,
         hidden: !!f.hidden,
+        active: f.active,
+        alwaysVisible: f.always_visible,
+        regexpForValidation: f.regexp_for_validation ?? undefined,
         position: f.position ?? 0,
         options: (f.options ?? []).map((o) => ({
           id: o.id,
           name: o.name ?? undefined,
           value: o.value ?? undefined,
           default: !!o.default,
+          position: o.position ?? undefined,
+          group: o.group ?? undefined,
+          noDisplay: o.no_display,
+          conditionalFieldId: o.conditional_field_id ?? undefined,
+          conditionalFieldValues: o.conditional_field_values ?? undefined,
           message: o.message ?? undefined,
           messageType: o.message_type ?? "info",
         })),
         conditionalFieldId: f.conditional_field_id ?? undefined,
         conditionalFieldValue: f.conditional_field_value ?? undefined,
+        conditionalFieldValues: f.conditional_field_values ?? undefined,
       })),
     };
   }

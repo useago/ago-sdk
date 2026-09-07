@@ -351,6 +351,9 @@ from your AGO dashboard instead of the options above.
 
 When the visitor asks for a human, the agent's ticket form renders inside the
 conversation on every placement, with the fields from your AGO dashboard.
+Conditional questions and choices work across ticketing providers; changing an
+answer clears responses that no longer apply. The API must include the form
+metadata described in the ticket form guide.
 Details in [Floating bubble](docs/general/widget.md#floating-bubble-placement-bubble)
 and [Ticket form](docs/general/widget.md#ticket-form-the-form-tool-call).
 

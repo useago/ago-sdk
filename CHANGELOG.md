@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Ticket attachments become available when the dashboard form configuration
+  finishes loading.
+
+- Ticket forms now support multiple condition values, nested questions and
+  conditional choices across ticketing providers. Changing a branch clears
+  answers that no longer apply. Required questions are checked before sending,
+  including those not yet revealed.
+- Ticket forms respect option groups and order, fields marked always visible,
+  format validation, priority by request type and dashboard success messages
+  when the API supplies these settings.
+
 ### Added
 
 - **JavaScript errors as agent context.** Set `errorWatcher: true` (or options)

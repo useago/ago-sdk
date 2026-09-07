@@ -29,6 +29,7 @@ export interface ToolCallFormLabels {
   detailedContextRequired: string;
   /** `{fieldTitle}` is substituted. */
   fieldRequired: string;
+  fieldFormatInvalid: string;
   attachments: string;
   selectFile: string;
   submit: string;
@@ -81,6 +82,7 @@ export const DEFAULT_TOOL_CALL_FORM_LABELS: ToolCallFormLabels = {
   detailedContext: "Detailed context",
   detailedContextRequired: "Detailed context is required.",
   fieldRequired: "{fieldTitle} is required.",
+  fieldFormatInvalid: "{fieldTitle} has an invalid format.",
   attachments: "Attachments",
   selectFile: "Select file",
   submit: "Submit",
