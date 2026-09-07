@@ -967,18 +967,17 @@ export function mountChatWidget(
     if (!feedbackOptions) return null;
     // Only a finished answer can be judged. An empty `conversationId` means the
     // bubble is local (the streamed greeting), so there is nothing to report on.
-    if (
-      !message.id ||
-      !message.conversationId ||
-      message.status !== "DONE" ||
-      !message.content
-    ) {
+    // Empty content is judgeable: a turn that only opened a ticket form has none
+    // (reference `EmbedModeActions`, gated on status alone).
+    if (!message.id || !message.conversationId || message.status !== "DONE") {
       return null;
     }
 
     let state = feedbackStates.get(message.id);
     if (!state) {
       state = createFeedbackState();
+      // A thread reloaded from the server brings back the thumb already given.
+      state.rating = message.feedback;
       feedbackStates.set(message.id, state);
     }
 
