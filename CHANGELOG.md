@@ -5,23 +5,19 @@ All notable changes to `@useago/sdk` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Fixed
-
-- Ticket attachments become available when the dashboard form configuration
-  finishes loading.
-
-- Ticket forms now support multiple condition values, nested questions and
-  conditional choices across ticketing providers. Changing a branch clears
-  answers that no longer apply. Required questions are checked before sending,
-  including those not yet revealed.
-- Ticket forms respect option groups and order, fields marked always visible,
-  format validation, priority by request type and dashboard success messages
-  when the API supplies these settings.
+## [1.12.0] - 2026-09-07
 
 ### Added
 
+- **User metadata on messages.** Set `metadata` on the client config (or in
+  `window.AGO.metadata`) and the JSON-serializable object rides along with every
+  new message, both JSON and multipart uploads. `sendMessage(text, { metadata })`
+  replaces the defaults for that message, `null` omits the field, and
+  `updateConfig({ metadata })` changes it at runtime. In React, `useAgo`
+  re-applies the `metadata` prop without recreating the client. The API stores
+  it as widget metadata on the user, where field mappings can pull selected
+  values into tickets. It is untrusted browser-supplied context, not a
+  credential.
 - **JavaScript errors as agent context.** Set `errorWatcher: true` (or options)
   on the client config and the page's recent JS errors ride along with every
   message as the `errors:recent` context entry: uncaught exceptions with file,
@@ -38,6 +34,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   current route (`SignalsSnapshot.jsErrors`, reset on navigation), so a
   trigger can nudge right after a crash with `when: { jsErrors: 1 }`. Needs
   `errorWatcher` on; counts only, the messages stay in `client_context`.
+
+### Fixed
+
+- Ticket attachments become available when the dashboard form configuration
+  finishes loading.
+- Ticket forms now support multiple condition values, nested questions and
+  conditional choices across ticketing providers. Changing a branch clears
+  answers that no longer apply. Required questions are checked before sending,
+  including those not yet revealed.
+- Ticket forms respect option groups and order, fields marked always visible,
+  format validation, priority by request type and dashboard success messages
+  when the API supplies these settings.
 
 ## [1.11.0] - 2026-09-04
 

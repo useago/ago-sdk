@@ -376,12 +376,18 @@ export class AgoClient {
     const configAgent = this.config.agent || this.config.defaultAgentId;
 
     const mode = this.resolveClientFunctionsMode(options);
+    const metadata = options?.metadata !== undefined
+      ? options.metadata
+      : this.config.metadata;
+    // Validate serializability before opening a turn (also used by FormData).
+    const serializedMetadata = metadata != null ? JSON.stringify(metadata) : undefined;
 
     const body: Record<string, unknown> = {
       content,
       conversation_id: options?.conversationId,
       agent_id: options?.agentId || configAgent,
     };
+    if (metadata != null) body.metadata = metadata;
 
     // Include client functions if any are registered
     if (clientFunctions.length > 0) {
@@ -408,6 +414,9 @@ export class AgoClient {
       // Use FormData for file uploads
       const formData = new FormData();
       formData.append("content", content);
+      if (serializedMetadata !== undefined) {
+        formData.append("metadata", serializedMetadata);
+      }
 
       if (options.conversationId) {
         formData.append("conversation_id", options.conversationId);

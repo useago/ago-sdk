@@ -17,6 +17,7 @@ interface AgoConfig {
   permission?: string;      // X-Widget-Permission header
   userEmail?: string;       // X-User-Email header, identify the end user
   userJwt?: string;         // Authorization: Bearer <jwt>, authenticated users
+  metadata?: Record<string, unknown> | null; // Message body, for user/ticket enrichment
   debug?: boolean;          // enable verbose console logging
   warnOnEmptyReply?: boolean; // default true; see "Empty replies" below
   clientFunctionsMode?: "placeholder" | "pause"; // default "pause"
@@ -33,6 +34,7 @@ interface AgoConfig {
 | `permission` | — | `X-Widget-Permission` | Mirrors the widget's `window.AGO.permission`. |
 | `userEmail` | — | `X-User-Email` | Identifies the user to AGO. |
 | `userJwt` | — | `Authorization: Bearer …` | For authenticated sessions. |
+| `metadata` | — | `metadata` in the body | JSON-serializable user/ticket context. Per-message overrides replace defaults; `null` omits the field. |
 | `debug` | — | — | Turns on the SDK's logger. |
 | `warnOnEmptyReply` | — | — | Default `true`: warn on the console (once per conversation) when a reply completes empty, usually an unknown `agent` slug. The [`message:empty` event](events-and-streaming.md#events) fires regardless. |
 | `clientFunctionsMode` | — | `client_functions_mode` in the body | Default `"pause"`: the agent stops on client function call(s) and resumes the SAME turn once the results are submitted (the SDK submits and resumes automatically; see the [`message:waiting-client` event](events-and-streaming.md#events)). Needs a backend with pause/resume support; older backends ignore the flag and fall back to placeholder behavior. Legacy `"placeholder"`: the turn continues on a placeholder and results are only visible on later turns. Per-message override via `sendMessage(..., { clientFunctionsMode })`. |
@@ -99,7 +101,7 @@ provideAgo({ baseUrl: "https://acme.useago.com", agent: "support" });
 order:
 
 1. **`window.AGO`** (the widget config object): `basepath`, `widgetId`,
-   `agent`/`defaultAgent`, `permission`, `email`, `jwt`.
+   `agent`/`defaultAgent`, `permission`, `email`, `jwt`, `metadata`.
 2. **`<meta>` tags**: `ago-base-url`, `ago-widget-id`, `ago-agent`
    (or `ago-agent-id`), `ago-permission`, `ago-user-email`.
 3. **`data-ago-*` attributes** on `<body>` or a `<script>` tag:
@@ -133,12 +135,31 @@ client.updateConfig({ userJwt: token, userEmail: "jane@acme.com" });
 
 Changing `permission` to a falsy value removes the header. In React, the
 `useAgo` hook re-applies `agent`, `permission`, `userEmail`, `userJwt`,
-`debug` and `warnOnEmptyReply` automatically when those props change (changing
-`baseUrl`/`widgetId` recreates the client).
+`metadata`, `debug` and `warnOnEmptyReply` automatically when those props
+change (changing `baseUrl`/`widgetId` recreates the client).
 
 `updateConfig` validates the merged result: omitting a key (or passing it as
 `undefined`) keeps the current value; an explicit empty or non-string `baseUrl`
 throws `config_missing_base_url` and leaves the client unchanged.
+
+### User and ticket metadata
+
+Pass JSON-serializable data in `config.metadata` to include it in every new
+message request (JSON and multipart uploads). `sendMessage(text, { metadata })`
+replaces those defaults for that message; it does not merge objects. `null`
+omits metadata. `updateConfig({ metadata: null })` stops sending defaults; it
+does not erase data already stored by the server.
+
+```ts
+client.updateConfig({ metadata: { brevo: { clientid: 11970100, planCategory: "Free" } } });
+await client.sendMessage("I need help");
+```
+
+The AGO API stores this data as widget metadata on the user. Configure metadata
+field mappings in AGO to include selected fields in tickets. This does not
+populate a separately hosted Zendesk form. Use `setContext` as well when the
+agent needs these values in its prompt. Metadata supplied by the browser is
+untrusted context, not an authentication credential or permission grant.
 
 ---
 
