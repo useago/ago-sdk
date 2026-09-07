@@ -24,6 +24,8 @@ export interface AgoConfig {
   userEmail?: string;
   /** JWT token for authenticated users */
   userJwt?: string;
+  /** User metadata sent with messages. Use null to stop sending defaults. Not an authentication credential. */
+  metadata?: Record<string, unknown> | null;
   /** Enable debug logging */
   debug?: boolean;
   /**
@@ -104,6 +106,8 @@ export type ClientFunctionsMode = "placeholder" | "pause";
  * Options for sending a message
  */
 export interface SendMessageOptions {
+  /** Replaces config.metadata for this message; null omits metadata for this message. */
+  metadata?: Record<string, unknown> | null;
   /** Existing conversation ID */
   conversationId?: string;
   /** Override default agent */

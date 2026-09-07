@@ -53,6 +53,20 @@ describe("autoDetectConfig", () => {
     expect(config!.permission).toBe("vip");
   });
 
+  it("detects widget metadata and supports replacing or omitting it explicitly", () => {
+    const metadata = { account: { id: 123, pro: false } };
+    (window as Record<string, unknown>).AGO = {
+      basepath: "https://api.test.com",
+      metadata,
+    };
+    expect(autoDetectConfig()?.metadata).toEqual(metadata);
+    expect(autoDetectConfig({ metadata: undefined })?.metadata).toEqual(metadata);
+    expect(autoDetectConfig({ metadata: { account: { id: 456 } } })?.metadata)
+      .toEqual({ account: { id: 456 } });
+    expect(autoDetectConfig({ metadata: null })?.metadata).toBeNull();
+    expect(autoDetectConfig({ metadata: {} })?.metadata).toEqual({});
+  });
+
   it("accepts defaultAgentId override and exposes it as agent", () => {
     const config = autoDetectConfig({
       baseUrl: "https://test.useago.com",

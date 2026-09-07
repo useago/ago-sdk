@@ -22,6 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **User metadata on messages.** Set `metadata` on the client config (or in
+  `window.AGO.metadata`) and the JSON-serializable object rides along with every
+  new message, both JSON and multipart uploads. `sendMessage(text, { metadata })`
+  replaces the defaults for that message, `null` omits the field, and
+  `updateConfig({ metadata })` changes it at runtime. In React, `useAgo`
+  re-applies the `metadata` prop without recreating the client. The API stores
+  it as widget metadata on the user, where field mappings can pull selected
+  values into tickets. It is untrusted browser-supplied context, not a
+  credential.
 - **JavaScript errors as agent context.** Set `errorWatcher: true` (or options)
   on the client config and the page's recent JS errors ride along with every
   message as the `errors:recent` context entry: uncaught exceptions with file,

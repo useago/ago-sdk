@@ -22,6 +22,7 @@ export function autoDetectConfig(
   let permission: string | undefined;
   let userEmail: string | undefined;
   let userJwt: string | undefined;
+  let metadata: AgoConfig["metadata"];
 
   // 1. window.AGO (widget config format)
   if (typeof window !== "undefined" && (window as unknown as Record<string, unknown>).AGO) {
@@ -32,6 +33,7 @@ export function autoDetectConfig(
     permission = ago.permission as string | undefined;
     userEmail = ago.email as string | undefined;
     userJwt = ago.jwt as string | undefined;
+    metadata = ago.metadata as AgoConfig["metadata"];
   }
 
   // 2. Meta tags
@@ -70,6 +72,7 @@ export function autoDetectConfig(
   permission = overrides?.permission || permission;
   userEmail = overrides?.userEmail || userEmail;
   userJwt = overrides?.userJwt || userJwt;
+  if (overrides?.metadata !== undefined) metadata = overrides.metadata;
   const debug = overrides?.debug;
 
   if (!baseUrl) {
@@ -83,6 +86,7 @@ export function autoDetectConfig(
     permission,
     userEmail,
     userJwt,
+    metadata,
     debug,
   };
 }
