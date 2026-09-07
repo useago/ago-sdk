@@ -21,6 +21,7 @@ interface AgoConfig {
   warnOnEmptyReply?: boolean; // default true; see "Empty replies" below
   clientFunctionsMode?: "placeholder" | "pause"; // default "pause"
   maxFunctionResultBytes?: number; // default 50000; cap on client function results
+  errorWatcher?: boolean | ErrorWatcherOptions; // default off; send recent JS errors as context
 }
 ```
 
@@ -36,6 +37,7 @@ interface AgoConfig {
 | `warnOnEmptyReply` | — | — | Default `true`: warn on the console (once per conversation) when a reply completes empty, usually an unknown `agent` slug. The [`message:empty` event](events-and-streaming.md#events) fires regardless. |
 | `clientFunctionsMode` | — | `client_functions_mode` in the body | Default `"pause"`: the agent stops on client function call(s) and resumes the SAME turn once the results are submitted (the SDK submits and resumes automatically; see the [`message:waiting-client` event](events-and-streaming.md#events)). Needs a backend with pause/resume support; older backends ignore the flag and fall back to placeholder behavior. Legacy `"placeholder"`: the turn continues on a placeholder and results are only visible on later turns. Per-message override via `sendMessage(..., { clientFunctionsMode })`. |
 | `maxFunctionResultBytes` | — | — | Default `50000`. Client function results larger than this (serialized) are replaced with a truncated preview before reaching the LLM. Override per function with `maxResultBytes`; see [result size limit](functions-and-context.md#result-size-limit). |
+| `errorWatcher` | — | `errors:recent` in `client_context` | Off by default. `true` (or options) captures the page's JavaScript errors (uncaught exceptions, unhandled rejections, `console.error`, `reportError`) and sends the recent ones with every message. See [JavaScript errors](functions-and-context.md#javascript-errors). |
 
 ---
 

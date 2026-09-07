@@ -1,4 +1,5 @@
 import type { ActivityEntry } from "../activity/ActivityLedger";
+import type { CapturedError, ErrorWatcherOptions } from "../errors/ErrorWatcher";
 import type { ContextSnapshot } from "../state/ClientContextRegistry";
 import type {
   ProactiveNudgeInstance,
@@ -82,6 +83,18 @@ export interface AgoConfig {
    * default otherwise.
    */
   proactive?: ProactiveOptions;
+  /**
+   * Capture the page's JavaScript errors as agent context. When set, the SDK
+   * listens for uncaught exceptions and unhandled promise rejections, wraps
+   * `console.error` (calling through; restored on `destroy`), and sends the
+   * recent errors (deduplicated, capped, pruned after 10 min) as the
+   * `errors:recent` context entry on every message. `true` uses the defaults;
+   * pass {@link ErrorWatcherOptions} to tune the caps or add a `filter` that
+   * redacts messages. Off by default: error messages can carry PII or internal
+   * URLs, so enabling it is the host's call. Errors also feed the proactive
+   * mode's `jsErrors` signal. See `client.reportError()` for caught errors.
+   */
+  errorWatcher?: boolean | ErrorWatcherOptions;
 }
 
 /** See {@link AgoConfig.clientFunctionsMode}. */
@@ -700,6 +713,12 @@ export interface AgoClientEvents {
   "nudge:accepted": { nudge: ProactiveNudgeInstance };
   /** A user- or agent-action was recorded into the activity ledger. */
   "activity:recorded": ActivityEntry;
+  /**
+   * The error watcher captured a JavaScript error (uncaught exception,
+   * unhandled rejection, `console.error` call, or `reportError`). Fires on
+   * repeats too, with the updated `count`. Requires `errorWatcher` in the config.
+   */
+  "error:captured": CapturedError;
 }
 
 export type AgoEventName = keyof AgoClientEvents;

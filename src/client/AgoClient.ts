@@ -1,5 +1,7 @@
 import { ActivityLedger } from "../activity/ActivityLedger";
 import type { ActivityEntry, ActivityInput } from "../activity/ActivityLedger";
+import { ErrorWatcher } from "../errors/ErrorWatcher";
+import type { CapturedError, ErrorWatcherOptions } from "../errors/ErrorWatcher";
 import { HttpClient, isAbortError } from "../api/HttpClient";
 import type {
   FormCollectorDefinition,
@@ -244,6 +246,9 @@ const ACTIVITY_CONTEXT_KEY = "activity:recent";
 /** Context key for the page-state changes since the last message. */
 const STATE_DELTA_CONTEXT_KEY = "state:delta";
 
+/** Context key under which the recent JavaScript errors ride along with messages. */
+const ERRORS_CONTEXT_KEY = "errors:recent";
+
 /**
  * Name of the read-only companion to a page-state function: `readPageData` for
  * the default `setPageState`, `read<Fn>Data` for a custom name.
@@ -262,6 +267,7 @@ export class AgoClient {
   private contextRegistry: ClientContextRegistry;
   private eventEmitter: EventEmitter<AgoClientEvents>;
   private activityLedger: ActivityLedger;
+  private errorWatcher: ErrorWatcher | null = null;
   private lastSentPageState: PageStateBaseline | null = null;
   private config: AgoConfig;
 
@@ -325,6 +331,12 @@ export class AgoClient {
 
     if (config.debug) {
       logger.enable();
+    }
+
+    if (config.errorWatcher) {
+      this.enableErrorWatcher(
+        config.errorWatcher === true ? undefined : config.errorWatcher
+      );
     }
 
     if (config.proactive) {
@@ -2163,6 +2175,83 @@ export class AgoClient {
   }
 
   // ─────────────────────────────────────────────────────────────────
+  // Error watcher
+  // ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Start capturing the page's JavaScript errors (uncaught exceptions,
+   * unhandled rejections, `console.error` calls, {@link reportError}) and send
+   * the recent ones as the `errors:recent` context entry on every message.
+   * Same as setting `errorWatcher` in the config. Calling it again replaces
+   * the watcher (and its options); the captured errors are not kept.
+   */
+  enableErrorWatcher(options?: ErrorWatcherOptions): void {
+    this.disableErrorWatcher();
+    const watcher = new ErrorWatcher(options);
+    this.errorWatcher = watcher;
+    watcher.start();
+    watcher.subscribe((error) => {
+      this.eventEmitter.emit("error:captured", error);
+      this.notifyContextChanged();
+    });
+    this.contextRegistry.addDynamicProvider(ERRORS_CONTEXT_KEY, () => {
+      const errors = watcher.getErrors();
+      if (errors.length === 0) return null;
+      const now = Date.now();
+      return {
+        name: "Recent JavaScript errors",
+        description:
+          "JavaScript errors captured on the page in the last minutes, oldest " +
+          "first, with how long ago each last fired (ageMs) and how many times " +
+          "(count). Use them to diagnose when the user reports something broken " +
+          "or unresponsive; do not bring them up otherwise.",
+        data: {
+          errors: errors.map(({ firstAt, lastAt, ...rest }) => ({
+            ...rest,
+            ageMs: Math.max(0, now - lastAt),
+            ...(firstAt !== lastAt
+              ? { firstSeenAgoMs: Math.max(0, now - firstAt) }
+              : {}),
+          })),
+        },
+      };
+    });
+  }
+
+  /** Stop capturing errors and drop the `errors:recent` context entry. */
+  disableErrorWatcher(): void {
+    if (!this.errorWatcher) return;
+    this.errorWatcher.destroy();
+    this.errorWatcher = null;
+    this.contextRegistry.removeDynamicProvider(ERRORS_CONTEXT_KEY);
+  }
+
+  /**
+   * Record an error the app caught itself (React error boundary, Vue
+   * `errorHandler`, Angular `ErrorHandler`, a try/catch) so the agent sees it
+   * like an uncaught one. No-op unless the error watcher is enabled. `context`
+   * is size-clamped before it is stored; keep it small and free of secrets.
+   */
+  reportError(error: unknown, context?: Record<string, unknown>): void {
+    if (!this.errorWatcher) {
+      logger.warn(
+        "reportError() ignored: enable the error watcher first (errorWatcher: true)."
+      );
+      return;
+    }
+    this.errorWatcher.report(error, context);
+  }
+
+  /** Errors the watcher currently holds, oldest first (a copy). Empty when disabled. */
+  getRecentErrors(): CapturedError[] {
+    return this.errorWatcher?.getErrors() ?? [];
+  }
+
+  clearErrors(): void {
+    this.errorWatcher?.clear();
+  }
+
+  // ─────────────────────────────────────────────────────────────────
   // Events
   // ─────────────────────────────────────────────────────────────────
 
@@ -2242,6 +2331,16 @@ export class AgoClient {
         cleaned.maxFunctionResultBytes
       );
     }
+
+    if (cleaned.errorWatcher !== undefined) {
+      if (cleaned.errorWatcher) {
+        this.enableErrorWatcher(
+          cleaned.errorWatcher === true ? undefined : cleaned.errorWatcher
+        );
+      } else {
+        this.disableErrorWatcher();
+      }
+    }
   }
 
   /**
@@ -2250,6 +2349,8 @@ export class AgoClient {
   destroy(): void {
     this.proactive?.destroy();
     this.proactive = null;
+    this.errorWatcher?.destroy();
+    this.errorWatcher = null;
     // Close any stream still open, so a destroyed client stops reading (and its
     // in-flight sendMessage resolves) instead of streaming into nothing.
     this.activeTurn?.controller.abort();
@@ -2271,11 +2372,16 @@ export class AgoClient {
    * React StrictMode's simulated unmount runs `useAgo`'s cleanup — which
    * destroys the memoized client — then remounts with the SAME instance.
    * Hooks re-register their functions, listeners and context on their own in
-   * their re-run effects; the proactive controller is the only
-   * constructor-owned attachment, so it must be revived explicitly.
+   * their re-run effects; the error watcher and the proactive controller are
+   * the constructor-owned attachments, so they must be revived explicitly.
    */
   reviveAfterDestroy(): void {
     this.registerActivityContext();
+    if (this.config.errorWatcher && !this.errorWatcher) {
+      this.enableErrorWatcher(
+        this.config.errorWatcher === true ? undefined : this.config.errorWatcher
+      );
+    }
     if (this.config.proactive && !this.proactive) {
       createAgoProactive(this, this.config.proactive);
     }

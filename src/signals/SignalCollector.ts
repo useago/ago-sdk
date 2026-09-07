@@ -42,8 +42,9 @@ const ACTIVITY_EVENTS = [
 
 /**
  * Framework-agnostic collector of client-side friction signals: per-route
- * dwell time, idle time, route bounces (A→B→A→B), rage clicks, and app-pushed
- * field error counters. Attached to an `AgoClient` by `createAgoProactive`,
+ * dwell time, idle time, route bounces (A→B→A→B), rage clicks, app-pushed
+ * field error counters, and JavaScript error counts (pushed by the client's
+ * `ErrorWatcher` through `createAgoProactive`). Attached to an `AgoClient` by `createAgoProactive`,
  * the same way `ClientContextRegistry` is attached.
  *
  * Route observation is poll-on-demand rather than a `history.pushState` patch:
@@ -78,6 +79,7 @@ export class SignalCollector {
   private recentRoutes: string[] = [];
   private routeBounces = 0;
   private rageClicks = 0;
+  private jsErrors = 0;
   private fieldErrors: Record<string, number> = {};
   private recentClicks: RecentClick[] = [];
   private signals: Signal[] = [];
@@ -168,8 +170,25 @@ export class SignalCollector {
   }
 
   /**
+   * Pushed signal: a JavaScript error was captured on the page. Counter only;
+   * `kind` says how it was caught (`error`, `unhandledrejection`, `console`,
+   * `manual`). The message itself never enters the signals channel.
+   */
+  signalJsError(kind: string): void {
+    this.checkRoute();
+    this.jsErrors += 1;
+    this.pushSignal({
+      type: "js_error",
+      route: this.route,
+      at: Date.now(),
+      count: this.jsErrors,
+      meta: { kind },
+    });
+  }
+
+  /**
    * Subscribe to raw signals (route changes, bounces, rage clicks, field
-   * errors). Returns an unsubscribe function. Used by the proactive engine to
+   * errors, JS errors). Returns an unsubscribe function. Used by the proactive engine to
    * evaluate promptly instead of waiting for the next tick.
    */
   subscribe(listener: (signal: Signal) => void): () => void {
@@ -201,6 +220,7 @@ export class SignalCollector {
       dwellMs: this.started ? now - this.routeEnteredAt : 0,
       idleMs: this.started ? now - this.lastActivityAt : 0,
       rageClicks: this.rageClicks,
+      jsErrors: this.jsErrors,
       routeBounces: this.routeBounces,
       fieldErrors: { ...this.fieldErrors },
       recentRoutes: [...this.recentRoutes],
@@ -252,6 +272,7 @@ export class SignalCollector {
 
     // Per-route friction resets: these describe the CURRENT page.
     this.rageClicks = 0;
+    this.jsErrors = 0;
     this.fieldErrors = {};
     this.recentClicks = [];
 

@@ -12,6 +12,7 @@ function snapshot(partial: Partial<SignalsSnapshot> = {}): SignalsSnapshot {
     dwellMs: 0,
     idleMs: 0,
     rageClicks: 0,
+    jsErrors: 0,
     routeBounces: 0,
     fieldErrors: {},
     recentRoutes: ["/"],
@@ -102,6 +103,14 @@ describe("matchesWhen", () => {
     expect(matchesWhen({ fieldErrors: { iban: 4 } }, snap)).toBe(false);
     expect(matchesWhen({ pageState: { step: "review" } }, snap)).toBe(false);
     expect(matchesWhen({ fieldErrors: { email: 1 } }, snap)).toBe(false);
+  });
+
+  it("jsErrors is a >= threshold on the current route count", () => {
+    const snap = snapshot({ jsErrors: 2 });
+    expect(matchesWhen({ jsErrors: 1 }, snap)).toBe(true);
+    expect(matchesWhen({ jsErrors: 2 }, snap)).toBe(true);
+    expect(matchesWhen({ jsErrors: 3 }, snap)).toBe(false);
+    expect(matchesWhen({ jsErrors: 1 }, snapshot())).toBe(false);
   });
 
   it("numeric fields are >= thresholds", () => {

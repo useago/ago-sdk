@@ -304,6 +304,29 @@ React and Vue have a `useFeedback()` hook/composable; React also exports the
 `<MessageFeedback messageId={...} />` row for a custom message list. Details in
 [Feedback](docs/general/widget.md#feedback).
 
+## Let the agent see what broke
+
+"The button does nothing" is easier to answer with the exception in hand. Turn
+on the error watcher and the page's recent JavaScript errors (uncaught
+exceptions with file, line and stack, unhandled rejections, `console.error`
+calls) ride along with every message, deduplicated and capped.
+
+```ts
+const ago = new AgoClient({
+  baseUrl: "https://playground.api.useago.com",
+  agent: "generic-guide",
+  errorWatcher: true, // off by default: error messages can carry PII
+});
+
+// Errors you already catch (error boundaries, framework handlers):
+ago.reportError(error, { component: "OrderTable" });
+```
+
+Same option on `<AgoProvider>`, the Vue plugin, `provideAgo` and
+`mountChatWidget({ config })`. Redact with a `filter`, tune the caps, or use
+`when: { jsErrors: 1 }` in a proactive trigger to nudge right after a crash.
+Details in [JavaScript errors](docs/general/functions-and-context.md#javascript-errors).
+
 ## Drop the chat bubble on any page
 
 The hosted embed widget, without the iframe: a launcher in the corner, a teaser

@@ -79,7 +79,10 @@ anything that already exists in the host application.
   panel. Don't inline a raw hex where a token belongs; keep the `theme` keys,
   `THEME_VARS`, and `docs/general/widget.md`'s token table in sync.
 - **No global JS pollution.** Never assign to `window.*` / `globalThis.*`. Keep
-  `sideEffects: false` true — importing the SDK must not mutate the page.
+  `sideEffects: false` true — importing the SDK must not mutate the page. The one
+  sanctioned exception is `ErrorWatcher` wrapping `console.error` (opt-in via
+  `errorWatcher`, wrapper always calls through, restored on `destroy`). Don't add
+  another.
 - `className` props on components are consumer hooks only; the SDK ships no CSS that
   targets them.
 
