@@ -1,7 +1,6 @@
 /**
  * The ticket (contact) form the agent's `ago_ticketing` tool opens inside the
- * conversation, a value-for-value port of the hosted widget's `ContactForm`
- * and its field components.
+ * conversation, based on the hosted widget's `ContactForm` and field components.
  *
  * The widget re-renders the thread on every update, so the form cannot keep
  * its state in the DOM: it reads and writes a {@link TicketFormState} owned by
@@ -17,6 +16,15 @@ import type {
   TicketForm,
   ToolCallTicketPrefill,
 } from "../client/types";
+import {
+  availableOptions,
+  fieldEnabled,
+  fieldKey,
+  priorityAllowed,
+  pruneCustomFields,
+  visibleCustomFields,
+} from "./ticketFormFields";
+export { fieldKey, visibleCustomFields } from "./ticketFormFields";
 import { renderMarkdown } from "./renderMarkdown";
 import {
   BORDER_COLOR,
@@ -58,21 +66,12 @@ export interface TicketFormState {
   submitted?: { ticketId: string; ticketUrl?: string };
 }
 
-/** Key a field's value is stored and submitted under. */
-export function fieldKey(field: TicketField): string {
-  return field.externalId || field.id;
-}
-
 /** The backend's fallback key for a field without an external id. */
 function sanitizeTitle(title: string): string {
   return title
     .toLowerCase()
     .trim()
     .replace(/[^a-z0-9_]/g, "_");
-}
-
-function sortedFields(form: TicketForm): TicketField[] {
-  return [...form.fields].sort((a, b) => a.position - b.position);
 }
 
 /**
@@ -88,6 +87,7 @@ export function createTicketFormState(
   const customFields: Record<string, string> = {};
   if (form) {
     for (const field of form.fields) {
+      if (field.active === false) continue;
       const def = field.options.find((o) => o.default);
       if (def) customFields[fieldKey(field)] = def.value ?? def.name ?? "";
     }
@@ -108,6 +108,7 @@ export function createTicketFormState(
       }
     }
   }
+  if (form) pruneCustomFields(form, customFields, prefill?.typology ?? "Question");
   return {
     ticket: {
       subject: prefill?.subject ?? "",
@@ -134,54 +135,7 @@ export function hydrateTicketFormState(
 ): void {
   const fresh = createTicketFormState(prefill, form, state.email);
   state.customFields = { ...fresh.customFields, ...state.customFields };
-}
-
-function parentOf(form: TicketForm, field: TicketField): TicketField | undefined {
-  if (!field.conditionalFieldId) return undefined;
-  return form.fields.find(
-    (f) => f.externalId === field.conditionalFieldId || f.id === field.conditionalFieldId,
-  );
-}
-
-/** Whether a conditional field's parent currently holds the required value. */
-function conditionMet(
-  form: TicketForm,
-  field: TicketField,
-  values: Record<string, string>,
-): boolean {
-  if (!field.conditionalFieldId || !field.conditionalFieldValue) return true;
-  const parent = parentOf(form, field);
-  if (!parent) return true;
-  return values[fieldKey(parent)] === field.conditionalFieldValue;
-}
-
-/**
- * The custom fields to render right now, in order. Hidden fields are skipped
- * (their values still travel), conditional fields wait for their parent, and
- * the rest reveal one after another as the previous one is filled (a checkbox
- * counts as filled).
- */
-export function visibleCustomFields(
-  form: TicketForm,
-  values: Record<string, string>,
-): TicketField[] {
-  const fields = sortedFields(form);
-  const out: TicketField[] = [];
-  fields.forEach((field, idx) => {
-    if (field.hidden) return;
-    const conditional = !!(field.conditionalFieldId && field.conditionalFieldValue);
-    if (conditional) {
-      if (conditionMet(form, field, values)) out.push(field);
-      return;
-    }
-    if (idx > 0) {
-      const prev = fields[idx - 1];
-      const prevFilled = prev.type === "checkbox" || !!values[fieldKey(prev)];
-      if (!prevFilled) return;
-    }
-    out.push(field);
-  });
-  return out;
+  pruneCustomFields(form, state.customFields, state.ticket.typology);
 }
 
 function fill(template: string, vars: Record<string, string>): string {
@@ -199,14 +153,26 @@ export function computeTicketFormErrors(
   const t = state.ticket;
   if (form.showSubject && !t.subject.trim()) errors.subject = labels.subjectRequired;
   if (form.showTypology && !t.typology.trim()) errors.typology = labels.typologyRequired;
-  if (form.showPriority && !t.priority.trim()) errors.priority = labels.priorityRequired;
+  if (form.showPriority && priorityAllowed(form, t.typology) && !t.priority.trim()) {
+    errors.priority = labels.priorityRequired;
+  }
   if (form.showBody && !t.body.trim()) errors.body = labels.detailedContextRequired;
-  for (const field of visibleCustomFields(form, state.customFields)) {
+  for (const field of form.fields) {
+    if (field.hidden || !fieldEnabled(form, field, state.customFields, t.typology)) continue;
     const value = state.customFields[fieldKey(field)];
     if (field.required && !value?.trim()) {
       errors[fieldKey(field)] = fill(labels.fieldRequired, {
         fieldTitle: field.title ?? "",
       });
+    } else if (field.regexpForValidation && value?.trim()) {
+      // Invalid admin patterns should not crash the entire form.
+      try {
+        if (!new RegExp(field.regexpForValidation).test(value)) {
+          errors[fieldKey(field)] = fill(labels.fieldFormatInvalid, { fieldTitle: field.title ?? "" });
+        }
+      } catch {
+        // Leave malformed patterns to server validation.
+      }
     }
   }
   if (requireEmail) {
@@ -391,13 +357,14 @@ export interface TicketFormViewOptions {
 export interface TicketFormView {
   el: HTMLElement;
   /** Re-render from the current state (after the config arrives, for instance). */
-  rebuild: (next?: Partial<Pick<TicketFormViewOptions, "ticketForm" | "configLoading">>) => void;
+  rebuild: (next?: Partial<Pick<TicketFormViewOptions, "ticketForm" | "configLoading" | "allowFiles">>) => void;
 }
 
 export function createTicketFormView(opts: TicketFormViewOptions): TicketFormView {
   const { state, labels } = opts;
   let ticketForm = opts.ticketForm;
   let configLoading = opts.configLoading;
+  let allowFiles = opts.allowFiles;
 
   const root = div({
     position: "relative",
@@ -421,6 +388,7 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
 
   async function submit(): Promise<void> {
     if (state.loading || !ticketForm) return;
+    pruneCustomFields(ticketForm, state.customFields, state.ticket.typology);
     state.submittedOnce = true;
     state.submitError = null;
     if (!validate()) {
@@ -469,13 +437,8 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
   function setCustomField(field: TicketField, value: string): void {
     const key = fieldKey(field);
     state.customFields[key] = value;
-    if (field.required) {
-      if (value.trim()) delete state.errors[key];
-      else if (state.submittedOnce) {
-        state.errors[key] = fill(labels.fieldRequired, { fieldTitle: field.title ?? "" });
-      }
-    }
-    // Progressive reveal: the next field may now be due.
+    if (ticketForm) pruneCustomFields(ticketForm, state.customFields, state.ticket.typology);
+    if (state.submittedOnce) validate();
     render();
   }
 
@@ -509,19 +472,30 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
     }
     const group = fieldGroup();
     group.appendChild(labelEl(field.title ?? "", id));
-    const options = field.options;
-    if (options.length > 0) {
+    const options = availableOptions(ticketForm!, field, state.customFields, state.ticket.typology)
+      .filter((option) => !option.noDisplay);
+    if (field.options.length > 0) {
       const select = document.createElement("select");
       select.id = id;
       const empty = document.createElement("option");
       empty.value = "";
       empty.textContent = "----";
       select.appendChild(empty);
+      const groups = new Map<string, HTMLOptGroupElement>();
       for (const option of options) {
         const el = document.createElement("option");
         el.value = option.value ?? option.name ?? "";
         el.textContent = option.name ?? option.value ?? "";
-        select.appendChild(el);
+        if (option.group) {
+          let group = groups.get(option.group);
+          if (!group) {
+            group = document.createElement("optgroup");
+            group.label = option.group;
+            groups.set(option.group, group);
+            select.appendChild(group);
+          }
+          group.appendChild(el);
+        } else select.appendChild(el);
       }
       select.value = value;
       applyControlState(select, !!error, disabled);
@@ -560,9 +534,9 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
     applyControlState(input, !!error, disabled);
     input.addEventListener("input", () => {
       state.customFields[key] = input.value;
-      if (field.required && state.submittedOnce) {
-        if (input.value.trim()) delete state.errors[key];
-        else state.errors[key] = fill(labels.fieldRequired, { fieldTitle: field.title ?? "" });
+      if (ticketForm) pruneCustomFields(ticketForm, state.customFields, state.ticket.typology);
+      if (state.submittedOnce) {
+        validate();
         paintErrors();
       }
     });
@@ -606,9 +580,9 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
     if (state.submitted) {
       root.appendChild(
         renderTicketSuccess({
-          text: opts.successMessage || labels.ticketSubmitted,
+          text: opts.successMessage || ticketForm?.successMessageText || labels.ticketSubmitted,
           ticketUrl: state.submitted.ticketUrl,
-          urlLabel: opts.successUrlLabel || labels.findTicketHere,
+          urlLabel: opts.successUrlLabel || ticketForm?.successMessageUrlLabel || labels.findTicketHere,
         }),
       );
       return;
@@ -692,7 +666,8 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
 
     const showTypology = (form.showSubject && !!state.ticket.subject) || !form.showSubject;
     const showPriority = showTypology && (!!state.ticket.typology || !form.showTypology);
-    const showFields = showPriority && (!!state.ticket.priority || !form.showPriority);
+    const hasPriority = form.showPriority && priorityAllowed(form, state.ticket.typology);
+    const showFields = showPriority && (!!state.ticket.priority || !hasPriority);
 
     if (form.showSubject) {
       const group = fieldGroup();
@@ -736,6 +711,7 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
       applyControlState(select, !!state.errors.typology, disabled);
       select.addEventListener("change", () => {
         state.ticket.typology = select.value;
+        pruneCustomFields(form, state.customFields, state.ticket.typology);
         onTicketInput();
         render();
       });
@@ -744,7 +720,7 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
       root.appendChild(group);
     }
 
-    if (showPriority && form.showPriority) {
+    if (showPriority && hasPriority) {
       const group = fieldGroup();
       group.dataset.agoErrorFor = "priority";
       group.appendChild(labelEl(labels.priority, "ago-ticket-priority"));
@@ -775,7 +751,10 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
     }
 
     if (showFields) {
-      for (const field of visibleCustomFields(form, state.customFields)) {
+      const visible = new Set(visibleCustomFields(form, state.customFields, state.ticket.typology));
+      for (const field of [...form.fields].sort((a, b) => a.position - b.position)) {
+        // A submit attempt reveals every missing required question so it can be corrected.
+        if (!visible.has(field) && !state.errors[fieldKey(field)]) continue;
         const el = buildCustomField(field);
         el.dataset.agoErrorFor = fieldKey(field);
         root.appendChild(el);
@@ -822,7 +801,7 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
     if (state.errors.body) bodyGroup.appendChild(errorEl(state.errors.body));
     root.appendChild(bodyGroup);
 
-    if (opts.allowFiles) {
+    if (allowFiles) {
       const group = fieldGroup();
       group.className = "ago-ticket-form__field ago-ticket-form__attachments";
       group.appendChild(labelEl(labels.attachments, "ago-ticket-files"));
@@ -946,6 +925,7 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
     rebuild: (next) => {
       if (next && "ticketForm" in next) ticketForm = next.ticketForm ?? null;
       if (next && "configLoading" in next) configLoading = !!next.configLoading;
+      if (next && "allowFiles" in next) allowFiles = !!next.allowFiles;
       render();
     },
   };

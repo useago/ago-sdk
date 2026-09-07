@@ -35,7 +35,7 @@ import { mountChatWidget } from "@useago/sdk/widget";
 
 const widget = mountChatWidget("#chat", {
   // Bring your own client, or pass `config` and one is created for you:
-  config: { baseUrl: "https://YOUR-DOMAIN.useago.com" },
+  config: { baseUrl: "https://playground.api.useago.com" },
   title: "Book a demo",
   welcomeMessage: "Hi! Tell me about your team and I'll set up a demo.",
   // Suggested replies are clickable by default (clicking sends the reply).
@@ -108,14 +108,14 @@ and the starter cards from your AGO dashboard instead, like the hosted widget:
 
 ```ts
 mountChatWidget(document.body, {
-  config: { baseUrl: "https://YOUR-DOMAIN.api.useago.com" },
+  config: { baseUrl: "https://playground.api.useago.com" },
   placement: "bubble",
   loadHomeConfig: true,
   title: "Support", // still the header title, and the home title until the config lands
 });
 ```
 
-It costs one `GET /config` on mount. The panel opens right away with whatever
+It costs one `GET /api/sdk/v1/config` on mount. The panel opens right away with whatever
 the options set, and re-renders when the config arrives, so nothing waits on
 the request; if it fails, the options stay. Each part is replaced only when the
 dashboard has a value for it, so a dashboard with a title but no starters keeps
@@ -132,8 +132,8 @@ so it costs the same nothing there).
 **Reopening the last thread.** On load the widget reopens the visitor's most
 recent conversation if its last message is under two hours old, first from the
 front-side cache (`persistConversation` is on by default here, under the usual
-`ago_last_thread` key), then from the thread list once it arrives, so it also
-works where the browser blocks storage. A visitor who already navigated is never
+`ago_last_thread` key), then from the thread list once it arrives, so it can also
+resume when no thread is cached locally. A visitor who already navigated is never
 redirected. Pass `autoResume: false` to always land on Home; an explicit
 `conversationId` opens that thread directly.
 
@@ -184,7 +184,7 @@ The bubble ignores `height`, `welcomeMessage`, `bubbleStyle`, `agentBubble`,
 and `showAgentName` (its layout is the hosted widget's), defaults `title` to
 `"AGO Chatbot"`, `width` to `550` (clamped between 400px and the viewport minus
 40px), `mobile.breakpoint` to `450`, and turns `feedback`, `loadThreads`, and
-`persistConversation` on. Every element carries an `ago`-prefixed class name
+`persistConversation` on. The widget's main elements carry `ago`-prefixed class names
 (`.ago-chat-widget-launcher`, `.ago-chat-widget-teaser`, `.ago-chat-widget-bubble`,
 `.ago-chat-widget__header`, `.ago-chat-widget__home`, `.ago-chat-widget__history`,
 `.ago-chat-widget__footer`).
@@ -239,8 +239,9 @@ and `showAgentName` (its layout is the hosted widget's), defaults `title` to
 ### Feedback
 
 `feedback: true` puts a thumbs up / thumbs down under every finished answer. On
-a thumbs-down, a small panel asks what went wrong (four reason chips and a free
--text box).
+a thumbs-down, inline and side placements ask what went wrong with reason chips
+and a comment box. Bubble placement sends the rating only by default; set
+`feedback: { askWhy: true }` to show the details panel there.
 
 ```ts
 mountChatWidget("#ago-chat", {
@@ -282,7 +283,7 @@ mountChatWidget("#ago-chat", {
 
 | Option      | Type                                            | Default |
 | ----------- | ----------------------------------------------- | ------- |
-| `askWhy?`   | `boolean`                                       | `true` (set `false` for thumbs only) |
+| `askWhy?`   | `boolean`                                       | `true` inline/side, `false` bubble |
 | `labels?`   | `Partial<FeedbackLabels>`                       | English strings |
 | `onSubmit?` | `({ messageId, rating, reasons, comment }) => void` | — (fires per accepted report: once for the thumb, again for the detailed panel) |
 | `onError?`  | `(error: Error) => void`                        | — (the row keeps its state) |
@@ -299,19 +300,33 @@ widget renders it the way the hosted widget does, with no option to set:
 
 ```ts
 mountChatWidget("#ago-chat", {
-  config: { baseUrl: "https://YOUR-DOMAIN.api.useago.com", agent: "support-bot" },
+  config: { baseUrl: "https://playground.api.useago.com", agent: "support-bot" },
 });
 // Visitor: "I want to talk to someone" → the form appears under the answer.
 ```
 
 The fields come from the ticket form configured in your AGO dashboard (fetched
-once from `GET /config`): subject, typology, priority, the custom fields, the
+once from `GET /api/sdk/v1/config`): subject, typology, priority, the custom fields, the
 detailed context, and attachments when the tenant allows them. The form asks
 for an email when the client has neither `userEmail` nor `userJwt`. Submitting
-creates the ticket (`POST /tickets`), completes the tool call
-(`POST /tool-calls/{id}/submit`), and shows a green confirmation with the
+creates the ticket (`POST /api/sdk/v1/tickets`), completes the tool call
+(`POST /api/sdk/v1/tool-calls/{id}/submit`), and shows a green confirmation with the
 ticket link. Fields pre-filled by the agent are kept, and what the visitor types
 survives every streamed chunk.
+
+Custom questions support multiple trigger values, nested conditions, and choices
+filtered by another answer, for every ticketing provider. Parent references can
+use the field UUID or its external ID. Both `conditionalFieldValues: ["billing",
+"account"]` and the older `conditionalFieldValue: "billing,account"` work.
+Changing an answer clears values in branches and options that no longer apply.
+Unconditional hidden defaults are still submitted.
+
+The form also respects `active`, `alwaysVisible`, option order and groups,
+`regexpForValidation`, and `priorityTypologies`. Required questions are checked
+before submission, including questions not yet revealed by progressive display.
+The dashboard's success message and link label are used unless overridden below.
+These settings must be included in the backend's SDK config response; a client
+cannot recover metadata omitted by an older API.
 
 Three variants: the inline form above; an **embedded** form when the ticket
 form is in embed mode (the tenant's HubSpot HTML is hosted in place, pre-filled,
@@ -323,7 +338,7 @@ replaced by a "complete the form above" card; once the ticket exists it becomes
 
 ```ts
 mountChatWidget("#ago-chat", {
-  config: { baseUrl: "https://YOUR-DOMAIN.api.useago.com", agent: "support-bot" },
+  config: { baseUrl: "https://playground.api.useago.com", agent: "support-bot" },
   toolCallForm: {
     userEmail: currentUser.email, // skip the email field for a known visitor
     successMessage: "Merci, votre demande est enregistrée.",
@@ -337,8 +352,8 @@ mountChatWidget("#ago-chat", {
 | Option              | Type                                                        | Default                            |
 | ------------------- | ----------------------------------------------------------- | ---------------------------------- |
 | `labels?`           | `Partial<ToolCallFormLabels>`                               | English strings                    |
-| `successMessage?`   | `string`                                                    | "Your ticket has been successfully submitted." |
-| `successUrlLabel?`  | `string`                                                    | "You can find it here:"            |
+| `successMessage?`   | `string`                                                    | Dashboard message, else "Your ticket has been successfully submitted." |
+| `successUrlLabel?`  | `string`                                                    | Dashboard label, else "You can find it here:" |
 | `userEmail?`        | `string`                                                    | the client's `userEmail`           |
 | `onSubmitted?`      | `({ toolCallId, toolName, mode, ticket, values }) => void` | —                                  |
 | `onError?`          | `(error: Error) => void`                                    | —                                  |
@@ -387,7 +402,7 @@ bubble to attach pills to.
 
 ```js
 mountChatWidget("#ago-chat", {
-  config: { baseUrl: "https://YOUR-DOMAIN.api.useago.com" },
+  config: { baseUrl: "https://playground.api.useago.com" },
   welcomeMessage: {
     message: "Hi! Tell me about your team and I'll set up a demo.",
     mode: "streaming",
@@ -420,7 +435,7 @@ third-party API's answer):
 
 ```js
 mountChatWidget("#ago-chat", {
-  config: { baseUrl: "https://YOUR-DOMAIN.api.useago.com" },
+  config: { baseUrl: "https://playground.api.useago.com" },
   forms: [{ name: "credit" }],
   onFormSubmitted: ({ name, values, result }) => {
     console.log(name, "submitted", result);
@@ -455,7 +470,7 @@ viewport).
 
 ```ts
 const widget = mountChatWidget(document.body, {
-  config: { baseUrl: "https://YOUR-DOMAIN.useago.com" },
+  config: { baseUrl: "https://playground.api.useago.com" },
   placement: "left", // or "right"
   width: 420, // panel width (number → px)
   // defaultOpen: true,   // start open instead of behind the launcher
@@ -483,7 +498,7 @@ or hand control back to you.
 
 ```ts
 mountChatWidget("#ago-chat", {
-  config: { baseUrl: "https://YOUR-DOMAIN.api.useago.com" },
+  config: { baseUrl: "https://playground.api.useago.com" },
   logoUrl: "https://YOUR-DOMAIN/logo.svg", // shown in the fullscreen bar
 });
 ```
@@ -553,14 +568,15 @@ no recorded last-message time is not.
 
 ```ts
 const widget = mountChatWidget("#chat", {
-  config: { baseUrl: "https://YOUR-DOMAIN.useago.com", agent: "support-bot" },
+  config: { baseUrl: "https://playground.api.useago.com", agent: "support-bot" },
   persistConversation: true, // localStorage, widget id under `ago_widget_id`, 2h ttl
 });
 
-// Customize the storage, ttl, or supply an explicit visitor id:
+// Use the same explicit visitor id for API calls and session storage:
 mountChatWidget("#chat", {
   config: {
-    /* … */
+    baseUrl: "https://playground.api.useago.com",
+    widgetId: "visitor-42",
   },
   persistConversation: {
     storage: sessionStorage,
@@ -617,7 +633,7 @@ Best when the colors come from JavaScript (a tenant config, a CMS value):
 
 ```ts
 mountChatWidget("#chat", {
-  config: { baseUrl: "https://YOUR-DOMAIN.useago.com" },
+  config: { baseUrl: "https://playground.api.useago.com" },
   theme: {
     font: "inherit",
     brand: "#2b7fff",
@@ -627,8 +643,9 @@ mountChatWidget("#chat", {
 });
 ```
 
-The `theme` keys are a strict subset of what CSS can do (it's set once at mount,
-so no media queries or hover); CSS variables override it if both are present.
+The `theme` option sets inline CSS variables once at mount. These override
+ordinary stylesheet declarations. For media queries or hover styles, leave the
+affected tokens out of `theme`, or override them with CSS `!important`.
 
 #### Token reference
 
@@ -677,7 +694,7 @@ Configure `window.AGO` before loading the widget script:
 ```html
 <script>
   window.AGO = {
-    basepath: "https://YOUR-DOMAIN.useago.com",
+    basepath: "https://playground.api.useago.com",
     widgetApiKey: "YOUR-WIDGET-API-KEY",
     defaultAgent: "support-bot",
     title: "Support",
@@ -706,7 +723,7 @@ The same UI is available without the iframe through
 import type { AgoWidgetConfig, AgoWidgetColors } from "@useago/sdk/widget";
 
 const config: AgoWidgetConfig = {
-  basepath: "https://YOUR-DOMAIN.useago.com",
+  basepath: "https://playground.api.useago.com",
   widgetApiKey: "YOUR-WIDGET-API-KEY",
   defaultAgent: "support-bot",
   title: "Support",

@@ -212,6 +212,12 @@ export interface TicketFieldOption {
   /** A note shown under the field once this option is picked. */
   message?: string;
   messageType: "info" | "warning" | "danger";
+  position?: number;
+  group?: string;
+  noDisplay?: boolean;
+  conditionalFieldId?: string;
+  /** Available when the parent matches any of these values. */
+  conditionalFieldValues?: string[];
 }
 
 /** A custom field of a ticket form. */
@@ -225,12 +231,19 @@ export interface TicketField {
   required: boolean;
   /** Carried in the submission but never shown. */
   hidden: boolean;
+  active?: boolean;
+  /** Bypass progressive disclosure, while still respecting conditions. */
+  alwaysVisible?: boolean;
+  regexpForValidation?: string;
   position: number;
   /** Non-empty turns the field into a select. */
   options: TicketFieldOption[];
   /** Show this field only when the parent field holds `conditionalFieldValue`. */
   conditionalFieldId?: string;
+  /** Legacy comma-separated condition values. */
   conditionalFieldValue?: string;
+  /** Takes precedence over conditionalFieldValue when non-empty. */
+  conditionalFieldValues?: string[];
 }
 
 /** The ticket form an agent's `ago_ticketing` tool opens in the conversation. */
@@ -243,6 +256,9 @@ export interface TicketForm {
   showBody: boolean;
   showPriority: boolean;
   showTypology: boolean;
+  priorityTypologies?: string[];
+  successMessageText?: string;
+  successMessageUrlLabel?: string;
   fields: TicketField[];
 }
 
