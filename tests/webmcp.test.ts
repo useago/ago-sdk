@@ -40,8 +40,12 @@ class FakeModelContext implements ModelContextLike {
     return entry.tool;
   }
 
-  call(name: string, args: Record<string, unknown> = {}): Promise<unknown> {
-    return Promise.resolve(this.get(name).execute(args));
+  call(
+    name: string,
+    args: Record<string, unknown> = {},
+    options?: { signal?: AbortSignal }
+  ): Promise<unknown> {
+    return Promise.resolve(this.get(name).execute(args, options));
   }
 }
 
@@ -268,6 +272,212 @@ describe("WebMCP bridge", () => {
 
       await expect(mc.call("boom")).rejects.toThrow(/nope/);
       expect(results.mock.calls[0][0].error).toMatch(/nope/);
+    });
+  });
+
+  describe("navigation", () => {
+    // The bridge waits for 150ms of registry quiet, capped at 4000ms.
+    const goTo = (handler: () => unknown) => ({
+      ...echo,
+      name: "goToPage",
+      webmcp: { navigates: true },
+      handler,
+    });
+    /** Runs the pending microtasks (the bridge syncs in one) under fake timers. */
+    const flush = () => vi.advanceTimersByTimeAsync(0);
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("marks the built-in navigateToPage as navigating", () => {
+      client.registerNavigationFunction(() => {}, [
+        { name: "home", path: "/", description: "The home page" },
+      ]);
+
+      const fn = client
+        .getFunctionRegistrations()
+        .find((f) => f.name === "navigateToPage");
+      expect(fn?.webmcp).toEqual({ navigates: true });
+    });
+
+    it("holds the call until the destination page has registered", async () => {
+      client.register(
+        goTo(() => {
+          // The route swap, one tick later: the departing page's function goes,
+          // the destination's arrives.
+          setTimeout(() => {
+            client.unregisterFunction("departing");
+            client.register({ ...echo, name: "arriving" });
+          }, 20);
+          return { success: true };
+        })
+      );
+      client.register({ ...echo, name: "departing" });
+      await flush();
+
+      let settled = false;
+      const call = mc.call("goToPage").then(() => {
+        settled = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(10);
+      expect(settled).toBe(false);
+      expect(mc.names()).toEqual(["departing", "goToPage"]);
+
+      await vi.advanceTimersByTimeAsync(170);
+      await call;
+      expect(mc.names()).toEqual(["arriving", "goToPage"]);
+    });
+
+    it("extends the wait while registrations keep arriving", async () => {
+      client.register(
+        goTo(() => {
+          setTimeout(() => client.register({ ...echo, name: "first" }), 10);
+          setTimeout(() => client.register({ ...echo, name: "second" }), 120);
+          return { success: true };
+        })
+      );
+      await flush();
+
+      let settled = false;
+      const call = mc.call("goToPage").then(() => {
+        settled = true;
+      });
+
+      // Without the second registration this would have settled at 160ms.
+      await vi.advanceTimersByTimeAsync(161);
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(120);
+      await call;
+      expect(settled).toBe(true);
+    });
+
+    it("gives up at the first-change grace when nothing registers", async () => {
+      client.register(goTo(() => ({ success: true })));
+      await flush();
+
+      let settled = false;
+      const call = mc.call("goToPage").then(() => {
+        settled = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(599);
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(2);
+      await call;
+      expect(settled).toBe(true);
+    });
+
+    it("hands the wait over to the settle once the transition starts", async () => {
+      client.register(
+        goTo(() => {
+          // Late enough that the grace would have fired first.
+          setTimeout(() => {
+            client.unregisterFunction("departing");
+            client.register({ ...echo, name: "arriving" });
+          }, 550);
+          return { success: true };
+        })
+      );
+      client.register({ ...echo, name: "departing" });
+      await flush();
+
+      let settled = false;
+      const call = mc.call("goToPage").then(() => {
+        settled = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(610);
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(100);
+      await call;
+      expect(mc.names()).toEqual(["arriving", "goToPage"]);
+    });
+
+    it("still gives up at the readiness cap when changes never stop", async () => {
+      const churn = setInterval(() => {
+        client.register({ ...echo, name: `churn-${Date.now()}` });
+      }, 100);
+      client.register(goTo(() => ({ success: true })));
+      await flush();
+
+      let settled = false;
+      const call = mc.call("goToPage").then(() => {
+        settled = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(3999);
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(2);
+      await call;
+      expect(settled).toBe(true);
+      clearInterval(churn);
+    });
+
+    it("does not hold a function that is not marked as navigating", async () => {
+      client.register(echo);
+      await flush();
+
+      await expect(mc.call("echo", { a: 1 })).resolves.toEqual({
+        echoed: { a: 1 },
+      });
+    });
+
+    it("skips the wait when the handler reports it did not navigate", async () => {
+      const refused = { success: false, error: "Unknown page: nope" };
+      client.register(goTo(() => refused));
+      await flush();
+
+      await expect(mc.call("goToPage")).resolves.toEqual(refused);
+    });
+
+    it("stops waiting when the caller aborts the execution", async () => {
+      client.register(goTo(() => ({ success: true })));
+      await flush();
+
+      const controller = new AbortController();
+      let settled = false;
+      const call = mc
+        .call("goToPage", {}, { signal: controller.signal })
+        .then(() => {
+          settled = true;
+        });
+
+      await vi.advanceTimersByTimeAsync(10);
+      expect(settled).toBe(false);
+
+      controller.abort();
+      await call;
+      expect(settled).toBe(true);
+    });
+
+    it("stops waiting when the bridge detaches", async () => {
+      const bare = new AgoClient({ baseUrl: "https://example.test" });
+      const detach = attachWebMCP(bare);
+      bare.register(goTo(() => ({ success: true })));
+      await flush();
+
+      let settled = false;
+      const call = mc.call("goToPage").then(() => {
+        settled = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(10);
+      expect(settled).toBe(false);
+
+      detach();
+      await call;
+      expect(settled).toBe(true);
+      bare.destroy();
     });
   });
 

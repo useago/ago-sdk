@@ -4,6 +4,7 @@ import type {
   AgoStateControl,
   ClientFunctionHandler,
   ClientFunctionSchema,
+  WebMCPToolMeta,
 } from "../../functions/types";
 import { useAgo } from "./useAgo";
 
@@ -30,6 +31,16 @@ export function useAgoFunction(
      * `Infinity` disables the guard for this function.
      */
     maxResultBytes?: number;
+    /**
+     * Require explicit user approval before this function runs (pause mode
+     * only). See `AgoConfig.approvalPolicy`.
+     */
+    requiresApproval?: boolean;
+    /**
+     * WebMCP metadata, read only when the bridge is on (`AgoConfig.webmcp`).
+     * `false` keeps this function out of WebMCP.
+     */
+    webmcp?: WebMCPToolMeta | false;
   }
 ): void {
   const client = useAgo();
@@ -39,6 +50,8 @@ export function useAgoFunction(
       description: options.description,
       parameters: options.parameters,
       maxResultBytes: options.maxResultBytes,
+      requiresApproval: options.requiresApproval,
+      webmcp: options.webmcp,
     });
   });
 

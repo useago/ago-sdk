@@ -484,7 +484,27 @@ In React it is a prop:
 ```
 
 A function a page registers on mount disappears from the browser's tool list
-when that page unmounts. Check what is exposed from the console:
+when that page unmounts. That is a problem for navigation: the handler returns
+before the destination page has mounted, so the caller would read the tools of
+the page it just left. Mark the function and the SDK holds the call open until
+the destination has registered:
+
+```ts
+client.registerFunction({
+  name: "openOrder",
+  description: "Open one order's detail page.",
+  parameters: { type: "object", properties: { id: { type: "string" } } },
+  handler: (args) => navigate(`/orders/${args.id}`),
+  webmcp: { navigates: true },
+});
+```
+
+The built-in `navigateToPage` already carries it, so
+[`registerNavigationFunction`](#navigation-shortcut) and `useAgoNavigation` need
+no change. The call resolves 150 ms after the last registration, 600 ms if the
+destination registers nothing, and gives up after 4 seconds.
+
+Check what is exposed from the console:
 
 ```js
 (await document.modelContext.getTools()).map((t) => t.name);

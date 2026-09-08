@@ -19,9 +19,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `function:result` like any other. There is no approval gate on them, and
   cancelling a call does not stop the handler.
 - **`webmcp` on a function definition.** WebMCP-only metadata the AGO schema has
-  no room for: `annotations` (`readOnlyHint`, `untrustedContentHint`).
-  `webmcp: false` keeps one function private to your own agent while the bridge
-  is on.
+  no room for: `annotations` (`readOnlyHint`, `untrustedContentHint`) and
+  `navigates`. `webmcp: false` keeps one function private to your own agent
+  while the bridge is on.
+- **`webmcp: { navigates: true }`.** A navigating function's WebMCP call is held
+  open until the function registry has been quiet for 150ms (600ms when the
+  destination registers nothing, 4s ceiling), so the caller reads the
+  destination page's tools instead of the departing page's.
+  Already set on the built-in `navigateToPage`, so `registerNavigationFunction`
+  and `useAgoNavigation` need no change. Set it yourself on a custom function
+  whose handler navigates.
+
+### Fixed
+
+- **`webmcp` and `requiresApproval` are no longer dropped by the framework
+  wrappers.** React's `useAgoFunction` dropped `webmcp`, and Vue's dropped both
+  `webmcp` and `requiresApproval`, so `webmcp: false` was silently ignored and
+  the function was mirrored anyway. An inline `webmcp` object is compared by
+  value, so it does not re-register the function on every render.
 - **`functions:changed` event** and `client.onFunctionsChanged(listener)`, fired
   when a function is registered, unregistered, or the registry is cleared. The
   dev panel now repaints its function list from it instead of waiting for a

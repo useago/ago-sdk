@@ -246,7 +246,9 @@ whatever agent the user brings, such as an agentic browser or an extension. Set
 
 Off by default, and a no-op where the browser has no WebMCP. A mirrored function
 runs as soon as the external agent calls it, with no approval gate, so set
-`webmcp: false` on anything that must not run unattended. See
+`webmcp: false` on anything that must not run unattended. Navigation is handled:
+a call that changes page resolves only once the destination has registered its
+own tools. See
 [functions and context](docs/general/functions-and-context.md#webmcp-bridge-share-your-functions-with-browser-agents).
 
 ## Let the user stop a long answer
