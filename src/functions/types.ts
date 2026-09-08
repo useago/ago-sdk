@@ -199,6 +199,12 @@ export interface WebMCPToolMeta {
     readOnlyHint?: boolean;
     untrustedContentHint?: boolean;
   };
+  /**
+   * This function navigates. The WebMCP call is held open until the function
+   * registry goes quiet, so the caller sees the destination page's tools rather
+   * than the departing page's. Already set on the built-in `navigateToPage`.
+   */
+  navigates?: boolean;
 }
 
 /** SDK-side function settings that are never sent to the backend. */

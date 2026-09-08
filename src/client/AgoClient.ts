@@ -1860,6 +1860,7 @@ export class AgoClient {
           properties,
           required: ["page"],
         },
+        webmcp: { navigates: true },
       },
     );
 

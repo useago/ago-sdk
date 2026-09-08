@@ -5,6 +5,7 @@ import type {
   AgoStateControl,
   ClientFunctionDefinition,
   ClientFunctionHandler,
+  WebMCPToolMeta,
 } from "../../functions/types";
 import { useAgoClient } from "../context/AgoContext";
 
@@ -36,6 +37,11 @@ export interface UseAgoFunctionOptions {
    * See `AgoConfig.approvalPolicy`.
    */
   requiresApproval?: boolean;
+  /**
+   * WebMCP metadata, read only when the bridge is on (`AgoConfig.webmcp`).
+   * `false` keeps this function out of WebMCP.
+   */
+  webmcp?: WebMCPToolMeta | false;
 }
 
 /**
@@ -72,13 +78,25 @@ export function useAgoFunction(
 ): void {
   const client = useAgoClient();
 
-  const { name, description, parameters, handler, maxResultBytes, requiresApproval } =
+  const {
+    name,
+    description,
+    parameters,
+    handler,
+    maxResultBytes,
+    requiresApproval,
+    webmcp,
+  } =
     typeof nameOrDef === "string"
       ? { name: nameOrDef, ...(options as UseAgoFunctionOptions) }
       : nameOrDef;
 
   const handlerRef = useRef(handler);
   handlerRef.current = handler;
+
+  // `webmcp` is usually written inline, so compare it by value: a fresh object
+  // literal on every render must not re-register the function.
+  const webmcpKey = JSON.stringify(webmcp ?? null);
 
   useEffect(() => {
     const stableHandler: ClientFunctionHandler = (args) =>
@@ -89,12 +107,23 @@ export function useAgoFunction(
       parameters,
       maxResultBytes,
       requiresApproval,
+      webmcp,
     });
 
     return () => {
       client.unregisterFunction(name);
     };
-  }, [client, name, description, parameters, maxResultBytes, requiresApproval]);
+    // `webmcpKey` stands in for `webmcp`: same value, stable identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    client,
+    name,
+    description,
+    parameters,
+    maxResultBytes,
+    requiresApproval,
+    webmcpKey,
+  ]);
 }
 
 export interface AgoRoute {
