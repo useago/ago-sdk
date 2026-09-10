@@ -24,6 +24,8 @@ export interface AgoConfig {
   defaultAgentId?: string;
   /** Permission name to apply to all requests (sent as `X-Widget-Permission`). Mirrors the widget's `window.AGO.permission`. */
   permission?: string;
+  /** Interface locale selected by the host app, sent as Accept-Language. Null clears the override. */
+  language?: string | null;
   /** User email for identification */
   userEmail?: string;
   /** JWT token for authenticated users */

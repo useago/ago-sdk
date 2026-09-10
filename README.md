@@ -323,6 +323,21 @@ React and Vue have a `useFeedback()` hook/composable; React also exports the
 `<MessageFeedback messageId={...} />` row for a custom message list. Details in
 [Feedback](docs/general/widget.md#feedback).
 
+## Choose the knowledge language
+
+```ts
+ago.updateConfig({ language: "fr" });
+const conversation = await ago.getConversation(conversationId);
+const sources = conversation.messages?.flatMap((message) => message.sources ?? []);
+```
+
+Pass your app's locale as `language` when creating the client, or update it when
+the visitor changes languages. The API uses `Accept-Language` to select existing
+knowledge translations. Reloading a conversation refreshes its source titles.
+In React, pass `language={i18n.language}` to `AgoProvider`.
+See [Language](docs/general/configuration.md#language) for regional tags and
+fallback behavior.
+
 ## Transcribe audio into a draft
 
 ```ts

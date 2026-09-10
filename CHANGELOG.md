@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Knowledge language from your application.** Set `language: "fr"` on the
+  client or `<AgoProvider language={locale}>` to send `Accept-Language` with
+  SDK requests. Change it with `client.updateConfig({ language: "de" })`
+  without recreating the client. AGO selects available knowledge translations
+  and source titles. `null` clears the override; invalid locales are rejected
+  before changing the configuration. `createAgo` accepts the same option.
 - **Audio transcription.** Call `client.transcribeAudio(file, { signal })` to
   turn an audio file into editable text. The method uses the SDK's existing
   authentication and supports cancellation. It is also available through the
@@ -53,6 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `getConversation()` and `getMessages()` now preserve knowledge sources,
+  including translated titles, when loading conversation history.
 - **`webmcp` and `requiresApproval` are no longer dropped by the framework
   wrappers.** React's `useAgoFunction` dropped `webmcp`, and Vue's dropped both
   `webmcp` and `requiresApproval`, so `webmcp: false` was silently ignored and

@@ -1163,6 +1163,7 @@ export class AgoClient {
         hidden?: boolean;
         tool_call_data?: Array<Record<string, unknown>>;
         attachments?: Array<Record<string, unknown>>;
+        sources?: Array<{ id: string; title: string; url?: string | null }>;
         follow_up_replies?: string[];
       }>;
     }>(`/api/sdk/v1/conversations/${conversationId}`);
@@ -1181,6 +1182,10 @@ export class AgoClient {
         status: m.status as AgoMessage["status"],
         createdAt: new Date(m.created_at),
         hidden: m.hidden,
+        sources:
+          m.sources && m.sources.length > 0
+            ? m.sources.map(({ id, title, url }) => ({ id, title, url: url ?? undefined }))
+            : undefined,
         toolCalls: AgoClient.mapPersistedToolCalls(m.tool_call_data),
         attachments:
           m.attachments && m.attachments.length > 0

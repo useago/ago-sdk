@@ -1,4 +1,5 @@
 import { AgoApiError, AgoNetworkError, ApiErrorResponse } from "../client/errors";
+import { normalizeLanguage } from "../client/language";
 import type { AgoConfig } from "../client/types";
 import { logger } from "../utils/logger";
 
@@ -69,12 +70,16 @@ export class HttpClient {
     if (config.permission) {
       this.headers["X-Widget-Permission"] = config.permission;
     }
+
+    const language = normalizeLanguage(config.language);
+    if (language) this.headers["Accept-Language"] = language;
   }
 
   /**
    * Update configuration (e.g., JWT token)
    */
   updateConfig(config: Partial<AgoConfig>): void {
+    const language = normalizeLanguage(config.language);
     if (config.baseUrl) {
       this.baseUrl = config.baseUrl.replace(/\/$/, "");
     }
@@ -92,6 +97,13 @@ export class HttpClient {
         this.headers["X-Widget-Permission"] = config.permission;
       } else {
         delete this.headers["X-Widget-Permission"];
+      }
+    }
+    if (config.language !== undefined) {
+      if (language) {
+        this.headers["Accept-Language"] = language;
+      } else {
+        delete this.headers["Accept-Language"];
       }
     }
   }
