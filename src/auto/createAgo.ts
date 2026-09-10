@@ -84,6 +84,7 @@ export function autoDetectConfig(
     widgetId,
     agent,
     permission,
+    language: overrides?.language,
     userEmail,
     userJwt,
     metadata,

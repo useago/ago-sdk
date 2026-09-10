@@ -1,4 +1,5 @@
 import { AgoError } from "./errors";
+import { normalizeLanguage } from "./language";
 import type { AgoConfig } from "./types";
 
 const BASE_URL_HINT =
@@ -55,6 +56,8 @@ export function validateConfig(
   if (typeof baseUrl !== "string" || baseUrl.trim() === "") {
     throw new AgoError(`${context}: ${BASE_URL_HINT}`, "config_missing_base_url");
   }
+
+  normalizeLanguage((config as AgoConfig).language);
 
   if (!baseUrl.startsWith("/") && !HAS_SCHEME.test(baseUrl)) {
     if (!warnedSuspectBaseUrl) {

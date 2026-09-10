@@ -2303,6 +2303,7 @@ interface AgoConfig {
   agent?: string;           // default agent (id or slug) for new conversations
   defaultAgentId?: string;  // same as `agent`; `agent` is preferred
   permission?: string;      // X-Widget-Permission header
+  language?: string | null; // Host interface locale, sent as Accept-Language
   userEmail?: string;       // X-User-Email header, identify the end user
   userJwt?: string;         // Authorization: Bearer <jwt>, authenticated users
   metadata?: Record<string, unknown> | null; // Message body, for user/ticket enrichment
@@ -2320,6 +2321,7 @@ interface AgoConfig {
 | `widgetId` | — | `X-User-Anon-Id` | Per-visitor anonymous id. If omitted, a UUID is generated and cached in `localStorage` (`ago_widget_id`) so a returning visitor keeps the same id. |
 | `agent` / `defaultAgentId` | — | `agent_id` in the body | Per-message `agentId` overrides it. `agent` wins if both are set. |
 | `permission` | — | `X-Widget-Permission` | Mirrors the widget's `window.AGO.permission`. |
+| `language` | No | `Accept-Language` | Pass your interface locale, such as `fr` or `pt-BR`. `null` clears the override. |
 | `userEmail` | — | `X-User-Email` | Identifies the user to AGO. |
 | `userJwt` | — | `Authorization: Bearer …` | For authenticated sessions. |
 | `metadata` | — | `metadata` in the body | JSON-serializable user/ticket context. Per-message overrides replace defaults; `null` omits the field. |
@@ -2422,13 +2424,70 @@ client.updateConfig({ userJwt: token, userEmail: "jane@acme.com" });
 ```
 
 Changing `permission` to a falsy value removes the header. In React, the
-`useAgo` hook re-applies `agent`, `permission`, `userEmail`, `userJwt`,
+`useAgo` hook re-applies `agent`, `permission`, `language`, `userEmail`, `userJwt`,
 `metadata`, `debug` and `warnOnEmptyReply` automatically when those props
 change (changing `baseUrl`/`widgetId` recreates the client).
 
 `updateConfig` validates the merged result: omitting a key (or passing it as
 `undefined`) keeps the current value; an explicit empty or non-string `baseUrl`
 throws `config_missing_base_url` and leaves the client unchanged.
+
+### Language
+
+```ts
+const client = new AgoClient({
+  baseUrl: "https://playground.api.useago.com",
+  agent: "generic-guide",
+  language: "fr",
+});
+const answer = await client.sendMessage("What can you help me with?");
+
+// Run this when your application's language picker changes.
+client.updateConfig({ language: "de" });
+await client.sendMessage("And now?", { conversationId: answer.conversationId });
+```
+
+Pass your application's current locale to `language`. The SDK sends it in the
+`Accept-Language` header on its requests. AGO uses the resolved language to select
+existing knowledge translations and source titles, falling back to the original
+content when a translation is unavailable. Region tags are preserved in the header
+(`pt-BR`); underscores are accepted (`fr_FR` becomes `fr-FR`). The backend may resolve
+a regional tag to its base language. If translations are stored under a base
+language such as `pt`, pass that code when the backend does not fall back from
+`pt-BR`. Source URLs remain the document's configured URLs.
+If a Django language cookie is sent with the
+request, it takes precedence over this header.
+
+In React, bind the same locale your interface uses:
+
+```tsx
+<AgoProvider baseUrl="https://playground.api.useago.com" language={i18n.language}>
+  <App />
+</AgoProvider>
+```
+
+Changing the prop updates subsequent requests without recreating the client or
+losing the conversation. Omit the React prop or call
+`client.updateConfig({ language: null })` to clear the override. With no override,
+the browser supplies its own language header. Each client has its own setting;
+the SDK does not read or change your
+page's language, global variables, or saved language preferences.
+
+To refresh knowledge source titles already on screen, reload the conversation
+after changing the language. Existing answer text stays unchanged:
+
+```ts
+client.updateConfig({ language: "fr" });
+const conversation = await client.getConversation(answer.conversationId);
+const sources = conversation.messages?.flatMap((message) => message.sources ?? []);
+```
+
+`createAgo({ language: "fr" })` also accepts an explicit locale when your API
+configuration is detected from the page.
+
+This header does not force the agent's reply language or translate your UI text.
+Continue passing translated labels, placeholders and welcome text from your
+application's translations.
 
 ### User and ticket metadata
 
@@ -2488,6 +2547,7 @@ may be reworded in any release.
 | Code | Thrown by | Meaning | Fix |
 | --- | --- | --- | --- |
 | `config_missing_base_url` | `AgoError` | `baseUrl` missing, empty, or not a string (also from `createAgo()` and `mountChatWidget`) | Pass `baseUrl`, e.g. `https://YOUR-DOMAIN.api.useago.com` (the public demo account `https://playground.api.useago.com` works without a tenant) |
+| `config_invalid_language` | `AgoError` | `language` is not a valid language tag | Use a tag such as `fr` or `pt-BR`, or `null` to clear the override. Invalid updates leave the client unchanged. |
 | `config_suspect_base_url` | console warning only | `baseUrl` has no protocol and is not a `/path` | Add `https://`, or use a `/path` for a same-origin proxy |
 | `network_error` | `AgoNetworkError` | fetch failed (offline, DNS, unreachable host) | Check `baseUrl` is reachable and includes the protocol |
 | `http_error` | `AgoApiError` | non-2xx without a structured error body | 401/403: check `userJwt`. 404: check `baseUrl` points at the API root |

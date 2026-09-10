@@ -70,6 +70,7 @@ export function createMockClient(
 
   const defaults: Record<string, MockFn> = {
     sendMessage: async () => noopMessage,
+    transcribeAudio: async () => ({ text: "Mock transcription" }),
     continueMessage: async () => noopMessage,
     stop: async () => null,
     stopMessage: async () => ({ status: "not_running" }),

@@ -168,6 +168,61 @@ canInlineImage(file)
   : renderDownloadLink(file.url, file.name);
 ```
 
+### Speech to text
+
+```ts
+const { permissions } = await ago.getConfig();
+const file = fileInput.files?.[0];
+if (file && permissions.some((p) => p.speechToTextEnabled)) {
+  const { text } = await ago.transcribeAudio(file);
+  messageInput.value = text; // Let the user edit the draft before sending.
+}
+```
+
+`transcribeAudio(file, options?)` uploads one `File` and returns
+`{ text: string }`. It uses the client's widget identity, JWT and permission
+headers. Call `sendMessage` when the user submits the draft.
+
+Speech to text must be enabled for the tenant. Check
+`permissions[].speechToTextEnabled` before showing a recording control; it is
+`false` when the backend omits the flag. This flag is separate from
+`voiceEnabled`.
+
+For a `MediaRecorder` recording, wrap the blob in a `File` with the matching
+extension and MIME type. For example, with a WebM recording:
+
+```ts
+const file = new File([audioBlob], "recording.webm", { type: audioBlob.type });
+const controller = new AbortController();
+const pending = ago.transcribeAudio(file, { signal: controller.signal });
+// A cancel button can call controller.abort().
+const { text } = await pending;
+```
+
+Supported formats: FLAC, MP3, MP4, MPEG, MPGA, M4A, OGG, WAV and WebM, up to
+25 MB (25,000,000 bytes). The filename extension must match the audio format.
+Recording requires browser microphone access; `transcribeAudio` handles the upload.
+
+Backend failures throw `AgoApiError`, including disabled dictation (`403`),
+oversized audio (`413`), and no detected speech (`422`). Check `statusCode` to
+handle these in your UI. Cancellation propagates the abort error; a failed
+connection throws `AgoNetworkError`.
+
+In React, get the client with `useAgoClient()` in your component. In Vue, use
+`useAgo()` during setup. Call `client.transcribeAudio(...)` in the upload handler.
+Angular exposes `AgoService.transcribeAudio(...)`. `createMockClient()` also
+supports this method.
+
+The vanilla widget includes the full dictation UI when mounted with
+`speechToText: true`: microphone, waveform that follows the recording volume,
+timer, cancel/confirm buttons and a transcription spinner. React exposes the
+same behavior through `<ChatWidget speechToText />`, `<ChatInput speechToText />`
+and the standalone `SpeechToTextButton`. They check the tenant flag before
+displaying the control. Finishing a recording fills the draft; canceling keeps
+the existing text.
+Recordings stop after two minutes. Closing or destroying the widget releases
+the microphone and cancels any pending transcription.
+
 ### Override the agent per message
 
 ```ts
@@ -452,6 +507,12 @@ Prefer callbacks over raw events? See the
 - `stopMessage(messageId)` → `Promise<StopMessageResult>`: stop a turn by id
 - `isGenerating()` → `boolean`
 
+### Audio
+
+- `transcribeAudio(file: File, options?: TranscribeAudioOptions)` → `Promise<AudioTranscription>`
+  (an editable `{ text: string }` draft)
+- `options.signal?: AbortSignal`: cancel the request
+
 ### Conversations
 
 - `getConversations()` → `Promise<Conversation[]>`
@@ -485,7 +546,7 @@ Prefer callbacks over raw events? See the
 - `submitToolCallForm(toolCallId, formData)`
 - `confirmToolCall(toolCallId)` · `rejectToolCall(toolCallId)`
 - `getConfig()` → `Promise<SdkConfig>`: the tenant's per-permission agents,
-  ticket form (`ticketForm`), and file-attachment flag (`GET /config`)
+  ticket form (`ticketForm`), file-attachment and speech-to-text flags (`GET /config`)
 - `createTicket({ subject, body, priority?, typology?, conversationId?, email?, customFields?, files?, ticketFormId? })`
   → `Promise<{ id, url? }>`: file a support ticket (`POST /tickets`, multipart)
 - `getUserIdentity()` → `{ email?, hasJwt }`: how the client identifies the

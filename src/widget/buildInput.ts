@@ -32,6 +32,9 @@ import {
   SEND_BACKGROUND,
   SHADOW,
 } from "./styles";
+import type { AudioTranscription, TranscribeAudioOptions } from "../client/types";
+import { createSpeechToText } from "./speechToText";
+import type { SpeechToTextLabels } from "./speechToText";
 
 export type InputLook = "classic" | "embed";
 
@@ -53,6 +56,8 @@ interface BuildInputArgs {
    * enabled Stop button while the agent is answering instead of a dead spinner.
    */
   onStop?: () => void;
+  transcribeAudio?: (file: File, options: TranscribeAudioOptions) => Promise<AudioTranscription>;
+  speechToTextLabels?: Partial<SpeechToTextLabels>;
   /** Visual preset. Defaults to `classic`. */
   look?: InputLook;
   /** Required for the `embed` look's file errors and button names. */
@@ -73,6 +78,9 @@ export interface InputHandle {
   restoreDraft: (content: string, files?: File[]) => void;
   /** Swap the placeholder (the bubble widget uses one per screen). */
   setPlaceholder: (text: string) => void;
+  setSpeechToTextEnabled: (enabled: boolean) => void;
+  cancelRecording: () => void;
+  destroy: () => void;
 }
 
 /** The reference's upload constraints (`prompt-form.tsx`). */
@@ -279,11 +287,12 @@ export function buildInput(args: BuildInputArgs): InputHandle {
   // Without `onStop` it stays a disabled spinner, as before. Otherwise the send
   // button is disabled when there's nothing to send, matching `submit()`.
   let answering = false;
+  let dictating = false;
   const canStop = (): boolean => answering && !!args.onStop;
   const refreshSendBtn = (): void => {
     const hasContent = textarea.value.trim() !== "" || files.length > 0;
     const stopping = canStop();
-    const disabled = !stopping && (answering || !hasContent);
+    const disabled = !stopping && (answering || dictating || !hasContent);
     sendBtn.disabled = disabled;
     // `type` drives the click: a submit button would send instead of stopping.
     sendBtn.type = stopping ? "button" : "submit";
@@ -569,6 +578,7 @@ export function buildInput(args: BuildInputArgs): InputHandle {
   }
 
   const getValueAndClear = (): { content: string; files: File[] } => {
+    speech?.cancel();
     const content = textarea.value;
     const collected = files;
     textarea.value = "";
@@ -580,6 +590,7 @@ export function buildInput(args: BuildInputArgs): InputHandle {
   };
 
   const submit = (): void => {
+    if (answering || dictating) return;
     const { content, files: collected } = getValueAndClear();
     if (content.trim() || collected.length > 0) {
       args.onSend(content.trim(), collected.length > 0 ? collected : undefined);
@@ -608,9 +619,42 @@ export function buildInput(args: BuildInputArgs): InputHandle {
     }
   });
 
+  const speech: ReturnType<typeof createSpeechToText> | undefined = args.transcribeAudio ? createSpeechToText({
+    transcribe: args.transcribeAudio,
+    labels: args.speechToTextLabels,
+    onBusy: (busy) => {
+      const shouldFocus = dictating && !busy && !answering && form.contains(document.activeElement);
+      dictating = busy;
+      textarea.disabled = answering || busy;
+      if (embed) {
+        leftCol.style.display = busy ? "none" : "";
+        rightCol.style.display = busy ? "none" : "flex";
+        row.style.padding = busy ? "8px" : "16px";
+        if (speech) {
+          if (busy) row.append(speech.el);
+          else rightCol.prepend(speech.el);
+        }
+      } else {
+        textarea.style.display = busy ? "none" : "";
+        sendBtn.style.display = busy ? "none" : "flex";
+        if (attachBtn) attachBtn.style.display = busy ? "none" : "flex";
+      }
+      refreshSendBtn();
+      if (shouldFocus) textarea.focus();
+    },
+    onText: (text) => {
+      textarea.value += `${textarea.value && !/\s$/.test(textarea.value) ? " " : ""}${text}`;
+      autoResize();
+      refreshSendBtn();
+      textarea.focus();
+    },
+    onError: showFileError,
+  }) : undefined;
+
   // Embed layout: [ left column: files / textarea / toolbar ] [ send ].
   const leftCol = div({ flex: "1", minWidth: "0" });
   leftCol.className = "ago-chat-input__editor";
+  const rightCol = div({ display: "flex", alignItems: "flex-end", flexShrink: "0", gap: "4px" });
   if (embed) {
     // The error banner lives in the editor column and is display:none until a
     // file is rejected, so the resting card stays 16px + 40px + 16px tall.
@@ -619,11 +663,7 @@ export function buildInput(args: BuildInputArgs): InputHandle {
     toolbar.className = "ago-chat-input__toolbar";
     if (attachBtn) toolbar.appendChild(attachBtn);
     if (attachBtn) leftCol.appendChild(toolbar);
-    const rightCol = div({
-      display: "flex",
-      alignItems: "flex-end",
-      flexShrink: "0",
-    });
+    if (speech) rightCol.appendChild(speech.el);
     rightCol.appendChild(sendBtn);
     row.append(leftCol, rightCol);
     if (fileInput) form.appendChild(fileInput);
@@ -636,9 +676,11 @@ export function buildInput(args: BuildInputArgs): InputHandle {
     });
   } else {
     if (attachBtn) row.appendChild(attachBtn);
-    row.append(textarea, sendBtn);
+    row.append(textarea);
+    if (speech) row.appendChild(speech.el);
+    row.append(sendBtn);
     if (fileInput) form.appendChild(fileInput);
-    form.append(fileList, row);
+    form.append(errorBox, fileList, row);
   }
 
   // Start disabled: the input is empty on mount.
@@ -648,10 +690,11 @@ export function buildInput(args: BuildInputArgs): InputHandle {
     inputRow: form,
     getValueAndClear,
     setDisabled: (disabled: boolean) => {
-      textarea.disabled = disabled;
       // The send button also stays disabled when the input is empty; let
       // refreshSendBtn reconcile the answering state with content presence.
       answering = disabled;
+      speech?.setDisabled(disabled);
+      textarea.disabled = disabled || dictating;
       refreshSendBtn();
     },
     focus: () => textarea.focus(),
@@ -681,6 +724,12 @@ export function buildInput(args: BuildInputArgs): InputHandle {
     setPlaceholder: (text: string) => {
       textarea.placeholder = text;
       if (text) textarea.setAttribute("aria-label", text);
+    },
+    setSpeechToTextEnabled: (enabled) => speech?.setEnabled(enabled),
+    cancelRecording: () => speech?.cancel(),
+    destroy: () => {
+      speech?.destroy();
+      for (const file of thumbUrls.keys()) dropThumb(file);
     },
   };
 }

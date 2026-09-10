@@ -9,6 +9,8 @@ export type { MarkdownProps } from "./Markdown";
 
 export { ChatInput } from "./ChatInput";
 export type { ChatInputProps } from "./ChatInput";
+export { SpeechToTextButton } from "./SpeechToTextButton";
+export type { SpeechToTextButtonProps } from "./SpeechToTextButton";
 
 export { AgoNudge } from "./AgoNudge";
 export type { AgoNudgeProps } from "./AgoNudge";

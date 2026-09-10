@@ -24,6 +24,8 @@ export interface AgoConfig {
   defaultAgentId?: string;
   /** Permission name to apply to all requests (sent as `X-Widget-Permission`). Mirrors the widget's `window.AGO.permission`. */
   permission?: string;
+  /** Interface locale selected by the host app, sent as Accept-Language. Null clears the override. */
+  language?: string | null;
   /** User email for identification */
   userEmail?: string;
   /** JWT token for authenticated users */
@@ -114,6 +116,17 @@ export interface AgoConfig {
 
 /** See {@link AgoConfig.clientFunctionsMode}. */
 export type ClientFunctionsMode = "placeholder" | "pause";
+
+/** Options for `AgoClient.transcribeAudio`. */
+export interface TranscribeAudioOptions {
+  /** Cancel the upload or stop waiting for its transcription. */
+  signal?: AbortSignal;
+}
+
+/** Editable text returned by `AgoClient.transcribeAudio`. */
+export interface AudioTranscription {
+  text: string;
+}
 
 /**
  * Options for sending a message
@@ -323,6 +336,8 @@ export interface SdkPermissionConfig {
   homePage?: SdkHomePageConfig;
   fileAttachmentsEnabled: boolean;
   voiceEnabled: boolean;
+  /** Whether audio uploads can be transcribed. Defaults to false on older backends. */
+  speechToTextEnabled: boolean;
 }
 
 /** Response of `GET /api/sdk/v1/config` (see `AgoClient.getConfig`). */

@@ -661,9 +661,16 @@ export function mountChatWidget(
     restoreDraft,
     setPlaceholder,
     getValueAndClear,
+    setSpeechToTextEnabled,
+    cancelRecording,
+    destroy: destroyInput,
   } = buildInput({
     placeholder,
     allowFiles,
+    transcribeAudio: options.speechToText
+      ? (file, opts) => client.transcribeAudio(file, opts)
+      : undefined,
+    speechToTextLabels: typeof options.speechToText === "object" ? options.speechToText.labels : undefined,
     onSend: (content, files) => void send(content, files),
     onStop: allowStop ? () => void stop() : undefined,
     look: isBubble ? "embed" : "classic",
@@ -679,6 +686,12 @@ export function mountChatWidget(
   });
 
   ensureKeyframes();
+
+  if (options.speechToText) {
+    void client.getConfig().then((config) => {
+      if (!destroyed) setSpeechToTextEnabled(config.permissions.some((p) => p.speechToTextEnabled));
+    }).catch(() => { /* Keep dictation hidden when availability cannot be checked. */ });
+  }
 
   if (!isBubble) {
     container.append(...(header ? [header] : []), messagesWrap, inputRow);
@@ -1895,6 +1908,7 @@ export function mountChatWidget(
       return;
     }
     if (opts?.byUser) navigatedByUser = true;
+    if (screen !== next) cancelRecording();
     screen = next;
     // One composer, moved to whichever screen shows it.
     if (next === "home") {
@@ -1927,6 +1941,7 @@ export function mountChatWidget(
   /** Open a thread on the chat screen and load its history. */
   async function openThread(id: string): Promise<void> {
     if (!isBubble) return;
+    cancelRecording();
     if (isLoading) await stop();
     conversationId = id;
     messages = [];
@@ -2172,6 +2187,7 @@ export function mountChatWidget(
       // hand the scroll lock a second release).
       if (destroyed) return;
       destroyed = true;
+      destroyInput();
       if (introTimer) clearInterval(introTimer);
       if (teaserTimer) clearTimeout(teaserTimer);
       if (resizeTimer) clearTimeout(resizeTimer);
@@ -2362,6 +2378,7 @@ export function mountChatWidget(
     onOpen?.();
   }
   function closePanel(): void {
+    cancelRecording();
     panelOpen = false;
     applyOpenState();
     onClose?.();
@@ -2377,6 +2394,7 @@ export function mountChatWidget(
     else void expandInline();
   }
   function closeCtl(): void {
+    cancelRecording();
     if (isFixedPanel) closePanel();
     else void collapseInline();
   }
@@ -2731,6 +2749,7 @@ export function mountChatWidget(
   }
   function collapseInline(): Promise<void> {
     if (!inlineExpanded) return Promise.resolve();
+    cancelRecording();
     inlineExpanded = false;
     removeViewportListeners();
     // Released synchronously, mirroring expandInline.

@@ -10,6 +10,21 @@
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
+export function microphoneIcon(opts: IconOptions = {}): SVGSVGElement {
+  return stroked([
+    "M9 5a3 3 0 0 1 6 0v7a3 3 0 0 1-6 0Z",
+    "M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8",
+  ], opts);
+}
+
+export function checkIcon(opts: IconOptions = {}): SVGSVGElement {
+  return stroked(["M5 12l4 4L19 6"], opts);
+}
+
+export function spinnerIcon(opts: IconOptions = {}): SVGSVGElement {
+  return stroked(["M21 12a9 9 0 1 1-6.219-8.56"], opts);
+}
+
 interface IconOptions {
   /** Rendered size in px (width and height). */
   size?: number;

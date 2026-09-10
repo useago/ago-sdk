@@ -5,10 +5,32 @@ All notable changes to `@useago/sdk` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.13.0] - 2026-09-10
 
 ### Added
 
+- **Knowledge language from your application.** Set `language: "fr"` on the
+  client or `<AgoProvider language={locale}>` to send `Accept-Language` with
+  SDK requests. Change it with `client.updateConfig({ language: "de" })`
+  without recreating the client. AGO selects available knowledge translations
+  and source titles. `null` clears the override; invalid locales are rejected
+  before changing the configuration. `createAgo` accepts the same option.
+- **Audio transcription.** Call `client.transcribeAudio(file, { signal })` to
+  turn an audio file into editable text. The method uses the SDK's existing
+  authentication and supports cancellation. It is also available through the
+  Angular service and mock client. `getConfig()` exposes `speechToTextEnabled`
+  for each permission, defaulting to `false` on older backends.
+- **Dictation in the chat composer.** Set `speechToText: true` on
+  `mountChatWidget`, or use `<ChatWidget speechToText />` in React. When the
+  tenant enables transcription, the microphone opens a volume waveform with
+  a timer and cancel/confirm controls. Confirming appends the transcript to
+  the draft for editing before sending. Recordings stop after two minutes;
+  closing the widget or changing conversations releases the microphone and
+  cancels pending transcription.
+- **Reusable React dictation controls.** Use `<ChatInput speechToText />` or
+  `<SpeechToTextButton onTranscript={setDraft} />` in a custom composer.
+  Translate the controls with `SpeechToTextLabels` and
+  `DEFAULT_SPEECH_TO_TEXT_LABELS`. The waveform respects reduced motion.
 - **WebMCP bridge (`webmcp` config).** Set `webmcp: true` and every registered
   client function is also registered as a
   [WebMCP](https://github.com/webmachinelearning/webmcp) tool on
@@ -37,6 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `getConversation()` and `getMessages()` now preserve knowledge sources,
+  including translated titles, when loading conversation history.
 - **`webmcp` and `requiresApproval` are no longer dropped by the framework
   wrappers.** React's `useAgoFunction` dropped `webmcp`, and Vue's dropped both
   `webmcp` and `requiresApproval`, so `webmcp: false` was silently ignored and

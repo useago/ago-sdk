@@ -202,6 +202,7 @@ and `showAgentName` (its layout is the hosted widget's), defaults `title` to
 | `welcomeMessage?`       | `string \| { message: string; mode?: "static" \| "streaming"; speed?; followUpReplies? }` | `"Hello! How can I help you today?"`                       |
 | `placeholder?`          | `string`                                                                                  | `"Type a message..."`                                      |
 | `allowFiles?`           | `boolean`                                                                                 | `false`                                                    |
+| `speechToText?`         | `boolean \| SpeechToTextOptions`                                                           | `false` (see [Microphone button](#microphone-button))        |
 | `allowStop?`            | `boolean`                                                                                 | `true` (see [Stop button](#stop-button))                   |
 | `autoScroll?`           | `boolean`                                                                                 | `true` (see [Scrolling](#scrolling))                       |
 | `height?`               | `string \| number`                                                                        | `500` (ignored for side panels)                            |
@@ -388,6 +389,56 @@ mountChatWidget("#ago-chat", {
   autoScroll: false, // true (the default) follows new content
 });
 ```
+
+### Microphone button
+
+```ts
+mountChatWidget(document.body, {
+  config: { baseUrl: "https://playground.api.useago.com" },
+  placement: "bubble",
+  speechToText: true,
+});
+```
+
+Use your tenant's API domain and enable speech to text in its configuration.
+The widget fetches `GET /config` and shows the microphone only when dictation
+is enabled and the browser supports recording. This works in every placement.
+
+Click the microphone, grant access, then speak. The composer becomes a waveform
+that follows the microphone volume, with an elapsed timer and cancel/confirm
+buttons. Confirm to transcribe; a spinner appears while waiting. The transcript
+is appended to the editable draft. Cancel (or Escape) keeps the existing text.
+Sending stays a separate action.
+The widget stops recordings after two minutes, releases the microphone when
+closed or destroyed, and cancels pending uploads when the visitor leaves the
+conversation.
+
+The waveform respects reduced-motion preferences. It also releases its audio
+processing resources after recording, and never plays the microphone through
+the speakers. Recording still works when waveform rendering is unavailable.
+
+Translate the controls with the same option:
+
+```ts
+speechToText: {
+  labels: {
+    start: "Dicter un message",
+    finish: "Valider",
+    cancel: "Annuler",
+    recording: "Enregistrement…",
+    requesting: "Autorisez le microphone…",
+    transcribing: "Transcription…",
+  },
+}
+```
+
+`SpeechToTextLabels` and `DEFAULT_SPEECH_TO_TEXT_LABELS` are exported from
+`@useago/sdk/widget` and `@useago/sdk/react` for translating the remaining
+error messages and time-limit announcement.
+
+Microphone access requires HTTPS or localhost. An iframe must allow microphone
+access. Your host page's origin must also be allowed by the tenant. See
+[Speech to text](core.md#speech-to-text) for the underlying SDK method.
 
 ### Stop button
 

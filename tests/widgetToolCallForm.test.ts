@@ -57,7 +57,7 @@ const ticketForm: TicketForm = {
 };
 
 const config: SdkConfig = {
-  permissions: [{ agents: [], ticketForm, fileAttachmentsEnabled: false, voiceEnabled: false }],
+  permissions: [{ agents: [], ticketForm, fileAttachmentsEnabled: false, voiceEnabled: false, speechToTextEnabled: false }],
   proactive: { enabled: false },
 };
 

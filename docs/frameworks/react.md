@@ -151,6 +151,50 @@ row works without configuring anything. Pass a function for full control
 indicator. Building your own UI? [`useAgoActivity`](#9-show-what-the-agent-is-doing-useagoactivity) is the same
 data source, with approvals and server-side tool calls included.
 
+### Dictation
+
+```tsx
+<ChatWidget speechToText />
+```
+
+This enables the complete dictation UI: microphone permission, a waveform that
+reacts to your voice, elapsed time, cancel/confirm buttons and a transcription
+spinner. The result fills the editable message draft. The component checks the
+tenant's `speechToTextEnabled` flag before showing the microphone.
+
+`<ChatInput speechToText onSend={sendMessage} />` offers the same behavior when
+you build your own message list. Both read the client from `AgoProvider`, or
+accept an explicit `client`.
+
+For an existing text field, use the standalone control:
+
+```tsx
+import { useState } from "react";
+import { SpeechToTextButton } from "@useago/sdk/react";
+
+function Composer() {
+  const [draft, setDraft] = useState("");
+  const [dictating, setDictating] = useState(false);
+  return <>
+    <textarea value={draft} disabled={dictating}
+      onChange={(event) => setDraft(event.target.value)} />
+    <SpeechToTextButton
+      onTranscript={(text) => setDraft((current) => `${current}${current ? " " : ""}${text}`)}
+      onBusyChange={setDictating}
+    />
+  </>;
+}
+```
+
+Use this inside `AgoProvider`. Pass `scopeKey={conversationId}` to cancel a
+recording or upload when switching conversations. `disabled` and unmount also
+release the microphone. The widget handles conversation changes automatically.
+
+Translate built-in controls through `speechToText={{ labels: { start: "Dicter",
+finish: "Valider", cancel: "Annuler" } }}`. The standalone button accepts
+`labels` directly. See [Microphone button](../general/widget.md#microphone-button)
+for limits, browser requirements and the shared label types.
+
 ### Stop button
 
 While the agent answers, `<ChatWidget>` turns its send button into a **Stop**
@@ -770,7 +814,7 @@ A runnable React example lives in [`examples/simple-react`](../examples/simple-r
   `useAgoAutoContinueAfterNavigation`, `useAgoActivity`, `useAgoContext`,
   `useAgoStore`, `useFormCollector`, `useFeedback`
 - **Components:** `ChatWidget`, `Message`, `ChatInput`, `Markdown`,
-  `MessageFeedback`
+  `MessageFeedback`, `SpeechToTextButton`
 - **Forms:** `createFormCollector` (+ `CreateFormCollectorOptions`, `SubmitConfig`, …)
 - **Testing:** `createMockClient`
 - **Types:** `AgoConfig`, `AgoMessage`, `Conversation`, `AgoAgent`, `AgoSource`,

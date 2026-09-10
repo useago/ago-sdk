@@ -3,6 +3,16 @@ import { AgoService } from "../src/angular/ago.service";
 import { provideAgo } from "../src/angular/provide";
 
 describe("AgoService", () => {
+  it("delegates audio transcription and cancellation to the client", async () => {
+    const service = new AgoService({ baseUrl: "https://test.useago.com" });
+    const transcribe = vi.spyOn(service.getClient(), "transcribeAudio").mockResolvedValue({ text: "Hello" });
+    const file = new File(["audio"], "recording.webm", { type: "audio/webm" });
+    const options = { signal: new AbortController().signal };
+    await expect(service.transcribeAudio(file, options)).resolves.toEqual({ text: "Hello" });
+    expect(transcribe).toHaveBeenCalledWith(file, options);
+    service.destroy();
+  });
+
   it("creates a service with config", () => {
     const service = new AgoService({ baseUrl: "https://test.useago.com" });
     expect(service).toBeDefined();

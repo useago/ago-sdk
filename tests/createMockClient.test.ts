@@ -2,6 +2,14 @@ import { describe, it, expect, vi } from "vitest";
 import { createMockClient } from "../src/testing";
 
 describe("createMockClient", () => {
+  it("returns a transcription and records the file and cancellation options", async () => {
+    const mock = createMockClient();
+    const file = new File(["audio"], "recording.webm", { type: "audio/webm" });
+    const options = { signal: new AbortController().signal };
+    await expect(mock.transcribeAudio(file, options)).resolves.toEqual({ text: "Mock transcription" });
+    expect(mock.__callsFor("transcribeAudio")[0].args).toEqual([file, options]);
+  });
+
   it("should create a client with default methods", async () => {
     const mock = createMockClient();
 
