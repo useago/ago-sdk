@@ -215,6 +215,47 @@ describe("widget dictation", () => {
     expect(handle.inputRow.querySelector<HTMLElement>(".ago-chat-input__speech")!.style.display).toBe("none");
   });
 
+  it.each([
+    ["button", false], ["toggle", false], ["Escape", false],
+    ["button", true], ["toggle", true], ["Escape", true],
+  ] as const)("closing mobile inline chat via %s cancels dictation (uploading=%s)", async (closeVia, uploading) => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: !query.includes("prefers-reduced-motion"),
+      addEventListener: vi.fn(), removeEventListener: vi.fn(),
+    }));
+    let finish!: (value: { text: string }) => void;
+    const transcribeAudio = vi.fn().mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const client = createMockClient({ overrides: {
+      getConfig: async () => ({ permissions: [{ speechToTextEnabled: true }], proactive: { enabled: false } }),
+      transcribeAudio,
+    } });
+    const host = document.createElement("div");
+    document.body.append(host);
+    const widget = mountChatWidget(host, { client, speechToText: true, autoResume: false });
+    handles.push(widget);
+    widget.open!();
+    await vi.waitFor(() => expect(host.querySelector<HTMLElement>(".ago-chat-input__speech")!.style.display).toBe("flex"));
+    const textarea = host.querySelector("textarea")!;
+    textarea.value = "Keep this";
+    const mic = host.querySelector<HTMLButtonElement>(".ago-chat-input__microphone")!;
+    await begin(mic);
+    if (uploading) mic.click();
+
+    if (closeVia === "button") host.querySelector<HTMLButtonElement>(".ago-chat-widget-mobile-bar button")!.click();
+    else if (closeVia === "toggle") widget.toggle!();
+    else host.querySelector(".ago-chat-widget")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+
+    expect(stopTrack).toHaveBeenCalledOnce();
+    expect(textarea.disabled).toBe(false);
+    expect(host.querySelector(".ago-chat-widget")!.getAttribute("role")).toBeNull();
+    if (uploading) {
+      expect(transcribeAudio.mock.calls[0][1].signal.aborted).toBe(true);
+      finish({ text: "Stale transcript" });
+      await Promise.resolve();
+    } else expect(transcribeAudio).not.toHaveBeenCalled();
+    expect(textarea.value).toBe("Keep this");
+  });
+
   it.each([true, false])("uses the tenant's enabled=%s flag", async (speechToTextEnabled) => {
     const client = createMockClient({ overrides: {
       getConfig: async () => ({ permissions: [{ speechToTextEnabled }], proactive: { enabled: false } }),

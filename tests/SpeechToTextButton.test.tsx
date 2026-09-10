@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, StrictMode } from "react";
+import { act, startTransition, StrictMode, Suspense, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { ChatInput } from "../src/react/components/ChatInput";
 import { ChatWidget } from "../src/react/components/ChatWidget";
@@ -101,6 +101,38 @@ describe("React dictation", () => {
     expect(onTranscript).not.toHaveBeenCalled();
   });
 
+  it.each(["recording", "transcribing"] as const)("re-enables a custom editor when the control unmounts while %s", async (phase) => {
+    let resolve!: (value: { text: string }) => void;
+    const mock = createMockClient({ overrides: {
+      getConfig: async () => ({ permissions: [{ speechToTextEnabled: true }], proactive: { enabled: false } }),
+      transcribeAudio: () => new Promise((done) => { resolve = done; }),
+    } });
+    const onTranscript = vi.fn();
+    function Composer({ showControl }: { showControl: boolean }) {
+      const [busy, setBusy] = useState(false);
+      return <>
+        <textarea disabled={busy} />
+        {showControl && <SpeechToTextButton client={mock} onBusyChange={setBusy} onTranscript={onTranscript} />}
+      </>;
+    }
+
+    await act(async () => root.render(<Composer showControl />));
+    await act(async () => mic().click());
+    if (phase === "transcribing") await act(async () => mic().click());
+    expect(container.querySelector("textarea")!.disabled).toBe(true);
+
+    await act(async () => root.render(<Composer showControl={false} />));
+
+    expect(container.querySelector("textarea")!.disabled).toBe(false);
+    expect(stopTrack).toHaveBeenCalledOnce();
+    if (phase === "transcribing") {
+      const options = mock.__callsFor("transcribeAudio")[0].args[1] as { signal: AbortSignal };
+      expect(options.signal.aborted).toBe(true);
+      await act(async () => resolve({ text: "Discarded recording" }));
+    }
+    expect(onTranscript).not.toHaveBeenCalled();
+  });
+
   it("ignores a late transcription after changing conversations", async () => {
     let resolve!: (value: { text: string }) => void;
     const mock = createMockClient({ overrides: {
@@ -116,6 +148,41 @@ describe("React dictation", () => {
     expect(onTranscript).not.toHaveBeenCalled();
     const options = mock.__callsFor("transcribeAudio")[0].args[1] as { signal: AbortSignal };
     expect(options.signal.aborted).toBe(true);
+  });
+
+  it("keeps transcripts in the committed conversation while a switch is suspended", async () => {
+    let resolve!: (value: { text: string }) => void;
+    const mock = createMockClient({ overrides: {
+      getConfig: async () => ({ permissions: [{ speechToTextEnabled: true }], proactive: { enabled: false } }),
+      transcribeAudio: () => new Promise((done) => { resolve = done; }),
+    } });
+    const onTranscript = vi.fn();
+    const pendingConversation = new Promise<void>(() => {});
+    let switchConversation!: (scope: string) => void;
+    function Conversation({ scope }: { scope: string }) {
+      if (scope === "two") throw pendingConversation;
+      return <p data-ago-conversation={scope} />;
+    }
+    function Composer() {
+      const [scope, setScope] = useState("one");
+      switchConversation = setScope;
+      return <Suspense fallback={<p>Loading conversation</p>}>
+        <SpeechToTextButton client={mock} scopeKey={scope}
+          onTranscript={(text) => onTranscript(scope, text)} />
+        <Conversation scope={scope} />
+      </Suspense>;
+    }
+
+    await act(async () => root.render(<Composer />));
+    await act(async () => mic().click());
+    await act(async () => mic().click());
+    await act(async () => startTransition(() => switchConversation("two")));
+    expect(container.querySelector('[data-ago-conversation="one"]')).not.toBeNull();
+    expect(container.textContent).not.toContain("Loading conversation");
+
+    await act(async () => resolve({ text: "Original conversation" }));
+
+    expect(onTranscript).toHaveBeenCalledExactlyOnceWith("one", "Original conversation");
   });
 
   it("hides the control for disabled tenants", async () => {

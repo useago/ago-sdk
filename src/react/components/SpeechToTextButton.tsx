@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { AgoClient } from "../../client/AgoClient";
 import { createSpeechToText } from "../../widget/speechToText";
 import type { SpeechToTextLabels } from "../../widget/speechToText";
 import { MUTED_TEXT_COLOR } from "../../widget/styles";
 import { useOptionalAgoClient } from "../context/AgoContext";
+
+const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 export interface SpeechToTextButtonProps {
   /** Uses AgoProvider's client when omitted. */
@@ -25,12 +27,14 @@ export function SpeechToTextButton(props: SpeechToTextButtonProps) {
   const host = useRef<HTMLDivElement>(null);
   const control = useRef<ReturnType<typeof createSpeechToText>>();
   const callbacks = useRef(props);
-  callbacks.current = props;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [enabled, setEnabled] = useState(false);
 
-  useEffect(() => {
+  // A suspended render must not redirect the current conversation's transcript.
+  useIsomorphicLayoutEffect(() => { callbacks.current = props; });
+
+  useIsomorphicLayoutEffect(() => {
     setEnabled(false);
     setBusy(false);
     callbacks.current.onBusyChange?.(false);
@@ -61,14 +65,16 @@ export function SpeechToTextButton(props: SpeechToTextButtonProps) {
     return () => {
       active = false;
       mounted.destroy();
+      // The owner may keep its editor mounted after removing this control.
+      callbacks.current.onBusyChange?.(false);
       mounted.el.remove();
       control.current = undefined;
     };
   }, [client]);
 
-  useEffect(() => { control.current?.setDisabled(!!props.disabled); }, [props.disabled]);
-  useEffect(() => { control.current?.cancel(); }, [props.scopeKey, client]);
-  useEffect(() => { control.current?.setLabels(props.labels); }, [props.labels]);
+  useIsomorphicLayoutEffect(() => { control.current?.setDisabled(!!props.disabled); }, [props.disabled]);
+  useIsomorphicLayoutEffect(() => { control.current?.cancel(); }, [props.scopeKey, client]);
+  useIsomorphicLayoutEffect(() => { control.current?.setLabels(props.labels); }, [props.labels]);
 
   return (
     <div className={`ago-speech-to-text ${props.className ?? ""}`}

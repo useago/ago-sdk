@@ -2749,6 +2749,7 @@ export function mountChatWidget(
   }
   function collapseInline(): Promise<void> {
     if (!inlineExpanded) return Promise.resolve();
+    cancelRecording();
     inlineExpanded = false;
     removeViewportListeners();
     // Released synchronously, mirroring expandInline.
