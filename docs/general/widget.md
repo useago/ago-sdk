@@ -203,6 +203,7 @@ and `showAgentName` (its layout is the hosted widget's), defaults `title` to
 | `placeholder?`          | `string`                                                                                  | `"Type a message..."`                                      |
 | `allowFiles?`           | `boolean`                                                                                 | `false`                                                    |
 | `allowStop?`            | `boolean`                                                                                 | `true` (see [Stop button](#stop-button))                   |
+| `autoScroll?`           | `boolean`                                                                                 | `true` (see [Scrolling](#scrolling))                       |
 | `height?`               | `string \| number`                                                                        | `500` (ignored for side panels)                            |
 | `placement?`            | `"inline" \| "left" \| "right" \| "bubble"`                                               | `"inline"` (see [Floating bubble](#floating-bubble-placement-bubble)) |
 | `width?`                | `string \| number`                                                                        | `400` (side panels), `550` (bubble)                        |
@@ -367,6 +368,26 @@ other tool call type; a `confirmation_input` is yours to handle with
 `confirmToolCall` / `rejectToolCall` (see [Tool calls](events-and-streaming.md#tool-calls)).
 The client-level calls behind the form are
 [`getConfig`, `createTicket`, and `submitToolCallForm`](core.md#6-tool-calls-feedback-and-lifecycle).
+
+### Scrolling
+
+By default, the panel follows new messages and streaming replies while the
+reader is near the bottom. Scrolling up pauses this follow behavior; sending a
+message or clicking the jump-to-latest button resumes it.
+
+Set `autoScroll: false` to let the reader control scrolling during replies.
+Sending a message scrolls to the end once so the reader sees their message.
+Streaming chunks and completed answers then keep that position, even if the
+reader was at the bottom. The jump button also moves to the latest message
+when clicked, without enabling automatic following for subsequent chunks.
+This option works with inline, side-panel and bubble placements.
+
+```ts
+mountChatWidget("#ago-chat", {
+  config: { baseUrl: "https://playground.api.useago.com" },
+  autoScroll: false, // true (the default) follows new content
+});
+```
 
 ### Stop button
 

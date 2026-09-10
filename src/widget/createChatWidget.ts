@@ -231,6 +231,7 @@ export function mountChatWidget(
     welcomeMessage = "Hello! How can I help you today?",
     allowFiles = false,
     allowStop = true,
+    autoScroll: autoScrollEnabled = true,
     height = 500,
     defaultOpen = false,
     logoUrl,
@@ -485,6 +486,9 @@ export function mountChatWidget(
   const messagesEl = div({
     flex: "1",
     overflow: "auto",
+    // Manual mode must also opt out of the browser moving the viewport as a
+    // streamed bubble grows or is replaced.
+    overflowAnchor: autoScrollEnabled ? "auto" : "none",
     // Keep overscroll at the top/bottom of the list from chaining into the page
     // behind the sheet (rubber-banding) on iOS/touch. Layers atop the scroll lock.
     overscrollBehavior: "contain",
@@ -518,7 +522,8 @@ export function mountChatWidget(
   // ── Follow-the-bottom policy ───────────────────────────────────────
   // The pane follows new content only while the reader is already at the bottom.
   // Scroll away to re-read something and the stream stops yanking you back; a
-  // button appears to return. Sending a message always re-attaches.
+  // button appears to return. Sending a message re-attaches in automatic mode;
+  // manual mode only moves in response to scrolling, sending or an explicit jump.
   const SCROLL_STICK_PX = 48;
   let stickToBottom = true;
   // Re-rendering mutates scrollTop, which fires `scroll`. Those are OUR events,
@@ -593,31 +598,45 @@ export function mountChatWidget(
       pointerEvents: "none",
     });
   }
-  jumpBtn.addEventListener("click", () => {
+  function jumpToLatest(): void {
     stickToBottom = true;
     withoutScrollTracking(() => {
       messagesEl.scrollTop = messagesEl.scrollHeight;
     });
     syncJumpBtn();
-  });
+  }
+  jumpBtn.addEventListener("click", jumpToLatest);
 
   function syncJumpBtn(): void {
+    const hide = autoScrollEnabled ? stickToBottom : atBottom();
     if (isBubble) {
-      jumpBtn.style.opacity = stickToBottom ? "0" : "1";
-      jumpBtn.style.pointerEvents = stickToBottom ? "none" : "auto";
+      jumpBtn.style.opacity = hide ? "0" : "1";
+      jumpBtn.style.pointerEvents = hide ? "none" : "auto";
       return;
     }
-    jumpBtn.style.display = stickToBottom ? "none" : "flex";
+    jumpBtn.style.display = hide ? "none" : "flex";
   }
 
   /** Follow the bottom if the reader hasn't deliberately scrolled away. */
   function autoScroll(): void {
-    if (stickToBottom) {
+    if (autoScrollEnabled && stickToBottom) {
       withoutScrollTracking(() => {
         messagesEl.scrollTop = messagesEl.scrollHeight;
       });
     }
     syncJumpBtn();
+  }
+
+  /** Rebuilding the list can clamp scrollTop even when following is disabled. */
+  function updateMessageList(mutate: () => void): void {
+    withoutScrollTracking(() => {
+      const scrollTop = messagesEl.scrollTop;
+      mutate();
+      if (!autoScrollEnabled || !stickToBottom) {
+        messagesEl.scrollTop = scrollTop;
+      }
+    });
+    autoScroll();
   }
 
   messagesEl.addEventListener("scroll", () => {
@@ -1384,9 +1403,8 @@ export function mountChatWidget(
    *
    * Emptying the pane additionally collapses `scrollHeight` and clamps
    * `scrollTop` to 0, which would latch the follow-the-bottom check off on the
-   * first token. That one is already neutralised for both paths by
-   * `withoutScrollTracking`, so it is a reason to keep that guard rather than a
-   * reason this fast path exists.
+   * first token. `updateMessageList` preserves the reader's position and guards
+   * scroll tracking for both render paths.
    *
    * Returns false when the thread shape means the fast path can't apply, so the
    * caller falls back to a full render.
@@ -1404,16 +1422,14 @@ export function mountChatWidget(
     const active = document.activeElement;
     const keepFocus =
       active instanceof HTMLElement && current.contains(active) ? active : null;
-    withoutScrollTracking(() => listEl.replaceChild(next, current));
+    updateMessageList(() => listEl.replaceChild(next, current));
     if (keepFocus && next.contains(keepFocus)) keepFocus.focus({ preventScroll: true });
     messageNodes[index] = next;
-    autoScroll();
     return true;
   }
 
   function render(): void {
-    withoutScrollTracking(renderAll);
-    autoScroll();
+    updateMessageList(renderAll);
     // Block the input only while the agent is generating the main answer. Once the
     // answer is done (status DONE) it re-enables, even though the stream stays open
     // while follow-up replies are still being generated.
@@ -1717,8 +1733,7 @@ export function mountChatWidget(
     onMessageSent?.(trimmed);
     isLoading = true;
     errorMessage = null;
-    // Sending is an explicit "show me the latest" gesture: re-attach the pane to
-    // the bottom even if the reader had scrolled up to re-read something.
+    // In automatic mode, sending re-attaches even if the reader scrolled away.
     stickToBottom = true;
 
     // If the streamed greeting is still typing, stop it and finalize what's there
@@ -1754,6 +1769,8 @@ export function mountChatWidget(
       createdAt: new Date(),
     });
     render();
+    // Reveal the sent message once, while leaving streamed replies stationary.
+    if (!autoScrollEnabled) jumpToLatest();
 
     try {
       const response = await client.sendMessage(trimmed, {
