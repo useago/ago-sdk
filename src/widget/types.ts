@@ -313,6 +313,14 @@ export interface MountChatWidgetOptions {
    * spinner instead.
    */
   allowStop?: boolean;
+  /**
+   * Follow new messages and streamed replies while the reader is at the bottom.
+   * Defaults to `true`; sending a message or clicking the jump button resumes
+   * following. Set `false` to keep the scroll position during replies. Sending
+   * a message or clicking the jump button still jumps to the end once, without
+   * enabling follow for subsequent chunks.
+   */
+  autoScroll?: boolean;
   /** Widget height (number → px). Ignored when `placement` is `"left"`/`"right"`
    * (a side panel is always full-height). */
   height?: string | number;

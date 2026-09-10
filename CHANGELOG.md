@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Already set on the built-in `navigateToPage`, so `registerNavigationFunction`
   and `useAgoNavigation` need no change. Set it yourself on a custom function
   whose handler navigates.
+- **`autoScroll: false` on the chat widget.** `mountChatWidget` follows new
+  messages and streamed replies while the reader is at the bottom. Pass
+  `autoScroll: false` and the reader keeps their position during a reply:
+  sending a message or clicking the jump-to-latest button still moves to the end
+  once, and nothing follows after that. Automatic following stays the default.
 
 ### Fixed
 
