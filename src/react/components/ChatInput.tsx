@@ -1,4 +1,7 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import type { AgoClient } from "../../client/AgoClient";
+import type { SpeechToTextOptions } from "../../widget/speechToText";
+import { SpeechToTextButton } from "./SpeechToTextButton";
 
 export interface ChatInputProps {
   /**
@@ -19,6 +22,12 @@ export interface ChatInputProps {
   disabled?: boolean;
   placeholder?: string;
   allowFiles?: boolean;
+  /** Microphone, live waveform and draft transcription. Uses the tenant flag. */
+  speechToText?: boolean | SpeechToTextOptions;
+  /** For dictation; otherwise uses AgoProvider's client. */
+  client?: AgoClient;
+  /** Cancels dictation when the conversation or page changes. */
+  scopeKey?: string;
   className?: string;
 }
 
@@ -31,12 +40,18 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   disabled = false,
   placeholder = "Type a message...",
   allowFiles = false,
+  speechToText = false,
+  client,
+  scopeKey,
   className = "",
 }) => {
   const [message, setMessage] = useState("");
   const [files, setFiles] = useState<File[]>([]);
+  const [dictating, setDictating] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const speechEnabled = !!speechToText;
+  useEffect(() => { if (!speechEnabled) setDictating(false); }, [speechEnabled]);
 
   // Grow the textarea to fit its content, capped at 4 lines, then scroll.
   // The +2 keeps the border-box height matching the natural single-line height
@@ -50,9 +65,19 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     el.style.overflowY = el.scrollHeight + 2 > max ? "auto" : "hidden";
   }, []);
 
+  const wasDictating = useRef(false);
+  useEffect(() => {
+    if (wasDictating.current && !dictating && !disabled) {
+      autoResize();
+      textareaRef.current?.focus();
+    }
+    wasDictating.current = dictating;
+  }, [dictating, disabled, autoResize]);
+
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
+      if (disabled || dictating) return;
       if (!message.trim() && files.length === 0) return;
       const sentText = message.trim();
       const sentFiles = files.length > 0 ? files : undefined;
@@ -71,7 +96,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         requestAnimationFrame(autoResize);
       }
     },
-    [message, files, onSend, autoResize],
+    [message, files, onSend, autoResize, disabled, dictating],
   );
 
   const handleKeyDown = useCallback(
@@ -97,6 +122,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   }, []);
 
   const canSend = message.trim() || files.length > 0;
+  const onTranscript = (text: string) => {
+    setMessage((current) => `${current}${current && !/\s$/.test(current) ? " " : ""}${text}`);
+  };
 
   return (
     <form
@@ -112,7 +140,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
       }}
     >
       {/* File preview */}
-      {files.length > 0 && (
+      {files.length > 0 && !dictating && (
         <div
           className="ago-chat-input__files"
           style={{
@@ -183,7 +211,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           alignItems: "flex-end",
         }}
       >
-        {allowFiles && (
+        {allowFiles && !dictating && (
           <>
             <button
               type="button"
@@ -232,9 +260,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           placeholder={placeholder}
           // A placeholder is not an accessible name; label the field explicitly.
           aria-label={placeholder}
-          disabled={disabled}
+          disabled={disabled || dictating}
           rows={1}
           style={{
+            display: dictating ? "none" : undefined,
             flex: 1,
             padding: "10px 14px",
             border: "1px solid #dee3e8",
@@ -260,10 +289,19 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           }}
         />
 
+        {speechToText && <SpeechToTextButton
+          client={client}
+          disabled={disabled}
+          scopeKey={scopeKey}
+          labels={typeof speechToText === "object" ? speechToText.labels : undefined}
+          onTranscript={onTranscript}
+          onBusyChange={setDictating}
+        />}
+
         {/* While the agent answers, the same slot becomes Stop — it has to stay
             enabled, which is why it's a separate button rather than more
             ternaries on the send one. */}
-        {disabled && onStop ? (
+        {!dictating && (disabled && onStop ? (
           <button
             type="button"
             onClick={onStop}
@@ -304,7 +342,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           >
             Send
           </button>
-        )}
+        ))}
       </div>
     </form>
   );

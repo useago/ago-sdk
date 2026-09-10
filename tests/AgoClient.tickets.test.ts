@@ -13,6 +13,19 @@ afterEach(() => {
 });
 
 describe("getConfig", () => {
+  it("maps speech-to-text availability separately from voice and defaults to disabled", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ permissions: [
+      { speech_to_text_enabled: true, voice_enabled: false },
+      { speech_to_text_enabled: false, voice_enabled: true },
+      {},
+    ] })));
+    const client = new AgoClient({ baseUrl: "https://x.example.com" });
+    const { permissions } = await client.getConfig();
+    expect(permissions.map((p) => p.speechToTextEnabled)).toEqual([true, false, false]);
+    expect(permissions.map((p) => p.voiceEnabled)).toEqual([false, true, false]);
+    client.destroy();
+  });
+
   it("maps the ticket form onto camelCase", async () => {
     vi.stubGlobal(
       "fetch",

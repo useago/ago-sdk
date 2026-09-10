@@ -21,6 +21,7 @@ import type {
   FeedbackReason,
 } from "../client/types";
 import type { FeedbackLabels } from "./renderFeedback";
+import type { SpeechToTextOptions } from "./speechToText";
 import type { ToolCallFormLabels } from "./toolCallLabels";
 import type {
   CreateFormCollectorOptions,
@@ -307,6 +308,8 @@ export interface MountChatWidgetOptions {
   placeholder?: string;
   /** Enable file attachments. */
   allowFiles?: boolean;
+  /** Microphone, live waveform and draft transcription. Checks the tenant flag. Default false. */
+  speechToText?: boolean | SpeechToTextOptions;
   /**
    * While the agent is answering, turn the send button into a Stop button that
    * interrupts the turn. Default `true`; set `false` to keep showing a disabled

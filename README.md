@@ -323,6 +323,45 @@ React and Vue have a `useFeedback()` hook/composable; React also exports the
 `<MessageFeedback messageId={...} />` row for a custom message list. Details in
 [Feedback](docs/general/widget.md#feedback).
 
+## Transcribe audio into a draft
+
+```ts
+const { text } = await ago.transcribeAudio(audioFile);
+messageInput.value = text; // The user can edit it before sending.
+```
+
+Pass an audio `File` (up to 25 MB). Check `speechToTextEnabled` in the
+permissions returned by `ago.getConfig()` before showing a recording control.
+Supports cancellation with `{ signal }` and works through the client in every
+framework, including `AgoService.transcribeAudio` in Angular.
+See [Speech to text](docs/general/core.md#speech-to-text) for recording blobs,
+supported formats and error handling.
+
+For the complete dictation UI in the floating chat widget:
+
+```ts
+mountChatWidget(document.body, {
+  config: { baseUrl: "https://playground.api.useago.com" },
+  placement: "bubble",
+  speechToText: true,
+});
+```
+
+Use your tenant's API domain with speech to text enabled. The microphone appears
+when the tenant allows it and the browser supports recording. While recording,
+the editor becomes a waveform that follows the microphone volume, with a timer
+and cancel/confirm controls. A spinner appears during transcription; the text
+then returns to the editable draft.
+
+The same UI ships in React:
+
+```tsx
+<ChatWidget speechToText />
+```
+
+For a custom React composer, use `SpeechToTextButton` with an `onTranscript`
+callback. See [Dictation](docs/frameworks/react.md#dictation) for examples.
+
 ## Let the agent see what broke
 
 "The button does nothing" is easier to answer with the exception in hand. Turn

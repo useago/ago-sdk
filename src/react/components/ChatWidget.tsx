@@ -26,6 +26,7 @@ import { useSheet } from "../hooks/useSheet";
 import { ActivityLine } from "./ActivityLine";
 import { renderInlineMarkdown } from "./inlineMarkdown";
 import { ChatInput } from "./ChatInput";
+import type { SpeechToTextOptions } from "../../widget/speechToText";
 import { Message, StreamingDots } from "./Message";
 import { MessageFeedback, type MessageFeedbackProps } from "./MessageFeedback";
 
@@ -42,6 +43,8 @@ export interface ChatWidgetProps {
   placeholder?: string;
   /** Enable file attachments */
   allowFiles?: boolean;
+  /** Microphone, live waveform and draft transcription. Checks the tenant flag. */
+  speechToText?: boolean | SpeechToTextOptions;
   /**
    * While the agent is answering, turn the send button into a Stop button that
    * interrupts the turn. Defaults to `true`.
@@ -154,6 +157,7 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
   welcomeMessage = "Hello! How can I help you today?",
   placeholder = "Type a message...",
   allowFiles = false,
+  speechToText = false,
   allowStop = true,
   height = 500,
   logoUrl,
@@ -809,6 +813,9 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
         disabled={isAnswering}
         placeholder={placeholder}
         allowFiles={allowFiles}
+        speechToText={speechToText}
+        client={resolvedClient ?? undefined}
+        scopeKey={`${initialConversationId ?? messages[0]?.conversationId ?? ""}:${sheet.state}`}
       />
     </div>
   );

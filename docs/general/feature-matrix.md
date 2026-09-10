@@ -11,6 +11,8 @@ idiomatic binding (hook / composable / service / component) is also provided.
 | Send message (streaming) | ✅ | ✅ `useChat`/`useMessages` | ✅ `useChat`/`useMessages` | ✅ `AgoService.sendMessage` |
 | Stop generation | ✅ `client.stop()` | ✅ `stop` from `useChat`/`useMessages` | ✅ `stop` from `useChat`/`useMessages` | ✅ `AgoService.stop` |
 | File attachments | ✅ | ✅ | ✅ | ✅ |
+| Audio transcription | ✅ `transcribeAudio` | ➖ core API | ➖ core API | ✅ `AgoService.transcribeAudio` |
+| Dictation UI with live waveform | ✅ widget `speechToText: true` | ✅ `ChatWidget`, `ChatInput`, `SpeechToTextButton` | ➖ vanilla widget | ➖ vanilla widget |
 | List / load conversations | ✅ | ✅ `useConversation` | ✅ `useConversation` | ✅ `AgoService` |
 | All-in-one chat state | — | ✅ `useChat` | ✅ `useChat` | ➖ compose manually |
 | Pre-built `<ChatWidget>` UI | — | ✅ | ➖ see example | — |

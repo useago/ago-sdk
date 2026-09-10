@@ -12,6 +12,8 @@ export type { AgoAutoContinueOptions } from "../client/autoContinue";
 export type {
   AgoConfig,
   AgoMessage,
+  AudioTranscription,
+  TranscribeAudioOptions,
   Conversation,
   FeedbackDetails,
   FeedbackRating,

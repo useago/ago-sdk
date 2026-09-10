@@ -16,6 +16,7 @@ export type {
   AgoEventName,
   AgoMessage,
   AgoSource,
+  AudioTranscription,
   ClientFunction,
   ClientFunctionInvocation,
   ClientFunctionsMode,
@@ -30,11 +31,14 @@ export type {
   MessageStatus,
   PaginatedResult,
   SendMessageOptions,
+  SdkConfig,
+  SdkPermissionConfig,
   SSEChunkData,
   StopMessageResult,
   SubmitToolCallResult,
   ToolCallData,
   ToolCallType,
+  TranscribeAudioOptions,
 } from "./client/types";
 
 // The four feedback reasons, for building a "what went wrong?" picker

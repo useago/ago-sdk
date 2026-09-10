@@ -23,6 +23,8 @@ export type { FeedbackLabels } from "./renderFeedback";
 // The bubble widget's chrome strings and the ticket form's strings, for the
 // same reason.
 export { DEFAULT_WIDGET_LABELS } from "./labels";
+export { DEFAULT_SPEECH_TO_TEXT_LABELS } from "./speechToText";
+export type { SpeechToTextLabels, SpeechToTextOptions } from "./speechToText";
 export { DEFAULT_TOOL_CALL_FORM_LABELS } from "./toolCallLabels";
 export type { ToolCallFormLabels } from "./toolCallLabels";
 

@@ -532,6 +532,7 @@ describe("placement: bubble (loadHomeConfig)", () => {
             agents: [],
             fileAttachmentsEnabled: false,
             voiceEnabled: false,
+            speechToTextEnabled: false,
             ...(home ? { homePage: home } : {}),
           },
         ],

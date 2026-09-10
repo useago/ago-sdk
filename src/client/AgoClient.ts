@@ -53,6 +53,7 @@ import type {
   AgoEventHandler,
   AgoEventName,
   AgoMessage,
+  AudioTranscription,
   ClientFunctionInvocation,
   ClientFunctionsMode,
   Conversation,
@@ -68,6 +69,7 @@ import type {
   SubmitToolCallResult,
   TicketForm,
   ToolCallData,
+  TranscribeAudioOptions,
 } from "./types";
 import { validateConfig } from "./validateConfig";
 
@@ -141,6 +143,7 @@ interface RawSdkConfig {
     home_page?: RawHomePage | null;
     file_attachments_enabled?: boolean;
     voice_enabled?: boolean;
+    speech_to_text_enabled?: boolean;
   }>;
   proactive?: { enabled?: boolean };
 }
@@ -1232,14 +1235,36 @@ export class AgoClient {
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // Config and tickets
+  // Audio, config and tickets
   // ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Transcribe an audio file into editable text (`POST /api/sdk/v1/audio/transcriptions`).
+   * Requires speech to text to be enabled for the tenant. Supports FLAC, MP3,
+   * MP4, MPEG, MPGA, M4A, OGG, WAV and WebM files up to 25 MB.
+   * The filename must include the matching extension. For a MediaRecorder blob,
+   * wrap it in a File with the recording's extension and MIME type.
+   * Show the returned text as a draft; call `sendMessage` when the user sends it.
+   */
+  async transcribeAudio(
+    file: File,
+    options?: TranscribeAudioOptions
+  ): Promise<AudioTranscription> {
+    const formData = new FormData();
+    formData.append("file", file, file.name);
+    const response = await this.httpClient.postFormData(
+      "/api/sdk/v1/audio/transcriptions",
+      formData,
+      options
+    );
+    return response.json();
+  }
 
   /**
    * The tenant's SDK configuration (`GET /api/sdk/v1/config`): per-permission
    * agents, the ticket form the agent's `ago_ticketing` tool opens, and the
-   * file-attachment flag. The vanilla widget fetches it once, when a ticket
-   * form first appears in a conversation.
+   * file-attachment and speech-to-text flags. The vanilla widget fetches it
+   * once, when a ticket form first appears in a conversation.
    */
   async getConfig(): Promise<SdkConfig> {
     const raw = await this.httpClient.get<RawSdkConfig>("/api/sdk/v1/config");
@@ -1258,6 +1283,7 @@ export class AgoClient {
         homePage: p.home_page ? AgoClient.mapHomePage(p.home_page) : undefined,
         fileAttachmentsEnabled: !!p.file_attachments_enabled,
         voiceEnabled: !!p.voice_enabled,
+        speechToTextEnabled: !!p.speech_to_text_enabled,
       })),
       proactive: { enabled: !!raw.proactive?.enabled },
     };

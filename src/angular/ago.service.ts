@@ -4,6 +4,7 @@ import type { AgoAutoContinueOptions } from "../client/autoContinue";
 import type {
   AgoConfig,
   AgoMessage,
+  AudioTranscription,
   Conversation,
   AgoClientEvents,
   AgoEventName,
@@ -12,6 +13,7 @@ import type {
   SendMessageOptions,
   StopMessageResult,
   SubmitToolCallResult,
+  TranscribeAudioOptions,
 } from "../client/types";
 import type {
   AgoPageStateOptions,
@@ -92,6 +94,11 @@ export class AgoService {
   /** Send a message and get a streaming response */
   sendMessage(content: string, options?: SendMessageOptions): Promise<AgoMessage> {
     return this.client.sendMessage(content, options);
+  }
+
+  /** Transcribe an audio file into an editable draft. */
+  transcribeAudio(file: File, options?: TranscribeAudioOptions): Promise<AudioTranscription> {
+    return this.client.transcribeAudio(file, options);
   }
 
   /**

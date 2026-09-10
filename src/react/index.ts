@@ -29,6 +29,10 @@ export type { MarkdownProps } from "./components/Markdown";
 
 export { ChatInput } from "./components/ChatInput";
 export type { ChatInputProps } from "./components/ChatInput";
+export { SpeechToTextButton } from "./components/SpeechToTextButton";
+export type { SpeechToTextButtonProps } from "./components/SpeechToTextButton";
+export { DEFAULT_SPEECH_TO_TEXT_LABELS } from "../widget/speechToText";
+export type { SpeechToTextLabels, SpeechToTextOptions } from "../widget/speechToText";
 
 export { AgoNudge } from "./components/AgoNudge";
 export type { AgoNudgeProps } from "./components/AgoNudge";
