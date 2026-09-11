@@ -217,10 +217,13 @@ describe("useAgoPageState", () => {
 
     // At mount the enum is empty, so any value should be rejected.
     const fn0 = client.getRegisteredFunctions().find((f) => f.name === "setPageState")!;
-    expect(fn0.parameters.properties["model"].enum).toEqual([]);
+    expect(fn0.parameters.properties["model"]).not.toHaveProperty("enum");
 
     const r0 = await execute(client, "setPageState", { model: "gpt-4" });
-    expect(r0).toMatchObject({ success: false, rejected: { model: expect.stringContaining("not an allowed value") } });
+    expect(r0).toMatchObject({
+      success: false,
+      rejected: { model: "No values are currently allowed." },
+    });
 
     // Simulate async load completing — enum populated.
     await act(async () => { triggerRerender(); });
