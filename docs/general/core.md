@@ -294,6 +294,10 @@ For a large route table, pass `{ catalogue: "onDemand" }` as a third argument to
 keep the descriptions out of every message. See
 [functions-and-context.md](./functions-and-context.md#large-route-tables).
 
+After navigation, the agent receives the destination page's registered
+functions and current state so it can finish the user's remaining requested
+actions.
+
 Page state is the mirror: let the agent change the current page's state
 (filters, sort, view mode…) and read it back.
 
