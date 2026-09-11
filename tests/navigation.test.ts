@@ -36,6 +36,18 @@ describe("registerNavigationFunction", () => {
     });
   });
 
+  it("tells the agent to use destination functions after navigation", () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    client.registerNavigationFunction(vi.fn(), ROUTES);
+
+    const description = schemaOf(client, "navigateToPage")!.description;
+    expect(description).toBe(
+      "Navigate the user to a page in the application. " +
+        "Available functions depend on the current page. After navigation, you will receive the destination page’s available functions and current state. Use them to complete any remaining actions in the user’s request. " +
+        'Available pages:\n- "dashboard": Home dashboard\n- "users": User list\n- "userDetail" (requires "id"): A single user\n- "settings": App settings',
+    );
+  });
+
   it("exposes each route param as an explicit top-level string argument", () => {
     const client = new AgoClient({ baseUrl: "https://example.test" });
     client.registerNavigationFunction(vi.fn(), ROUTES);

@@ -149,6 +149,10 @@ This registers a `navigateToPage` function whose `page` parameter is an enum of
 your route names. React/Vue offer `useAgoNavigation(navigate, routes)` with
 lifecycle cleanup.
 
+Functions and page state can change with the route. After navigation, the agent
+receives the destination page's registered functions and current state so it can
+finish the user's remaining requested actions.
+
 Paths can contain `:param` placeholders. Each placeholder becomes an explicit
 top-level argument of `navigateToPage` (`{ page: "orderDetail", id: "42" }`
 navigates to `/orders/42`), so one route covers every detail page of an entity.

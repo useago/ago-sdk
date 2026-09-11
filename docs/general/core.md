@@ -286,6 +286,10 @@ context on every message, so the agent knows which page the user is on. It does
 not include the document title. The separate opt-in `enableAutoPageContext()`
 feature below still includes the URL and document title.
 
+After navigation, the agent receives the destination page's registered
+functions and current state so it can finish the user's remaining requested
+actions.
+
 Page state is the mirror: let the agent change the current page's state
 (filters, sort, view mode…) and read it back.
 

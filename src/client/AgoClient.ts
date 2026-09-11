@@ -1885,7 +1885,7 @@ export class AgoClient {
         return { success: true, navigatedTo: path };
       },
       {
-        description: `Navigate the user to a page in the application. Available pages:\n${routeDescriptions}`,
+        description: `Navigate the user to a page in the application. Available functions depend on the current page. After navigation, you will receive the destination page’s available functions and current state. Use them to complete any remaining actions in the user’s request. Available pages:\n${routeDescriptions}`,
         parameters: {
           type: "object",
           properties,
