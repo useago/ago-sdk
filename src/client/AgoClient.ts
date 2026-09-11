@@ -1901,13 +1901,10 @@ export class AgoClient {
     this.addDynamicContext("current-page", () => {
       if (typeof window === "undefined" || !window.location) return null;
       const url = window.location.href;
-      const title =
-        typeof document !== "undefined" ? document.title : undefined;
       const match = matchRoute(window.location.pathname, routes);
 
       const data: Record<string, unknown> = { url };
       if (match) data.page = match.name;
-      if (title) data.title = title;
 
       return {
         name: "Current page",

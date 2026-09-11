@@ -281,8 +281,10 @@ Paths can contain `:param` placeholders. Each placeholder becomes a top-level
 argument of `navigateToPage`, so `{ page: "orderDetail", id: "42" }` navigates
 to `/orders/42`. One route covers every detail page of an entity.
 
-This also reports the current page (by route name, plus URL and title) as context
-on every message, so the agent knows which page the user is on.
+This also reports the current page (by route name when matched, plus URL) as
+context on every message, so the agent knows which page the user is on. It does
+not include the document title. The separate opt-in `enableAutoPageContext()`
+feature below still includes the URL and document title.
 
 Page state is the mirror: let the agent change the current page's state
 (filters, sort, view mode…) and read it back.
