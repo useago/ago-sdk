@@ -51,6 +51,117 @@ describe("registerPageStateFunction", () => {
     });
   });
 
+  it("omits empty scalar and item enums from the advertised schema without mutating controls", () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const controls: AgoStateControl[] = [
+      {
+        name: "model",
+        description: "Custom model.",
+        schema: { type: "string", enum: [] },
+        set: () => {},
+      },
+      {
+        name: "tags",
+        description: "Selected tags.",
+        schema: { type: "array", items: { type: "string", enum: [] } },
+        set: () => {},
+      },
+    ];
+
+    client.registerPageStateFunction(controls);
+
+    const props = schemaOf(client, "setPageState")!.parameters.properties;
+    expect(props.model).not.toHaveProperty("enum");
+    expect(props.tags.items).not.toHaveProperty("enum");
+    expect(controls[0].schema.enum).toEqual([]);
+    expect(controls[1].schema.items?.enum).toEqual([]);
+  });
+
+  it("keeps empty enums restrictive at execution while applying independent controls", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const setModel = vi.fn();
+    const setTags = vi.fn();
+    const setName = vi.fn();
+    client.registerPageStateFunction([
+      {
+        name: "model",
+        description: "Custom model.",
+        schema: { type: "string", enum: [] },
+        set: setModel,
+      },
+      {
+        name: "tags",
+        description: "Selected tags.",
+        schema: { type: "array", items: { type: "string", enum: [] } },
+        set: setTags,
+      },
+      {
+        name: "name",
+        description: "Agent name.",
+        schema: { type: "string" },
+        set: setName,
+      },
+    ]);
+
+    const result = await execute(client, "setPageState", {
+      model: "unavailable",
+      tags: ["unavailable"],
+      name: "Support bot",
+    });
+
+    expect(setModel).not.toHaveBeenCalled();
+    expect(setTags).not.toHaveBeenCalled();
+    expect(setName).toHaveBeenCalledWith("Support bot");
+    expect(result).toEqual({
+      success: false,
+      applied: ["name"],
+      unchanged: [],
+      rejected: {
+        model: "No values are currently allowed.",
+        tags: "Array item No values are currently allowed.",
+      },
+    });
+  });
+
+  it("allows an empty array when its item enum is empty", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const setTags = vi.fn();
+    client.registerPageStateFunction([
+      {
+        name: "tags",
+        description: "Selected tags.",
+        schema: { type: "array", items: { type: "string", enum: [] } },
+        set: setTags,
+      },
+    ]);
+
+    const result = await execute(client, "setPageState", { tags: [] });
+
+    expect(setTags).toHaveBeenCalledWith([]);
+    expect(result).toEqual({ success: true, applied: ["tags"], unchanged: [] });
+  });
+
+  it("keeps an empty enum clearable for string controls", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const setModel = vi.fn();
+    const control: AgoStateControl = {
+      name: "model",
+      description: "Custom model.",
+      schema: { type: "string", enum: [] },
+      clearable: true,
+      set: setModel,
+    };
+    client.registerPageStateFunction([control]);
+
+    const property = schemaOf(client, "setPageState")!.parameters.properties.model;
+    expect(property.enum).toEqual([""]);
+    expect(control.schema.enum).toEqual([]);
+
+    const result = await execute(client, "setPageState", { model: "" });
+    expect(setModel).toHaveBeenCalledWith("");
+    expect(result).toEqual({ success: true, applied: ["model"], unchanged: [] });
+  });
+
   it("uses a read-only description when no controls are registered", () => {
     const client = new AgoClient({ baseUrl: "https://example.test" });
     client.registerPageStateFunction([]);
