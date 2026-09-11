@@ -157,8 +157,11 @@ and returns an error telling the agent what to retry with. Placeholders cannot
 be named `page` (that argument selects the route).
 
 It also registers a dynamic context entry ("Current page") that reports the page
-the user is on (by route name, plus URL and title) on every message, so the agent
-knows where it is after it navigates, not just how to navigate away. Call
+the user is on (by route name when matched, plus URL) on every message, so the
+agent knows where it is after it navigates, not just how to navigate away. It
+does not include `document.title`, which may describe a conversation instead of
+the application route. The separate opt-in `enableAutoPageContext()` feature
+still includes the URL and document title. Call
 `client.unregisterNavigationFunction()` to remove both the function and that
 context.
 
