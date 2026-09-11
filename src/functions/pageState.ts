@@ -101,6 +101,7 @@ function validateEnum(
   allowed: readonly (string | number)[]
 ): string | null {
   if (allowed.includes(value as string | number)) return null;
+  if (allowed.length === 0) return "No values are currently allowed.";
   return `${JSON.stringify(value)} is not an allowed value. Allowed values: ${formatAlternatives(allowed)}.`;
 }
 
@@ -165,12 +166,18 @@ function effectiveEnum(
 }
 
 function advertisedSchema(control: AgoStateControl) {
-  const schema = { ...control.schema, description: control.description };
+  const schema = {
+    ...control.schema,
+    ...(control.schema.items ? { items: { ...control.schema.items } } : {}),
+    description: control.description,
+  };
+  if (schema.enum?.length === 0) delete schema.enum;
+  if (schema.items?.enum?.length === 0) delete schema.items.enum;
   if (clearsOnEmptyString(control)) {
     schema.description = `${control.description} Pass "" to clear it.`;
   }
   const effectiveValues = effectiveEnum(control);
-  if (effectiveValues) schema.enum = effectiveValues;
+  if (effectiveValues?.length) schema.enum = effectiveValues;
   return schema;
 }
 
