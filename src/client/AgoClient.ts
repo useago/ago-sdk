@@ -2344,7 +2344,8 @@ export class AgoClient {
         name: "Recent activity",
         description:
           "Recent actions by the user and the agent in the app, oldest first. " +
-          "Use this to understand what just happened before this message.",
+          "Use this to understand what just happened before this message. " +
+          "Use current-page for the user’s current location.",
         data: { events },
       };
     });
