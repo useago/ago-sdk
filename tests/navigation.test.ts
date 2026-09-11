@@ -145,7 +145,7 @@ describe("registerNavigationFunction", () => {
     expect(result).toEqual({ success: true, navigatedTo: "/users" });
   });
 
-  it("reports the current page (by route name) plus url and title as context", () => {
+  it("reports the matched route name and current url without the document title", () => {
     const client = new AgoClient({ baseUrl: "https://example.test" });
     client.registerNavigationFunction(vi.fn(), ROUTES);
 
@@ -155,8 +155,9 @@ describe("registerNavigationFunction", () => {
     const entry = client.getContextSnapshot()?.entries["current-page"];
     expect(entry).toMatchObject({
       name: "Current page",
-      data: { page: "users", title: "Users" },
+      data: { page: "users" },
     });
+    expect(entry?.data).not.toHaveProperty("title");
     expect(String(entry?.data?.url)).toContain("/users");
   });
 
@@ -190,8 +191,10 @@ describe("registerNavigationFunction", () => {
     client.registerNavigationFunction(vi.fn(), ROUTES);
 
     window.history.pushState({}, "", "/nowhere");
+    document.title = "Stale conversation title";
     const data = client.getContextSnapshot()?.entries["current-page"].data;
     expect(data).not.toHaveProperty("page");
+    expect(data).not.toHaveProperty("title");
     expect(String(data?.url)).toContain("/nowhere");
   });
 
