@@ -33,8 +33,15 @@ describe("AgoClient activity ledger", () => {
     const snap = client.getContextSnapshot();
     const entry = snap?.entries["activity:recent"];
     expect(entry).toBeDefined();
+    expect(entry?.description).toBe(
+      "Recent actions by the user and the agent in the app, oldest first. " +
+        "Use this to understand what just happened before this message. " +
+        "Use current-page for the user’s current location.",
+    );
     const data = entry?.data as { events: ActivityEntry[] };
-    expect(data.events.map((e) => e.name)).toEqual(["a"]);
+    expect(data.events).toMatchObject([
+      { actor: "user", name: "a", summary: "did a" },
+    ]);
   });
 
   it("omits the activity:recent entry when the ledger is empty", () => {
