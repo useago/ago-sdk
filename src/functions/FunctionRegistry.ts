@@ -1,5 +1,6 @@
 import { AgoError, AgoFunctionError } from "../client/errors";
 import { logger } from "../utils/logger";
+import { overBudget } from "./budgets";
 import type {
   ClientFunctionDefinition,
   ClientFunctionHandler,
@@ -116,13 +117,21 @@ export class FunctionRegistry {
     // maxResultBytes, requiresApproval and webmcp are SDK-side settings: keep
     // them out of the schema sent to the backend.
     const { maxResultBytes, requiresApproval, webmcp, ...schemaRest } = schema;
+    const fullSchema: ClientFunctionSchema = { ...schemaRest, name };
     this.functions.set(name, {
-      schema: { ...schemaRest, name },
+      schema: fullSchema,
       handler,
       maxResultBytes,
       requiresApproval,
       webmcp,
     });
+
+    const over = overBudget(fullSchema);
+    if (over.length > 0) {
+      logger.warn(
+        `Function "${name}" is over the per-tool budget on ${over.join(", ")}.`
+      );
+    }
 
     logger.log(`Registered function: ${name}`);
     this.emitChange();

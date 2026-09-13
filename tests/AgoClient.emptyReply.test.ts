@@ -128,6 +128,7 @@ describe("empty-reply detection (message:empty + console warning)", () => {
     const client = new AgoClient({ baseUrl: "https://x.example.com" });
     client.registerFunction({
       name: "navigate",
+      description: "Go to a page.",
       parameters: { type: "object", properties: {} },
       handler: async () => "ok",
     });
