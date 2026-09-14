@@ -22,6 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Without `catalogue` the generated schema is unchanged.
 
+### Fixed
+
+- **`useAgoFunction` no longer re-registers on every render.** `parameters` was
+  compared by identity, so a component that re-renders on navigation (anything
+  calling react-router's `useNavigate`) unregistered and re-registered its
+  function on every route change. Now compared by value, like `webmcp` already
+  was.
+
 ## [1.13.0] - 2026-09-10
 
 ### Added

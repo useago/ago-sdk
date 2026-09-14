@@ -116,4 +116,33 @@ describe("useAgoFunction webmcp settings", () => {
     });
     expect(register).toHaveBeenCalledTimes(1);
   });
+
+  it("does not re-register when parameters are written inline", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const register = vi.spyOn(client, "registerFunction");
+    const unregister = vi.spyOn(client, "unregisterFunction");
+    let rerender = () => {};
+
+    function Harness() {
+      const [, setTick] = React.useState(0);
+      rerender = () => setTick((n) => n + 1);
+      useAgoFunction({
+        name: "openFilteredConversations",
+        description: "Open the conversations list filtered",
+        // A fresh schema every render.
+        parameters: { type: "object", properties: { email: { type: "string" } } },
+        handler: () => "ok",
+      });
+      return <span>ok</span>;
+    }
+
+    await mount(client, Harness);
+    expect(register).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      rerender();
+    });
+    expect(register).toHaveBeenCalledTimes(1);
+    expect(unregister).not.toHaveBeenCalled();
+  });
 });
