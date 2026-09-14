@@ -1736,7 +1736,7 @@ export function mountChatWidget(
     sendOptions?: { agentId?: string },
   ): Promise<void> {
     const trimmed = content.trim();
-    if ((!trimmed && !files?.length) || isLoading) return;
+    if (!trimmed || isLoading) return;
     // Sending from the home screen (composer or a starter card) lands the
     // exchange on the conversation screen.
     if (isBubble && screen !== "chat") {

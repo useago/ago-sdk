@@ -290,7 +290,7 @@ export function buildInput(args: BuildInputArgs): InputHandle {
   let dictating = false;
   const canStop = (): boolean => answering && !!args.onStop;
   const refreshSendBtn = (): void => {
-    const hasContent = textarea.value.trim() !== "" || files.length > 0;
+    const hasContent = textarea.value.trim() !== "";
     const stopping = canStop();
     const disabled = !stopping && (answering || dictating || !hasContent);
     sendBtn.disabled = disabled;
@@ -590,18 +590,16 @@ export function buildInput(args: BuildInputArgs): InputHandle {
   };
 
   const submit = (): void => {
-    if (answering || dictating) return;
+    if (answering || dictating || !textarea.value.trim()) return;
     const { content, files: collected } = getValueAndClear();
-    if (content.trim() || collected.length > 0) {
-      args.onSend(content.trim(), collected.length > 0 ? collected : undefined);
-      // Close the on-screen keyboard on a phone (reference: `innerWidth < 600`).
-      if (
-        embed &&
-        typeof window !== "undefined" &&
-        window.innerWidth < (args.blurOnSubmitBelow ?? 600)
-      ) {
-        textarea.blur();
-      }
+    args.onSend(content.trim(), collected.length > 0 ? collected : undefined);
+    // Close the on-screen keyboard on a phone (reference: `innerWidth < 600`).
+    if (
+      embed &&
+      typeof window !== "undefined" &&
+      window.innerWidth < (args.blurOnSubmitBelow ?? 600)
+    ) {
+      textarea.blur();
     }
   };
 

@@ -262,6 +262,7 @@ may be reworded in any release.
 | `config_invalid_language` | `AgoError` | `language` is not a valid language tag | Use a tag such as `fr` or `pt-BR`, or `null` to clear the override. Invalid updates leave the client unchanged. |
 | `config_suspect_base_url` | console warning only | `baseUrl` has no protocol and is not a `/path` | Add `https://`, or use a `/path` for a same-origin proxy |
 | `network_error` | `AgoNetworkError` | fetch failed (offline, DNS, unreachable host) | Check `baseUrl` is reachable and includes the protocol |
+| `message_empty_content` | `AgoError` | `sendMessage` received empty, whitespace-only, or non-string content | Include message text, even when attaching files |
 | `http_error` | `AgoApiError` | non-2xx without a structured error body | 401/403: check `userJwt`. 404: check `baseUrl` points at the API root |
 | `stream_no_body` | `AgoStreamError` | the endpoint returned no streamable body | Check `baseUrl` targets an AGO API and no proxy/mock strips the SSE stream |
 | `stream_error` | `AgoStreamError` | the stream failed mid-flight | Usually a dropped connection; retry the message |

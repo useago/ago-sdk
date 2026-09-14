@@ -399,6 +399,14 @@ export class AgoClient {
     content: string,
     options?: SendMessageOptions,
   ): Promise<AgoMessage> {
+    if (typeof content !== "string" || !content.trim()) {
+      throw new AgoError(
+        "Add message text before sending, including when attaching files. " +
+          "See docs/general/core.md#file-attachments.",
+        "message_empty_content",
+      );
+    }
+
     const clientFunctions = this.functionRegistry.getSchemas();
 
     const clientContext = this.buildSendContext();
