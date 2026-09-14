@@ -55,6 +55,7 @@ export type { UseFeedbackOptions, UseFeedbackResult } from "./hooks/useFeedback"
 
 export { useAgoFunction, useAgoNavigation, useAgoPageState } from "./hooks/useAgoFunction";
 export type { UseAgoFunctionOptions, AgoRoute } from "./hooks/useAgoFunction";
+export type { AgoNavigationOptions } from "../functions/navigation";
 export type {
   AgoStateControl,
   AgoPageStateOptions,

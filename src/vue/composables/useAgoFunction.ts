@@ -1,4 +1,5 @@
 import { onMounted, onUnmounted } from "vue";
+import type { AgoNavigationOptions } from "../../functions/navigation";
 import type {
   AgoPageStateOptions,
   AgoStateControl,
@@ -64,6 +65,8 @@ export interface AgoRoute {
   name: string;
   path: string;
   description: string;
+  /** Groups this route for `catalogue: "onDemand"`. Unused otherwise. */
+  section?: string;
 }
 
 /**
@@ -79,12 +82,15 @@ export interface AgoRoute {
  */
 export function useAgoNavigation(
   navigate: (path: string) => void,
-  routes: AgoRoute[]
+  routes: AgoRoute[],
+  opts?: AgoNavigationOptions
 ): void {
   const client = useAgo();
 
   onMounted(() => {
-    client.registerNavigationFunction(navigate, routes);
+    client.registerNavigationFunction(navigate, routes, {
+      catalogue: opts?.catalogue === "onDemand" ? "onDemand" : "inline",
+    });
   });
 
   onUnmounted(() => {

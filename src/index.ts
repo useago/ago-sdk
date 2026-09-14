@@ -86,6 +86,10 @@ export type { CapturedError, CapturedErrorType, ErrorWatcherOptions } from "./er
 export { defineFunction } from "./functions/defineFunction";
 export { FunctionRegistry } from "./functions/FunctionRegistry";
 export type {
+  AgoNavigationOptions,
+  NavRoute,
+} from "./functions/navigation";
+export type {
   AgoPageDataSource,
   AgoPageStateEnvelope,
   AgoPageStateOptions,

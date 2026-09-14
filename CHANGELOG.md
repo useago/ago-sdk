@@ -5,6 +5,23 @@ All notable changes to `@useago/sdk` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`catalogue: "onDemand"` for navigation.** Route descriptions ride in the
+  prompt on every message, so a large table costs on every turn. Pass
+  `registerNavigationFunction(navigate, routes, { catalogue: "onDemand" })`, or
+  the same third argument to `useAgoNavigation`, and they move into a read-only
+  `listPages` companion instead. `navigateToPage` keeps the page names as its
+  `page` enum, and an unknown page answers with the valid names. On a large
+  table this can cut the tool's schema by around 70%.
+- **`section` on a route.** Makes `section` a required argument of `listPages`,
+  so the agent asks for one group at a time and no single answer has to carry
+  the whole catalogue. Only read under `catalogue: "onDemand"`.
+
+Without `catalogue` the generated schema is unchanged.
+
 ## [1.13.0] - 2026-09-10
 
 ### Added
