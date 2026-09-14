@@ -284,6 +284,10 @@ to `/orders/42`. One route covers every detail page of an entity.
 This also reports the current page (by route name, plus URL and title) as context
 on every message, so the agent knows which page the user is on.
 
+For a large route table, pass `{ catalogue: "onDemand" }` as a third argument to
+keep the descriptions out of every message. See
+[functions-and-context.md](./functions-and-context.md#large-route-tables).
+
 Page state is the mirror: let the agent change the current page's state
 (filters, sort, view mode…) and read it back.
 

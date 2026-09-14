@@ -7,6 +7,8 @@ export { useConversation } from "./composables/useConversation";
 export { useFeedback } from "./composables/useFeedback";
 export type { UseFeedbackOptions } from "./composables/useFeedback";
 export { useAgoFunction, useAgoNavigation, useAgoPageState } from "./composables/useAgoFunction";
+export type { AgoRoute } from "./composables/useAgoFunction";
+export type { AgoNavigationOptions } from "../functions/navigation";
 export type {
   AgoStateControl,
   AgoPageStateOptions,

@@ -17,6 +17,17 @@ import {
   readWhenSettled,
   truncatePageData,
 } from "../functions/pageData";
+import {
+  createListPagesFunction,
+  createNavigationFunction,
+  LIST_PAGES_FUNCTION,
+  matchRoute,
+  NAVIGATE_FUNCTION,
+} from "../functions/navigation";
+import type {
+  AgoNavigationOptions,
+  NavRoute,
+} from "../functions/navigation";
 import { createPageStateFunction } from "../functions/pageState";
 import type {
   AgoPageDataSource,
@@ -148,8 +159,6 @@ interface RawSdkConfig {
   proactive?: { enabled?: boolean };
 }
 
-type NavRoute = { name: string; path: string; description: string };
-
 /**
  * Hook run before a paused turn is resumed, so the app controls WHEN the
  * continuation fires (e.g. wait for the destination page to mount after a
@@ -192,77 +201,6 @@ type ActiveTurn = {
   /** The stop endpoint was already called for this turn (call it once). */
   stopPosted: boolean;
 };
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/**
- * Resolve which registered route a pathname corresponds to, so the agent can be
- * told the current page by the same name it uses to navigate.
- *
- * Precedence: exact path, then parameterised path (`/users/:id`), then the
- * longest static path that prefixes the pathname (nested routes). Returns
- * `undefined` when nothing matches.
- */
-/** Names of the `:param` placeholders in a route path, in order. */
-function routeParamNames(path: string): string[] {
-  return path
-    .split("/")
-    .filter((seg) => seg.startsWith(":"))
-    .map((seg) => seg.slice(1));
-}
-
-/**
- * Fill the `:param` placeholders of a route path with agent-supplied values.
- * Returns the resolved path plus the placeholders that had no value, so the
- * caller can send the agent a correctable error instead of a broken URL.
- */
-function fillRouteParams(
-  path: string,
-  params: Record<string, unknown>,
-): { path: string; missing: string[] } {
-  const missing: string[] = [];
-  const filled = path
-    .split("/")
-    .map((seg) => {
-      if (!seg.startsWith(":")) return seg;
-      const name = seg.slice(1);
-      const value = params[name];
-      if (value === undefined || value === null || value === "") {
-        missing.push(name);
-        return seg;
-      }
-      return encodeURIComponent(String(value));
-    })
-    .join("/");
-  return { path: filled, missing };
-}
-
-function matchRoute(
-  pathname: string,
-  routes: NavRoute[],
-): NavRoute | undefined {
-  const exact = routes.find((r) => r.path === pathname);
-  if (exact) return exact;
-
-  const parameterised = routes.find((r) => {
-    if (!r.path.includes(":")) return false;
-    const pattern =
-      "^" +
-      r.path
-        .split("/")
-        .map((seg) => (seg.startsWith(":") ? "[^/]+" : escapeRegExp(seg)))
-        .join("/") +
-      "/?$";
-    return new RegExp(pattern).test(pathname);
-  });
-  if (parameterised) return parameterised;
-
-  return routes
-    .filter((r) => r.path !== "/" && pathname.startsWith(r.path))
-    .sort((a, b) => b.path.length - a.path.length)[0];
-}
 
 /** Context key under which the recent-activity window rides along with messages. */
 const ACTIVITY_CONTEXT_KEY = "activity:recent";
@@ -344,6 +282,9 @@ export class AgoClient {
 
   /** Removes the mirrored WebMCP tools; `null` when the bridge is off. */
   private detachWebMCP: (() => void) | null = null;
+
+  /** The `listPages` companion is live. */
+  private listPagesRegistered = false;
 
   constructor(config: AgoConfig) {
     validateConfig(config, "AgoClient");
@@ -1793,107 +1734,30 @@ export class AgoClient {
    * page of an entity. Flat arguments only: nested object parameters are not
    * reliably rendered to the model, so placeholders must not be named `page`.
    *
+   * For a large table, `{ catalogue: "onDemand" }` moves the route descriptions
+   * into a read-only `listPages` companion, leaving only the page names in the
+   * per-message schema. Routes may carry a `section` to group that companion.
+   *
    * @param navigate - A callback that performs the navigation (e.g. react-router's navigate)
    * @param routes - Map of route names to paths, with descriptions for the LLM
+   * @param opts - Where the catalogue lives; `"inline"` by default
    */
   registerNavigationFunction(
     navigate: (path: string) => void,
-    routes: Array<{ name: string; path: string; description: string }>,
+    routes: NavRoute[],
+    opts?: AgoNavigationOptions,
   ): void {
-    const routeNames = routes.map((r) => r.name);
-    const routeDescriptions = routes
-      .map((r) => {
-        const params = routeParamNames(r.path);
-        const paramNote =
-          params.length > 0
-            ? ` (requires ${params.map((p) => `"${p}"`).join(", ")})`
-            : "";
-        return `- "${r.name}"${paramNote}: ${r.description}`;
-      })
-      .join("\n");
+    this.registerFunction(createNavigationFunction(navigate, routes, opts));
 
-    // One top-level argument per distinct placeholder, listing the pages that
-    // need it. Flat scalar properties are what schemas support end to end.
-    const paramUsage = new Map<string, string[]>();
-    for (const r of routes) {
-      for (const param of routeParamNames(r.path)) {
-        paramUsage.set(param, [...(paramUsage.get(param) ?? []), r.name]);
-      }
+    // Flipping back to "inline" must drop the companion, or it keeps answering
+    // for the old route table.
+    if (opts?.catalogue === "onDemand") {
+      this.registerFunction(createListPagesFunction(routes));
+      this.listPagesRegistered = true;
+    } else if (this.listPagesRegistered) {
+      this.unregisterFunction(LIST_PAGES_FUNCTION);
+      this.listPagesRegistered = false;
     }
-
-    const properties: ClientFunctionSchema["parameters"]["properties"] = {
-      page: {
-        type: "string",
-        description: "The page to navigate to",
-        enum: routeNames,
-      },
-    };
-    for (const [param, usedBy] of paramUsage) {
-      if (param === "page") {
-        logger.error(
-          'registerNavigationFunction: a ":page" placeholder collides with the "page" argument and is ignored. Rename the placeholder.',
-        );
-        continue;
-      }
-      properties[param] = {
-        type: "string",
-        description: `Value for ":${param}" in the page path. Required when page is ${usedBy
-          .map((n) => `"${n}"`)
-          .join(" or ")}.`,
-      };
-    }
-
-    this.registerFunction(
-      "navigateToPage",
-      async (args) => {
-        const pageName = args.page as string;
-        const route = routes.find((r) => r.name === pageName);
-        if (!route) {
-          return { success: false, error: `Unknown page: ${pageName}` };
-        }
-
-        // Params arrive as top-level arguments. Some models still nest them
-        // under a "params" object (or a JSON string of one); accept those too.
-        let nested: Record<string, unknown> = {};
-        if (typeof args.params === "string") {
-          try {
-            nested = JSON.parse(args.params) as Record<string, unknown>;
-          } catch {
-            // fall through to the missing-params error below
-          }
-        } else if (args.params && typeof args.params === "object") {
-          nested = args.params as Record<string, unknown>;
-        }
-
-        const values: Record<string, unknown> = {};
-        for (const name of routeParamNames(route.path)) {
-          values[name] = args[name] ?? nested[name];
-        }
-
-        const { path, missing } = fillRouteParams(route.path, values);
-        if (missing.length > 0) {
-          const example = missing.map((m) => `"${m}": "..."`).join(", ");
-          return {
-            success: false,
-            error: `Page "${pageName}" needs ${missing
-              .map((m) => `"${m}"`)
-              .join(", ")}. Retry with { "page": "${pageName}", ${example} }.`,
-          };
-        }
-
-        navigate(path);
-        return { success: true, navigatedTo: path };
-      },
-      {
-        description: `Navigate the user to a page in the application. Available pages:\n${routeDescriptions}`,
-        parameters: {
-          type: "object",
-          properties,
-          required: ["page"],
-        },
-        webmcp: { navigates: true },
-      },
-    );
 
     // Report the current page (by route name) as dynamic context, re-evaluated
     // on every message. Without this the agent knows how to navigate but never
@@ -1921,7 +1785,11 @@ export class AgoClient {
    * Unregister the navigation function and its `current-page` context provider.
    */
   unregisterNavigationFunction(): void {
-    this.unregisterFunction("navigateToPage");
+    this.unregisterFunction(NAVIGATE_FUNCTION);
+    if (this.listPagesRegistered) {
+      this.unregisterFunction(LIST_PAGES_FUNCTION);
+      this.listPagesRegistered = false;
+    }
     this.removeDynamicContext("current-page");
   }
 
@@ -2540,6 +2408,7 @@ export class AgoClient {
     this.stoppedTurnIds.clear();
     this.eventEmitter.removeAllListeners();
     this.functionRegistry.clear();
+    this.listPagesRegistered = false;
     this.contextRegistry.clear();
     this.pendingResumes.clear();
     this.pendingApprovals.clear();

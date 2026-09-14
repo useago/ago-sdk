@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import type { AgoNavigationOptions } from "../../functions/navigation";
 import type {
   AgoPageDataSource,
   AgoPageStateOptions,
@@ -130,6 +131,8 @@ export interface AgoRoute {
   name: string;
   path: string;
   description: string;
+  /** Groups this route for `catalogue: "onDemand"`. Unused otherwise. */
+  section?: string;
 }
 
 /**
@@ -143,25 +146,33 @@ export interface AgoRoute {
  *   { name: "settings", path: "/settings", description: "User settings" },
  * ]);
  * ```
+ *
+ * For a large route table, `{ catalogue: "onDemand" }` keeps the descriptions
+ * out of every message.
  */
 export function useAgoNavigation(
   navigate: (path: string) => void,
-  routes: AgoRoute[]
+  routes: AgoRoute[],
+  opts?: AgoNavigationOptions
 ): void {
   const client = useAgoClient();
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
 
+  // By value: an inline `opts` is a new object every render.
+  const catalogue = opts?.catalogue;
+
   useEffect(() => {
     client.registerNavigationFunction(
       (path) => navigateRef.current(path),
-      routes
+      routes,
+      { catalogue: catalogue === "onDemand" ? "onDemand" : "inline" }
     );
 
     return () => {
       client.unregisterNavigationFunction();
     };
-  }, [client, routes]);
+  }, [client, routes, catalogue]);
 }
 
 /**

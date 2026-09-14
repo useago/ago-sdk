@@ -15,6 +15,7 @@ import type {
   SubmitToolCallResult,
   TranscribeAudioOptions,
 } from "../client/types";
+import type { AgoNavigationOptions } from "../functions/navigation";
 import type {
   AgoPageStateOptions,
   AgoStateControl,
@@ -22,6 +23,14 @@ import type {
   ClientFunctionHandler,
   ClientFunctionRegisterOptions,
 } from "../functions/types";
+
+interface AgoRoute {
+  name: string;
+  path: string;
+  description: string;
+  /** Groups this route for `catalogue: "onDemand"`. Unused otherwise. */
+  section?: string;
+}
 
 interface Observable<T> {
   subscribe(observer: { next?: (value: T) => void; error?: (err: unknown) => void }): { unsubscribe: () => void };
@@ -190,9 +199,12 @@ export class AgoService {
   /** Register navigation routes */
   registerNavigationFunction(
     navigate: (path: string) => void,
-    routes: Array<{ name: string; path: string; description: string }>
+    routes: AgoRoute[],
+    opts?: AgoNavigationOptions
   ): void {
-    this.client.registerNavigationFunction(navigate, routes);
+    this.client.registerNavigationFunction(navigate, routes, {
+      catalogue: opts?.catalogue === "onDemand" ? "onDemand" : "inline",
+    });
   }
 
   /** Unregister navigation (function + current-page context) */

@@ -1478,6 +1478,34 @@ knows where it is after it navigates, not just how to navigate away. Call
 `client.unregisterNavigationFunction()` to remove both the function and that
 context.
 
+#### Large route tables
+
+Every route description sits in the prompt on every message. Pass
+`catalogue: "onDemand"` to move them into a read-only `listPages` companion the
+agent can call when it needs them:
+
+```ts
+client.registerNavigationFunction(
+  navigate,
+  [
+    { name: "pricing", path: "/pricing", description: "Pricing page", section: "Marketing" },
+    { name: "orders", path: "/orders", description: "Order list", section: "Admin" },
+  ],
+  { catalogue: "onDemand" },
+);
+```
+
+`navigateToPage` keeps the page names as its `page` enum, so a recognisable name
+can still navigate in one call.
+
+Give routes a `section` and `listPages` takes it as a required argument, so the
+agent asks for one group at a time and no single answer has to carry the whole
+catalogue. Keep a section small enough that listing it fits WebMCP's 1.5K output
+budget. Without sections, `listPages` returns every route in one answer.
+
+On a large table this can cut the tool's schema by around 70%. `section` is only
+read in this mode.
+
 ### Page state shortcut
 
 The mirror of navigation: instead of moving the user to another page, let the
