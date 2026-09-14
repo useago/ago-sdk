@@ -135,6 +135,10 @@ await ago.sendMessage("Summarise this", {
 });
 ```
 
+Include message text with attachments. Empty or whitespace-only content is
+rejected locally with `AgoError` code `message_empty_content`. The built-in
+chat inputs keep selected files and enable Send once you add text.
+
 Uploaded files come back on the message that carries them, under
 `message.attachments` (an `AgoAttachment[]`):
 

@@ -78,7 +78,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     async (e: React.FormEvent) => {
       e.preventDefault();
       if (disabled || dictating) return;
-      if (!message.trim() && files.length === 0) return;
+      if (!message.trim()) return;
       const sentText = message.trim();
       const sentFiles = files.length > 0 ? files : undefined;
       setMessage("");
@@ -121,7 +121,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     setFiles((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
-  const canSend = message.trim() || files.length > 0;
+  const canSend = message.trim().length > 0;
   const onTranscript = (text: string) => {
     setMessage((current) => `${current}${current && !/\s$/.test(current) ? " " : ""}${text}`);
   };

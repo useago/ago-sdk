@@ -38,6 +38,33 @@ function type(textarea: HTMLTextAreaElement, value: string): void {
   textarea.dispatchEvent(new Event("input"));
 }
 
+describe.each(["classic", "embed"] as const)("buildInput (%s) attachments", (look) => {
+  it.each(["", " \n\t "])("keeps files until text is added to a blank draft %j", (content) => {
+    const { handle, textarea, send, fileInput, onSend } = build({ look });
+    const file = new File(["hello"], "note.txt", { type: "text/plain" });
+    try {
+      pick(fileInput, [file]);
+      type(textarea, content);
+      expect(send.disabled).toBe(true);
+      send.click();
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      handle.inputRow.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      expect(onSend).not.toHaveBeenCalled();
+      expect(handle.inputRow.textContent).toContain("note.txt");
+
+      type(textarea, "Analyze this");
+      expect(send.disabled).toBe(false);
+      send.click();
+      expect(onSend).toHaveBeenCalledExactlyOnceWith("Analyze this", [file]);
+      expect(textarea.value).toBe("");
+      expect(handle.inputRow.textContent).not.toContain("note.txt");
+    } finally {
+      handle.destroy();
+      handle.inputRow.remove();
+    }
+  });
+});
+
 describe("buildInput (embed look)", () => {
   it("renders the PromptForm card and a 40px round send button, disabled when empty", () => {
     const { handle, send, textarea } = build();
