@@ -95,8 +95,9 @@ export function useAgoFunction(
   const handlerRef = useRef(handler);
   handlerRef.current = handler;
 
-  // `webmcp` is usually written inline, so compare it by value: a fresh object
-  // literal on every render must not re-register the function.
+  // Written inline at the call site, so compare by value: a fresh object
+  // literal every render must not re-register the function.
+  const parametersKey = JSON.stringify(parameters);
   const webmcpKey = JSON.stringify(webmcp ?? null);
 
   useEffect(() => {
@@ -114,13 +115,12 @@ export function useAgoFunction(
     return () => {
       client.unregisterFunction(name);
     };
-    // `webmcpKey` stands in for `webmcp`: same value, stable identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     client,
     name,
     description,
-    parameters,
+    parametersKey,
     maxResultBytes,
     requiresApproval,
     webmcpKey,
