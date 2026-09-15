@@ -48,7 +48,10 @@ describe('registerNavigationFunction with catalogue: "onDemand"', () => {
 
     const description = schemaOf(c, "navigateToPage")!.description;
     expect(description).not.toContain("Home dashboard");
-    expect(description).toContain("listPages");
+    expect(description).toBe(
+      "Navigate the user to a page. Call listPages for what a page name means. " +
+        "Available functions depend on the current page. After navigation, you will receive the destination page’s available functions and current state. Use them to complete any remaining actions in the user’s request."
+    );
     // Section names live in listPages' own enum; repeating them here would be
     // the same text twice in one prompt.
     expect(description).not.toContain("Analytics");
