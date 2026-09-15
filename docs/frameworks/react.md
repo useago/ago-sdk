@@ -528,6 +528,17 @@ useAgoNavigation(navigate, [
 ]);
 ```
 
+To fetch route descriptions only when needed, pass the catalogue option:
+
+```tsx
+useAgoNavigation(navigate, routes, { catalogue: "onDemand" });
+```
+
+The Glacier example uses this mode. The agent can call `listPages` to discover
+route descriptions; known page names can still navigate directly. See
+[large route tables](../general/functions-and-context.md#large-route-tables)
+for grouping routes into sections.
+
 When the agent should pick a record by meaning instead of by id (*"the invoice
 for Acme"*), it needs to know which ids exist. For a small, stable set, keep the
 single parameterized route and list the ids in its `description`, derived from
