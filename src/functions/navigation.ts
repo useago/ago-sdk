@@ -126,16 +126,15 @@ export function createNavigationFunction(
       'registerNavigationFunction: routes declare "section" but catalogue is "inline", so it is unused. Set catalogue: "onDemand" to use it.'
     );
   }
-  //`Navigate the user to a page in the application. Available functions depend on the current page. After navigation, you will receive the destination page’s available functions and current state. Use them to complete any remaining actions in the user’s request. Available pages:\n${routeDescriptions}`,
-
-  const navigationContextUpdateDescription = "Available functions depend on the current page. After navigation, you will receive the destination page’s available functions and current state. Use them to complete any remaining actions in the user’s request."
+  const continuationDescription =
+    "Available functions depend on the current page. After navigation, you will receive the destination page’s available functions and current state. Use them to complete any remaining actions in the user’s request.";
   // The section names are not repeated here: they are already the `section`
   // enum of `listPages`, which the agent reads in the same prompt.
   const description = onDemand
-    ? `Navigate the user to a page. Call ${LIST_PAGES_FUNCTION} for what a page name means. ${navigationContextUpdateDescription} `
-    : `Navigate the user to a page in the application. Available pages:\n${routes
+    ? `Navigate the user to a page. Call ${LIST_PAGES_FUNCTION} for what a page name means. ${continuationDescription}`
+    : `Navigate the user to a page in the application. ${continuationDescription} Available pages:\n${routes
         .map(catalogueLine)
-        .join("\n")} ${navigationContextUpdateDescription}`;
+        .join("\n")}`;
 
   // One top-level argument per distinct placeholder, listing the pages that
   // need it. Flat scalar properties are what schemas support end to end.
