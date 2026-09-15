@@ -1465,6 +1465,11 @@ This registers a `navigateToPage` function whose `page` parameter is an enum of
 your route names. React/Vue offer `useAgoNavigation(navigate, routes)` with
 lifecycle cleanup.
 
+Functions and page state can change with the route. The navigation tool
+instructs the agent to use the destination's functions for remaining actions.
+Use the [auto-continue helper](#navigate-then-change-the-page-in-one-go) to wait
+for destination page-state registration before continuing.
+
 Paths can contain `:param` placeholders. Each placeholder becomes an explicit
 top-level argument of `navigateToPage` (`{ page: "orderDetail", id: "42" }`
 navigates to `/orders/42`), so one route covers every detail page of an entity.
@@ -1473,8 +1478,11 @@ and returns an error telling the agent what to retry with. Placeholders cannot
 be named `page` (that argument selects the route).
 
 It also registers a dynamic context entry ("Current page") that reports the page
-the user is on (by route name, plus URL and title) on every message, so the agent
-knows where it is after it navigates, not just how to navigate away. Call
+the user is on (by route name when matched, plus URL) on every message, so the
+agent knows where it is after it navigates, not just how to navigate away. It
+does not include `document.title`, which may describe a conversation instead of
+the application route. The separate opt-in `enableAutoPageContext()` feature
+still includes the URL and document title. Call
 `client.unregisterNavigationFunction()` to remove both the function and that
 context.
 
@@ -1496,7 +1504,8 @@ client.registerNavigationFunction(
 ```
 
 `navigateToPage` keeps the page names as its `page` enum, so a recognisable name
-can still navigate in one call.
+can still navigate in one call. Both catalogue modes instruct the agent to use
+the destination page's functions and state to finish remaining requested actions.
 
 Give routes a `section` and `listPages` takes it as a required argument, so the
 agent asks for one group at a time and no single answer has to carry the whole
@@ -1563,6 +1572,12 @@ Before calling `set()`, the SDK validates the declared type and enum. Unknown
 control names are rejected with the list of available controls. A value that
 matches the current `get()` value is skipped without calling `set()` and
 reported as `unchanged`.
+
+Empty enums are omitted from the advertised tool schema because providers
+reject them. Execution still rejects selections when no values are available.
+An empty array remains valid when only its item enum is empty, and a clearable
+string can still be cleared with `""`. Independent fields in the same request
+can still be applied.
 
 React/Vue offer `useAgoPageState(controls, opts?)` with lifecycle cleanup;
 Angular exposes `agoService.registerPageStateFunction(...)`.
@@ -1704,7 +1719,8 @@ of reporting a diff, so a page switch never shows up as a spurious change.
 A request like "open the invoices page and show only the overdue ones" needs two
 steps: the agent navigates, then changes the new page's state. But the
 destination page only registers its `setPageState` (and current state) once it
-mounts, so the agent can't do both in a single turn.
+mounts. Continuation must wait for that registration to use the new page's
+capabilities.
 
 `useAgoAutoContinueAfterNavigation()` closes the gap. Mount it once inside
 `AgoProvider`:

@@ -1773,13 +1773,10 @@ export class AgoClient {
     this.addDynamicContext("current-page", () => {
       if (typeof window === "undefined" || !window.location) return null;
       const url = window.location.href;
-      const title =
-        typeof document !== "undefined" ? document.title : undefined;
       const match = matchRoute(window.location.pathname, routes);
 
       const data: Record<string, unknown> = { url };
       if (match) data.page = match.name;
-      if (title) data.title = title;
 
       return {
         name: "Current page",
@@ -2223,7 +2220,8 @@ export class AgoClient {
         name: "Recent activity",
         description:
           "Recent actions by the user and the agent in the app, oldest first. " +
-          "Use this to understand what just happened before this message.",
+          "Use this to understand what just happened before this message. " +
+          "Use current-page for the user’s current location.",
         data: { events },
       };
     });

@@ -285,12 +285,18 @@ Paths can contain `:param` placeholders. Each placeholder becomes a top-level
 argument of `navigateToPage`, so `{ page: "orderDetail", id: "42" }` navigates
 to `/orders/42`. One route covers every detail page of an entity.
 
-This also reports the current page (by route name, plus URL and title) as context
-on every message, so the agent knows which page the user is on.
+This also reports the current page (by route name when matched, plus URL) as
+context on every message, so the agent knows which page the user is on. It does
+not include the document title. The separate opt-in `enableAutoPageContext()`
+feature below still includes the URL and document title.
 
 For a large route table, pass `{ catalogue: "onDemand" }` as a third argument to
 keep the descriptions out of every message. See
 [functions-and-context.md](./functions-and-context.md#large-route-tables).
+
+The navigation tool instructs the agent to use the destination's functions
+and state for remaining actions. To wait for that page to register before
+continuing, attach the [auto-continue helper](./functions-and-context.md#navigate-then-change-the-page-in-one-go).
 
 Page state is the mirror: let the agent change the current page's state
 (filters, sort, view mode…) and read it back.

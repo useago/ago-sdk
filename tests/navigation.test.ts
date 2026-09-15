@@ -36,6 +36,18 @@ describe("registerNavigationFunction", () => {
     });
   });
 
+  it("tells the agent to use destination functions after navigation", () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    client.registerNavigationFunction(vi.fn(), ROUTES);
+
+    const description = schemaOf(client, "navigateToPage")!.description;
+    expect(description).toBe(
+      "Navigate the user to a page in the application. " +
+        "Available functions depend on the current page. After navigation, you will receive the destination page’s available functions and current state. Use them to complete any remaining actions in the user’s request. " +
+        'Available pages:\n- "dashboard": Home dashboard\n- "users": User list\n- "userDetail" (requires "id"): A single user\n- "settings": App settings',
+    );
+  });
+
   it("exposes each route param as an explicit top-level string argument", () => {
     const client = new AgoClient({ baseUrl: "https://example.test" });
     client.registerNavigationFunction(vi.fn(), ROUTES);
@@ -145,7 +157,7 @@ describe("registerNavigationFunction", () => {
     expect(result).toEqual({ success: true, navigatedTo: "/users" });
   });
 
-  it("reports the current page (by route name) plus url and title as context", () => {
+  it("reports the matched route name and current url without the document title", () => {
     const client = new AgoClient({ baseUrl: "https://example.test" });
     client.registerNavigationFunction(vi.fn(), ROUTES);
 
@@ -155,8 +167,9 @@ describe("registerNavigationFunction", () => {
     const entry = client.getContextSnapshot()?.entries["current-page"];
     expect(entry).toMatchObject({
       name: "Current page",
-      data: { page: "users", title: "Users" },
+      data: { page: "users" },
     });
+    expect(entry?.data).not.toHaveProperty("title");
     expect(String(entry?.data?.url)).toContain("/users");
   });
 
@@ -190,8 +203,10 @@ describe("registerNavigationFunction", () => {
     client.registerNavigationFunction(vi.fn(), ROUTES);
 
     window.history.pushState({}, "", "/nowhere");
+    document.title = "Stale conversation title";
     const data = client.getContextSnapshot()?.entries["current-page"].data;
     expect(data).not.toHaveProperty("page");
+    expect(data).not.toHaveProperty("title");
     expect(String(data?.url)).toContain("/nowhere");
   });
 
