@@ -51,19 +51,19 @@ const ROUTES = {
     name: 'ingredients',
     path: '/ingredients',
     description:
-      "Page Ingrédients & allergènes : liste complète des parfums, toppings et contenants avec leurs allergènes (lait, œufs, fruits à coque, arachides, gluten, soja, sulfites). À ouvrir dès qu'un client évoque une allergie, un régime alimentaire, ou demande la composition.",
+      "Page Ingrédients & allergènes : liste complète des parfums, toppings et contenants avec leurs allergènes. À ouvrir dès qu'un client évoque une allergie, un régime alimentaire, ou demande la composition.",
   },
   origins: {
     name: 'origins',
     path: '/origines',
     description:
-      "Page Origines des ingrédients : index des terroirs et producteurs (vanille de Tahiti, pistache de Bronte, citron de Menton, mangue Alphonso, noisette du Piémont, cacao d'Équateur, fraise Gariguette, café Sidamo). À ouvrir si le client demande d'où viennent les ingrédients.",
+      "Page Origines des ingrédients : index des terroirs et producteurs. À ouvrir si le client demande d'où viennent les ingrédients.",
   },
   flavors: {
     name: 'flavors',
     path: '/parfums',
     description:
-      "Page Parfums : liste filtrable/triable des parfums. À ouvrir si le client veut parcourir, filtrer (sans lactose, sans fruits à coque, sans gluten) ou trier les parfums. Une fois sur cette page, ses filtres/tri/affichage sont modifiables via setPageState.",
+      "Page Parfums : liste filtrable/triable des parfums. À ouvrir si le client veut parcourir, filtrer ou trier les parfums. Une fois sur cette page, ses filtres/tri/affichage sont modifiables via setPageState.",
   },
 } as const;
 
