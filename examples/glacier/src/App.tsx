@@ -188,7 +188,9 @@ export default function App() {
   // Cours du jour d'un parfum, via un service de prix externe.
   useAgoFunction(lookupFlavorPrices.name, lookupFlavorPrices);
 
-  useAgoNavigation(navigate, [...Object.values(ROUTES), ORIGIN_DETAIL_ROUTE]);
+  useAgoNavigation(navigate, [...Object.values(ROUTES), ORIGIN_DETAIL_ROUTE], {
+    catalogue: 'onDemand',
+  });
 
   // In pause mode (see main.tsx) the backend pauses the turn on the navigation
   // call; this hook delays the SDK's auto-resume until the destination page's
