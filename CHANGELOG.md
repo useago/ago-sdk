@@ -29,6 +29,11 @@ Without `catalogue` the generated schema is unchanged.
   calling react-router's `useNavigate`) unregistered and re-registered its
   function on every route change. Now compared by value, like `webmcp` already
   was.
+- **A WebMCP navigation no longer triggers a continuation on the next turn.**
+  `autoContinue` watched `function:invoke` without checking where the call came
+  from, and the flag it sets is sticky. An external `navigateToPage` would sit on
+  that flag until the user's next message completed, which then fired a hidden
+  continuation prompt for something the agent never did.
 
 ## [1.13.0] - 2026-09-10
 

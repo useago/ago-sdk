@@ -60,6 +60,25 @@ describe("attachAutoContinueAfterNavigation (core)", () => {
     detach();
   });
 
+  it("ignores a WebMCP navigation, which belongs to no turn", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const send = vi.spyOn(client, "sendMessage").mockResolvedValue({} as AgoMessage);
+    const detach = attachAutoContinueAfterNavigation(client, {
+      settleMs: 0,
+      readinessTimeoutMs: 200,
+    });
+
+    // What runExternalFunction emits: same event, no conversation. The flag is
+    // sticky, so an unguarded listener would make the next turn continue.
+    navigate(client, "");
+    registerPageState(client);
+    complete(client);
+    await tick(30);
+
+    expect(send).not.toHaveBeenCalled();
+    detach();
+  });
+
   it("does not continue when the destination has no page-state (timeout)", async () => {
     const client = new AgoClient({ baseUrl: "https://example.test" });
     const send = vi.spyOn(client, "sendMessage").mockResolvedValue({} as AgoMessage);
