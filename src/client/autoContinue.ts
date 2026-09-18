@@ -158,6 +158,10 @@ export function attachAutoContinueAfterNavigation(
   };
 
   const onInvoke = (data: ClientFunctionInvocation) => {
+    // A WebMCP call emits the same event with no conversation. Its navigation is
+    // not part of any turn, and the flag is sticky, so counting it here would
+    // make the NEXT turn fire a continuation for something the agent never did.
+    if (!data.conversationId) return;
     if (opts().navigationFunctions.includes(data.functionName)) {
       state.navigated = true;
     }
