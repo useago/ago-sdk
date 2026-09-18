@@ -542,6 +542,14 @@ Off by default, and a no-op in browsers without WebMCP. Calls arrive as
 `function:invoke` and `function:result` like any other, so your logging and the
 dev panel already cover them.
 
+While the bridge is on, each external call is also reported to AGO, so it shows
+up in the AGO dashboard next to the calls your AGO agent makes. The report carries
+the function name and arguments, what the handler returned or how it failed, how
+long it took, and a per-tab id that groups one external agent's run of calls. The
+result is the same value an agent call already stores, under the same
+`maxResultBytes` cap. Delivery is best-effort and never blocks the call. There is
+no separate switch: `webmcp: true` turns reporting on too.
+
 **There is no approval gate on a WebMCP call**, and cancelling one does not stop
 your handler. `requiresApproval` and `approvalPolicy` hold a call in the agent
 loop, which a WebMCP call never enters. Set `webmcp: false` on a definition to

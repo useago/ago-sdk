@@ -22,6 +22,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Without `catalogue` the generated schema is unchanged.
 
+- **WebMCP calls are reported to AGO for analytics.** With `webmcp` on, each call
+  an external agent makes through the bridge is sent to AGO, so it shows up in
+  the dashboard alongside the calls your AGO agent makes. One request per call,
+  carrying the function name, arguments, the handler's result or its failure,
+  the duration, and a per-tab id that groups one external agent's run of calls.
+  The result is the same value your AGO agent's calls already store, under the
+  same `maxResultBytes`. Best-effort: nothing blocks the call, and a failed
+  report is not retried. There is no separate switch: turning `webmcp` on also
+  turns reporting on.
+
 ### Fixed
 
 - **`useAgoFunction` no longer re-registers on every render.** `parameters` was
