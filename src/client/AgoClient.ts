@@ -57,6 +57,7 @@ import { byteLength } from "../utils/jsonBytes";
 import { logger } from "../utils/logger";
 import { generateUuid } from "../utils/uuid";
 import { attachWebMCP } from "../webmcp/attachWebMCP";
+import { reportExternalCall } from "../webmcp/reportExternalCall";
 import { AgoError } from "./errors";
 import type {
   AgoClientEvents,
@@ -235,6 +236,9 @@ export class AgoClient {
 
   /** Conversations already warned about an empty reply (one warning each). */
   private warnedEmptyConversations = new Set<string>();
+
+  /** Client functions the backend has accepted from a WebMCP call report. */
+  private declaredExternally = new Set<string>();
 
   /** Whether the placeholder-mode page-data warning has already been logged. */
   private warnedPageDataPlaceholder = false;
@@ -1019,7 +1023,8 @@ export class AgoClient {
   /**
    * @internal Run a function for a caller outside the agent loop (the WebMCP
    * bridge). Runs immediately, since the approval gate covers the agent loop
-   * only. Emits `function:invoke` and `function:result` like an agent call.
+   * only. Emits `function:invoke` and `function:result` like an agent call, and
+   * reports the call for analytics.
    */
   async runExternalFunction(
     name: string,
@@ -1036,18 +1041,52 @@ export class AgoClient {
 
     this.eventEmitter.emit("function:invoke", invocation);
 
+    const startedAt = Date.now();
     try {
       const result = await this.functionRegistry.execute(name, args);
       this.eventEmitter.emit("function:result", { invocationId, result });
+      this.reportExternalCall(name, args, startedAt, { result });
       return result;
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       this.eventEmitter.emit("function:result", {
         invocationId,
         result: null,
-        error: error instanceof Error ? error.message : String(error),
+        error: message,
       });
+      this.reportExternalCall(name, args, startedAt, { error: message });
       throw error;
     }
+  }
+
+  /**
+   * Best-effort analytics for one WebMCP call. No agent: the caller is someone
+   * else's agent and cannot be known from `execute`.
+   */
+  private reportExternalCall(
+    name: string,
+    args: Record<string, unknown>,
+    startedAt: number,
+    outcome: { result?: unknown; error?: string },
+  ): void {
+    const registration = this.functionRegistry.get(name);
+    if (!registration) return;
+
+    reportExternalCall(
+      {
+        post: (path, body, options) => this.httpClient.post(path, body, options),
+        declared: this.declaredExternally,
+      },
+      {
+        schema: registration.schema,
+        args,
+        durationMs: Date.now() - startedAt,
+        navigates: registration.webmcp
+          ? registration.webmcp.navigates
+          : undefined,
+        ...outcome,
+      },
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────
