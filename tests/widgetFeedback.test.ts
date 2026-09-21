@@ -75,6 +75,30 @@ describe("widget feedback row", () => {
     cleanup();
   });
 
+  it("shows on a text-less answer (a turn that only opened a form)", async () => {
+    const { root, cleanup } = await mountWithAnswer(
+      { feedback: true },
+      makeAssistantMessage({ content: "" }),
+    );
+
+    expect(thumbs(root)).toHaveLength(2);
+
+    cleanup();
+  });
+
+  it("comes back pressed on an answer this user already rated", async () => {
+    const { root, cleanup } = await mountWithAnswer(
+      { feedback: true },
+      makeAssistantMessage({ feedback: "positive" }),
+    );
+
+    const [up, down] = thumbs(root);
+    expect(up.getAttribute("aria-pressed")).toBe("true");
+    expect(down.getAttribute("aria-pressed")).toBe("false");
+
+    cleanup();
+  });
+
   it("sends the thumb as soon as it is clicked", async () => {
     const { root, feedbackSpy, cleanup } = await mountWithAnswer({
       feedback: true,
