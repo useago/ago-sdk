@@ -19,6 +19,8 @@ export interface ModelContextToolLike {
   annotations?: {
     readOnlyHint?: boolean;
     untrustedContentHint?: boolean;
+    consequentialHint?: boolean;
+    debugging?: boolean;
   };
 }
 

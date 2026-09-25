@@ -514,10 +514,27 @@ client.registerFunction({
   description: "The flights currently on screen, after filtering.",
   parameters: { type: "object", properties: {} },
   handler: () => visibleFlights(),
-  // Optional, WebMCP only: MCP behavior hints.
+  // Optional, WebMCP only: tool annotations.
   webmcp: { annotations: { readOnlyHint: true } },
 });
 ```
+
+The optional `webmcp.annotations` fields describe the tool to browser agents:
+
+| Annotation | Meaning when `true` |
+| --- | --- |
+| `readOnlyHint` | Only reads data and does not change state. |
+| `untrustedContentHint` | Returns content untrusted by the tool author, such as customer reviews. |
+| `consequentialHint` | Has significant, real-world, or irreversible effects, such as purchasing a flight. |
+| `debugging` | Is intended for debugging and developer tooling. |
+
+All four default to `false` in WebMCP. For example, a purchase tool can set
+`webmcp: { annotations: { consequentialHint: true } }`, and a diagnostic tool
+can set `webmcp: { annotations: { debugging: true } }`.
+
+The SDK forwards these annotations to the browser without changing AGO's
+in-app agent behavior. `consequentialHint` and `requiresApproval` are independent:
+neither sets the other, and annotations do not enforce confirmation dialogs.
 
 In React it is a prop:
 

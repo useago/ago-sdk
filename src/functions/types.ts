@@ -188,16 +188,21 @@ export interface AgoPageStateOptions {
   settleTimeoutMs?: number;
 }
 
-/** The MCP behavior hints AGO has no equivalent for. */
+/** Metadata for tools exposed through the WebMCP bridge. */
 export interface WebMCPToolMeta {
   /**
-   * Both default to `false`, so only set what is true: `readOnlyHint` marks a
-   * function that changes nothing, `untrustedContentHint` one whose result may
-   * carry third-party text.
+   * Optional WebMCP metadata; all fields default to `false` in WebMCP.
+   * These annotations do not affect AGO's in-app agent or approval behavior.
    */
   annotations?: {
+    /** The tool only reads data and does not change state. */
     readOnlyHint?: boolean;
+    /** The output contains content untrusted by the tool author. */
     untrustedContentHint?: boolean;
+    /** Significant, real-world, or irreversible effects; independent of requiresApproval. */
+    consequentialHint?: boolean;
+    /** Intended for debugging and developer tooling. */
+    debugging?: boolean;
   };
   /**
    * This function navigates. The WebMCP call is held open until the function
