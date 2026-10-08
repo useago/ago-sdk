@@ -13,6 +13,27 @@ afterEach(() => {
 });
 
 describe("getConfig", () => {
+  it("retains Zendesk translations and the original labels and values", async () => {
+    const title = { source: "Topic", default: "Topic", values: { fr: "Sujet" } };
+    const help = { source: "Choose", default: "Choose", values: { fr: "Choisissez" } };
+    const name = { source: "Billing", default: "Billing", values: { fr: "Facturation" } };
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ permissions: [{ ticket_form: {
+      id: "form", fields: [{
+        id: "topic", title: "AGO override", description: "Choose",
+        translations: { title, description: help },
+        options: [{ id: "billing", name: "Billing", value: "billing_tag", translations: { name } }],
+      }],
+    } }] })));
+    const client = new AgoClient({ baseUrl: "https://example.test", language: "fr" });
+    try {
+      const field = (await client.getConfig()).permissions[0].ticketForm!.fields[0];
+      expect(field).toMatchObject({ title: "AGO override", description: "Choose", translations: { title, description: help } });
+      expect(field.options[0]).toMatchObject({ name: "Billing", value: "billing_tag", translations: { name } });
+    } finally {
+      client.destroy();
+    }
+  });
+
   it("maps speech-to-text availability separately from voice and defaults to disabled", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ permissions: [
       { speech_to_text_enabled: true, voice_enabled: false },
