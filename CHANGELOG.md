@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Ticket-field labels, help text and choices use the client's `language`
+  when the backend supplies translations. Open widget forms refresh after
+  `client.updateConfig({ language })` without losing drafts, selections or files.
+  AGO overrides take precedence; missing locales fall back to the parent language
+  and the configured default text. Custom interfaces can use `ticketFieldText` with
+  the provider-independent `translations` metadata returned by `getConfig()`.
+
 - **`catalogue: "onDemand"` for navigation.** Route descriptions ride in the
   prompt on every message, so a large table costs on every turn. Pass
   `registerNavigationFunction(navigate, routes, { catalogue: "onDemand" })`, or

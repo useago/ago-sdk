@@ -230,11 +230,18 @@ export interface SubmitToolCallResult {
 
 // ── Tickets and the SDK config ─────────────────────────────────────
 
+export interface TicketTextTranslation {
+  source: string;
+  default: string;
+  values: Record<string, string>;
+}
+
 /** An option of a ticket form field (`GET /config` → `ticket_form.fields[].options[]`). */
 export interface TicketFieldOption {
   id: string;
   /** Label shown to the user. */
   name?: string;
+  translations?: { name?: TicketTextTranslation };
   /** Value submitted. Falls back to `name` when absent. */
   value?: string;
   /** Preselected when the form opens. */
@@ -256,6 +263,8 @@ export interface TicketField {
   /** The key the ticketing backend expects; used as the submit key when set. */
   externalId?: string;
   title?: string;
+  description?: string;
+  translations?: { title?: TicketTextTranslation; description?: TicketTextTranslation };
   /** Field kind, e.g. `"text"`, `"checkbox"`, `"tagger"`. */
   type?: string;
   required: boolean;
@@ -618,6 +627,7 @@ export interface SSEChunkData {
  * SDK Events
  */
 export interface AgoClientEvents {
+  "language:changed": { language: string | null };
   /**
    * The client-side context changed: a context entry or dynamic provider was
    * added/removed, or a stateful helper (e.g. `createFormCollector`) updated its

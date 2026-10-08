@@ -80,10 +80,13 @@ import type {
   StopMessageResult,
   SubmitToolCallResult,
   TicketForm,
+  TicketField,
+  TicketFieldOption,
   ToolCallData,
   TranscribeAudioOptions,
 } from "./types";
 import { validateConfig } from "./validateConfig";
+import { normalizeLanguage } from "./language";
 
 /** `GET /api/sdk/v1/config` as the backend serializes it (snake_case). */
 interface RawTicketForm {
@@ -101,6 +104,8 @@ interface RawTicketForm {
     id: string;
     external_id?: string | null;
     title?: string | null;
+    description?: string | null;
+    translations?: TicketField["translations"] | null;
     type?: string | null;
     required?: boolean;
     hidden?: boolean;
@@ -111,6 +116,7 @@ interface RawTicketForm {
     options?: Array<{
       id: string;
       name?: string | null;
+      translations?: TicketFieldOption["translations"] | null;
       value?: string | null;
       default?: boolean;
       position?: number | null;
@@ -1332,6 +1338,8 @@ export class AgoClient {
         id: f.id,
         externalId: f.external_id ?? undefined,
         title: f.title ?? undefined,
+        description: f.description ?? undefined,
+        translations: f.translations ?? undefined,
         type: f.type ?? undefined,
         required: !!f.required,
         hidden: !!f.hidden,
@@ -1342,6 +1350,7 @@ export class AgoClient {
         options: (f.options ?? []).map((o) => ({
           id: o.id,
           name: o.name ?? undefined,
+          translations: o.translations ?? undefined,
           value: o.value ?? undefined,
           default: !!o.default,
           position: o.position ?? undefined,
@@ -2143,6 +2152,10 @@ export class AgoClient {
     };
   }
 
+  getLanguage(): string | null {
+    return normalizeLanguage(this.config.language);
+  }
+
   /**
    * Enable automatic capture of the current browser page (URL + title).
    * Injected as a dynamic context entry named `browser-page`.
@@ -2407,8 +2420,13 @@ export class AgoClient {
     const merged = { ...this.config, ...cleaned };
     validateConfig(merged, "AgoClient.updateConfig");
 
+    const previousLanguage = this.getLanguage();
     this.config = merged;
     this.httpClient.updateConfig(cleaned);
+    const language = this.getLanguage();
+    if (language !== previousLanguage) {
+      this.eventEmitter.emit("language:changed", { language });
+    }
 
     if (cleaned.debug !== undefined) {
       if (cleaned.debug) {

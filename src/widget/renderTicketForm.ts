@@ -16,6 +16,7 @@ import type {
   TicketForm,
   ToolCallTicketPrefill,
 } from "../client/types";
+import { ticketFieldText } from "../client/ticketFieldTranslations";
 import {
   availableOptions,
   fieldEnabled,
@@ -148,6 +149,7 @@ export function computeTicketFormErrors(
   state: TicketFormState,
   labels: ToolCallFormLabels,
   requireEmail: boolean,
+  language: string | null = null,
 ): Record<string, string> {
   const errors: Record<string, string> = {};
   const t = state.ticket;
@@ -162,13 +164,15 @@ export function computeTicketFormErrors(
     const value = state.customFields[fieldKey(field)];
     if (field.required && !value?.trim()) {
       errors[fieldKey(field)] = fill(labels.fieldRequired, {
-        fieldTitle: field.title ?? "",
+        fieldTitle: ticketFieldText(field.title, field.translations?.title, language),
       });
     } else if (field.regexpForValidation && value?.trim()) {
       // Invalid admin patterns should not crash the entire form.
       try {
         if (!new RegExp(field.regexpForValidation).test(value)) {
-          errors[fieldKey(field)] = fill(labels.fieldFormatInvalid, { fieldTitle: field.title ?? "" });
+          errors[fieldKey(field)] = fill(labels.fieldFormatInvalid, {
+            fieldTitle: ticketFieldText(field.title, field.translations?.title, language),
+          });
         }
       } catch {
         // Leave malformed patterns to server validation.
@@ -325,6 +329,7 @@ export function renderTicketDenied(markdown: string): HTMLElement {
 }
 
 export interface TicketFormViewOptions {
+  language?: string | null;
   state: TicketFormState;
   /** Null while the config loads or when the tenant has no ticket form. */
   ticketForm: TicketForm | null;
@@ -357,7 +362,7 @@ export interface TicketFormViewOptions {
 export interface TicketFormView {
   el: HTMLElement;
   /** Re-render from the current state (after the config arrives, for instance). */
-  rebuild: (next?: Partial<Pick<TicketFormViewOptions, "ticketForm" | "configLoading" | "allowFiles">>) => void;
+  rebuild: (next?: Partial<Pick<TicketFormViewOptions, "ticketForm" | "configLoading" | "allowFiles" | "language">>) => void;
 }
 
 export function createTicketFormView(opts: TicketFormViewOptions): TicketFormView {
@@ -365,6 +370,7 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
   let ticketForm = opts.ticketForm;
   let configLoading = opts.configLoading;
   let allowFiles = opts.allowFiles;
+  let language = opts.language ?? null;
 
   const root = div({
     position: "relative",
@@ -382,7 +388,7 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
 
   function validate(): boolean {
     if (!ticketForm) return false;
-    state.errors = computeTicketFormErrors(ticketForm, state, labels, opts.requireEmail);
+    state.errors = computeTicketFormErrors(ticketForm, state, labels, opts.requireEmail, language);
     return Object.keys(state.errors).length === 0;
   }
 
@@ -452,6 +458,21 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
     const value = state.customFields[key] ?? "";
     const disabled = state.loading;
     const error = state.errors[key];
+    const title = ticketFieldText(field.title, field.translations?.title, language);
+    const description = field.translations?.description
+      ? ticketFieldText(field.description, field.translations.description, language)
+      : "";
+    const group = fieldGroup();
+    function appendDescription(control: HTMLElement): void {
+      if (!description) return;
+      const help = document.createElement("p");
+      help.id = `${id}-description`;
+      help.className = "ago-ticket-form__description";
+      help.textContent = description;
+      css(help, { margin: "0", fontSize: "14px", lineHeight: "20px", whiteSpace: "pre-line", overflowWrap: "anywhere" });
+      control.setAttribute("aria-describedby", help.id);
+      group.appendChild(help);
+    }
     if (field.type === "checkbox") {
       const row = div({ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" });
       row.className = "ago-ticket-form__field";
@@ -464,14 +485,15 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
       box.addEventListener("change", () => setCustomField(field, box.checked ? "true" : "false"));
       const label = document.createElement("label");
       label.htmlFor = id;
-      label.textContent = field.title ?? "";
+      label.textContent = title;
       label.style.fontWeight = "600";
       row.append(box, label);
-      if (error) row.appendChild(errorEl(error));
-      return row;
+      group.appendChild(row);
+      appendDescription(box);
+      if (error) group.appendChild(errorEl(error));
+      return group;
     }
-    const group = fieldGroup();
-    group.appendChild(labelEl(field.title ?? "", id));
+    group.appendChild(labelEl(title, id));
     const options = availableOptions(ticketForm!, field, state.customFields, state.ticket.typology)
       .filter((option) => !option.noDisplay);
     if (field.options.length > 0) {
@@ -485,7 +507,7 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
       for (const option of options) {
         const el = document.createElement("option");
         el.value = option.value ?? option.name ?? "";
-        el.textContent = option.name ?? option.value ?? "";
+        el.textContent = ticketFieldText(option.name ?? option.value, option.translations?.name, language);
         if (option.group) {
           let group = groups.get(option.group);
           if (!group) {
@@ -501,6 +523,7 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
       applyControlState(select, !!error, disabled);
       select.addEventListener("change", () => setCustomField(field, select.value));
       group.appendChild(select);
+      appendDescription(select);
       const picked = options.find((o) => (o.value ?? o.name) === value);
       if (error) group.appendChild(errorEl(error));
       if (picked?.message) {
@@ -543,6 +566,7 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
     // Reveal the next field once the user leaves a filled text field.
     input.addEventListener("change", () => render());
     group.appendChild(input);
+    appendDescription(input);
     if (error) group.appendChild(errorEl(error));
     return group;
   }
@@ -926,6 +950,10 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
       if (next && "ticketForm" in next) ticketForm = next.ticketForm ?? null;
       if (next && "configLoading" in next) configLoading = !!next.configLoading;
       if (next && "allowFiles" in next) allowFiles = !!next.allowFiles;
+      if (next && "language" in next) {
+        language = next.language ?? null;
+        if (state.submittedOnce) validate();
+      }
       render();
     },
   };
