@@ -178,7 +178,7 @@ describe("createFormCollector", () => {
     expect(spy).toHaveBeenCalledWith("order", {
       product: "Widget",
       quantity: 5,
-    });
+    }, undefined);
     expect(result).toEqual({ ok: true, result: { status: "completed" } });
 
     uninstall();

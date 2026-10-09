@@ -1567,10 +1567,12 @@ export class AgoClient {
   async submitFormCollector(
     name: string,
     values: Record<string, unknown>,
+    conversationId?: string,
   ): Promise<unknown> {
     return this.httpClient.post("/api/sdk/v1/forms/submit", {
       name,
       values,
+      conversation_id: conversationId,
     });
   }
 
