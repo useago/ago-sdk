@@ -188,17 +188,22 @@ export interface AgoPageStateOptions {
   settleTimeoutMs?: number;
 }
 
-/** The MCP behavior hints AGO has no equivalent for. */
+/** Optional WebMCP metadata describing a tool's behavior. */
+export interface WebMCPToolAnnotations {
+  /** The tool reads data without modifying state. Defaults to `false`. */
+  readOnlyHint?: boolean;
+  /** The tool may return content the registering application does not trust. */
+  untrustedContentHint?: boolean;
+  /** The tool performs a significant, real-world, or non-reversible action. */
+  consequentialHint?: boolean;
+  /** The tool is intended for debugging or developer tooling. */
+  debugging?: boolean;
+}
+
+/** WebMCP-only function metadata AGO has no equivalent for. */
 export interface WebMCPToolMeta {
-  /**
-   * Both default to `false`, so only set what is true: `readOnlyHint` marks a
-   * function that changes nothing, `untrustedContentHint` one whose result may
-   * carry third-party text.
-   */
-  annotations?: {
-    readOnlyHint?: boolean;
-    untrustedContentHint?: boolean;
-  };
+  /** Behavior hints passed unchanged to WebMCP. All default to `false`. */
+  annotations?: WebMCPToolAnnotations;
   /**
    * This function navigates. The WebMCP call is held open until the function
    * registry goes quiet, so the caller sees the destination page's tools rather

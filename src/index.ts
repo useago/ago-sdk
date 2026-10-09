@@ -101,6 +101,7 @@ export type {
   ClientFunctionRegisterOptions,
   ClientFunctionSchema,
   RegisteredFunction,
+  WebMCPToolAnnotations,
   WebMCPToolMeta,
 } from "./functions/types";
 

@@ -565,10 +565,12 @@ Prefer callbacks over raw events? See the
   → `Promise<{ id, url? }>`: file a support ticket (`POST /tickets`, multipart)
 - `getUserIdentity()` → `{ email?, hasJwt }`: how the client identifies the
   visitor (the ticket form asks for an email when it has neither)
-- `submitFormCollector(name, values)` → `Promise<unknown>`: relay form
+- `submitFormCollector(name, values, conversationId?)` → `Promise<unknown>`: relay form
   values through the backend, which resolves the destination from the named
   form's stored definition (used by `createFormCollector` in
-  `{ via: "backend" }` mode)
+  `{ via: "backend" }` mode). Installed collectors include the conversation reference
+  from live messages or a reopened conversation automatically. Direct calls can
+  supply it as the third argument to link the submission in the admin conversation list.
 - `submitFeedback(messageId, "positive" | "negative", details?)`
   - `details.reasons?: FeedbackReason[]` · `details.comment?: string`
 - `submitConversationFeedback(conversationId, rating, details?)` →
