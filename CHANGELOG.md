@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **All WebMCP tool annotations.** Function metadata now supports
+  `readOnlyHint`, `untrustedContentHint`, `consequentialHint`, and `debugging`.
+  The reusable `WebMCPToolAnnotations` type is exported from `@useago/sdk`.
 - **`catalogue: "onDemand"` for navigation.** Route descriptions ride in the
   prompt on every message, so a large table costs on every turn. Pass
   `registerNavigationFunction(navigate, routes, { catalogue: "onDemand" })`, or

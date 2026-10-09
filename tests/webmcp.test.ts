@@ -106,11 +106,23 @@ describe("WebMCP bridge", () => {
     it("carries the annotations from the webmcp metadata", async () => {
       client.register({
         ...echo,
-        webmcp: { annotations: { readOnlyHint: true } },
+        webmcp: {
+          annotations: {
+            readOnlyHint: true,
+            untrustedContentHint: true,
+            consequentialHint: true,
+            debugging: true,
+          },
+        },
       });
       await vi.waitFor(() => expect(mc.names()).toEqual(["echo"]));
 
-      expect(mc.get("echo").annotations).toEqual({ readOnlyHint: true });
+      expect(mc.get("echo").annotations).toEqual({
+        readOnlyHint: true,
+        untrustedContentHint: true,
+        consequentialHint: true,
+        debugging: true,
+      });
     });
 
     it("skips a function that opted out with webmcp: false", async () => {

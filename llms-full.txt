@@ -1830,10 +1830,22 @@ client.registerFunction({
   description: "The flights currently on screen, after filtering.",
   parameters: { type: "object", properties: {} },
   handler: () => visibleFlights(),
-  // Optional, WebMCP only: MCP behavior hints.
+  // Optional WebMCP behavior hints.
   webmcp: { annotations: { readOnlyHint: true } },
 });
 ```
+
+WebMCP supports four optional annotations. All default to `false`:
+
+- `readOnlyHint`: the function reads data without modifying state.
+- `untrustedContentHint`: the result may contain content your application does
+  not trust.
+- `consequentialHint`: the function performs a significant, real-world, or
+  non-reversible action.
+- `debugging`: the function is intended for debugging or developer tooling.
+
+The SDK passes these hints to the browser unchanged. They do not affect AGO's
+approval policy.
 
 In React it is a prop:
 

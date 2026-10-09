@@ -1,4 +1,7 @@
-import type { RegisteredFunction } from "../functions/types";
+import type {
+  RegisteredFunction,
+  WebMCPToolAnnotations,
+} from "../functions/types";
 
 /**
  * The slice of the WebMCP browser API this bridge uses. Declared structurally
@@ -16,10 +19,7 @@ export interface ModelContextToolLike {
     /** Aborted when the caller cancels this invocation. */
     options?: { signal?: AbortSignal }
   ) => Promise<unknown> | unknown;
-  annotations?: {
-    readOnlyHint?: boolean;
-    untrustedContentHint?: boolean;
-  };
+  annotations?: WebMCPToolAnnotations;
 }
 
 export interface ModelContextLike {
