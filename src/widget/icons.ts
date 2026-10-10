@@ -94,7 +94,7 @@ export const LAUNCHER_CLOSE_PATH =
  * `data-ago-path="open" | "close"` (the caller flips `display`).
  */
 export function launcherIcon(): SVGSVGElement {
-  const el = svg("0 -960 960 960", 48);
+  const el = launcherSvg();
   el.appendChild(filledPath(LAUNCHER_OPEN_PATH, "open"));
   el.appendChild(filledPath(LAUNCHER_CLOSE_PATH, "close"));
   return el;
@@ -102,8 +102,15 @@ export function launcherIcon(): SVGSVGElement {
 
 /** Just the close chevron, for a launcher showing a custom `icon` image. */
 export function launcherCloseIcon(): SVGSVGElement {
-  const el = svg("0 -960 960 960", 48);
+  const el = launcherSvg();
   el.appendChild(filledPath(LAUNCHER_CLOSE_PATH, "close"));
+  return el;
+}
+
+function launcherSvg(): SVGSVGElement {
+  const el = svg("0 -960 960 960", 48);
+  el.style.width = "100%";
+  el.style.height = "100%";
   return el;
 }
 

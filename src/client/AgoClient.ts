@@ -1153,6 +1153,7 @@ export class AgoClient {
         attachments?: Array<Record<string, unknown>>;
         sources?: Array<{ id: string; title: string; url?: string | null }>;
         follow_up_replies?: string[];
+        feedback?: FeedbackRating | null;
       }>;
     }>(`/api/sdk/v1/conversations/${conversationId}`);
 
@@ -1185,6 +1186,7 @@ export class AgoClient {
           m.follow_up_replies && m.follow_up_replies.length > 0
             ? m.follow_up_replies
             : undefined,
+        feedback: m.feedback ?? undefined,
       })),
     };
 
