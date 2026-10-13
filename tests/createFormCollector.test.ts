@@ -905,6 +905,40 @@ describe("createFormCollector submit events", () => {
     required: ["product", "quantity"],
   };
 
+  it("emits submitting before the backend request and once for concurrent submits", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    let finish!: (result: unknown) => void;
+    const response = new Promise((resolve) => { finish = resolve; });
+    const events: string[] = [];
+    const onSubmitting = vi.fn(() => events.push("submitting"));
+    client.on("form:submitting", onSubmitting);
+    client.on("form:submitted", () => events.push("submitted"));
+    const request = vi.spyOn(client, "submitFormCollector").mockImplementation(async () => {
+      events.push("request");
+      return response;
+    });
+    const c = createFormCollector({
+      name: "order",
+      schema: completeSchema,
+      initialValues: { product: "Widget", quantity: 2 },
+      autoSubmit: false,
+      submit: { via: "backend" },
+    });
+    const uninstall = c.install(client);
+    const first = c.submit();
+    const second = c.submit();
+    expect(events).toEqual(["submitting", "request"]);
+    expect(onSubmitting).toHaveBeenCalledExactlyOnceWith({
+      name: "order", values: { product: "Widget", quantity: 2 },
+    });
+    expect(request).toHaveBeenCalledTimes(1);
+    finish({ id: 42 });
+    await Promise.all([first, second]);
+    expect(events).toEqual(["submitting", "request", "submitted"]);
+    uninstall();
+    client.destroy();
+  });
+
   it("emits form:submitted with name, values, and result on success", async () => {
     const client = new AgoClient({ baseUrl: "https://example.test" });
     const c = createFormCollector({
@@ -913,6 +947,8 @@ describe("createFormCollector submit events", () => {
       schema: completeSchema,
       submit: { via: "client", handler: async () => ({ id: 42 }) },
     });
+    const onSubmitting = vi.fn();
+    client.on("form:submitting", onSubmitting);
     const onSubmitted = vi.fn();
     const onError = vi.fn();
     client.on("form:submitted", onSubmitted);
@@ -922,6 +958,7 @@ describe("createFormCollector submit events", () => {
     // The fill that completes the form auto-submits.
     await c.functions[0].handler({ product: "Widget", quantity: 2 });
 
+    expect(onSubmitting).toHaveBeenCalledTimes(1);
     expect(onSubmitted).toHaveBeenCalledTimes(1);
     expect(onSubmitted).toHaveBeenCalledWith({
       name: "order",
@@ -947,6 +984,8 @@ describe("createFormCollector submit events", () => {
         },
       },
     });
+    const onSubmitting = vi.fn();
+    client.on("form:submitting", onSubmitting);
     const onSubmitted = vi.fn();
     const onError = vi.fn();
     client.on("form:submitted", onSubmitted);
@@ -955,6 +994,7 @@ describe("createFormCollector submit events", () => {
 
     await c.functions[0].handler({ product: "Widget", quantity: 2 });
 
+    expect(onSubmitting).toHaveBeenCalledTimes(1);
     expect(onError).toHaveBeenCalledTimes(1);
     expect(onError).toHaveBeenCalledWith({
       name: "order",
@@ -1003,6 +1043,8 @@ describe("createFormCollector submit events", () => {
       submit: { via: "client", handler: async () => ({ id: 1 }) },
       autoSubmit: false,
     });
+    const onSubmitting = vi.fn();
+    client.on("form:submitting", onSubmitting);
     const onSubmitted = vi.fn();
     const onError = vi.fn();
     client.on("form:submitted", onSubmitted);
@@ -1011,6 +1053,7 @@ describe("createFormCollector submit events", () => {
 
     const res = await c.submit();
     expect(res).toEqual({ ok: false, missing: ["product", "quantity"] });
+    expect(onSubmitting).not.toHaveBeenCalled();
     expect(onSubmitted).not.toHaveBeenCalled();
     expect(onError).not.toHaveBeenCalled();
 

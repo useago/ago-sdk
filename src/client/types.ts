@@ -724,6 +724,11 @@ export interface AgoClientEvents {
     result: unknown;
     error?: string;
   };
+  /** A validated form collector submission is about to call its submit target. */
+  "form:submitting": {
+    name: string;
+    values: Record<string, unknown>;
+  };
   /**
    * A form collector submitted successfully. `result` is the raw submit response
    * (POST body / handler return value / backend relay result) — the third-party

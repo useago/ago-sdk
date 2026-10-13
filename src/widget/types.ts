@@ -538,6 +538,11 @@ export interface MountChatWidgetOptions {
   onMessageSent?: (content: string) => void;
   /** Called when an assistant message completes. */
   onMessageReceived?: (message: { id: string; content: string }) => void;
+  /** Called after validation, just before the form submission starts. */
+  onFormSubmitting?: (data: {
+    name: string;
+    values: Record<string, unknown>;
+  }) => void;
   /**
    * Called when a form collector submits successfully. `result` is the raw submit
    * response (the third-party API's answer); `values` are the submitted fields.

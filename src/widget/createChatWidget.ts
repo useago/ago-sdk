@@ -244,6 +244,7 @@ export function mountChatWidget(
     onFollowUpClick,
     onMessageSent,
     onMessageReceived,
+    onFormSubmitting,
     onFormSubmitted,
     onFormError,
     onOpen,
@@ -1689,11 +1690,15 @@ export function mountChatWidget(
   // Forward form submit outcomes to the optional callbacks. The success notice is
   // still driven by the collector store below; these are additive (and the only
   // way to observe a failure, which never touches the store).
+  const onFormSubmittingEvent = (
+    data: AgoClientEvents["form:submitting"],
+  ): void => onFormSubmitting?.(data);
   const onFormSubmittedEvent = (
     data: AgoClientEvents["form:submitted"],
   ): void => onFormSubmitted?.(data);
   const onFormErrorEvent = (data: AgoClientEvents["form:error"]): void =>
     onFormError?.(data);
+  if (onFormSubmitting) client.on("form:submitting", onFormSubmittingEvent);
   if (onFormSubmitted) client.on("form:submitted", onFormSubmittedEvent);
   if (onFormError) client.on("form:error", onFormErrorEvent);
 
@@ -2201,6 +2206,7 @@ export function mountChatWidget(
       client.off("conversation:title", onTitle);
       client.off("toolCall:received", onToolCall);
       clearToolCallViews();
+      if (onFormSubmitting) client.off("form:submitting", onFormSubmittingEvent);
       if (onFormSubmitted) client.off("form:submitted", onFormSubmittedEvent);
       if (onFormError) client.off("form:error", onFormErrorEvent);
       formsDestroyed = true;

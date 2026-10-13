@@ -440,8 +440,19 @@ export function createFormCollector<V = Record<string, unknown>>(
       };
     }
 
+    if (submitConfig.via === "backend" && !boundClient) {
+      return {
+        ok: false,
+        error: "Backend submit requires install(client) (or useFormCollector) first.",
+      };
+    }
+
     const submitValues = values as V;
     try {
+      boundClient?.emitFormEvent("form:submitting", {
+        name,
+        values: submitValues as Record<string, unknown>,
+      });
       let result: unknown;
       if (submitConfig.via === "client") {
         if ("handler" in submitConfig) {
@@ -463,14 +474,7 @@ export function createFormCollector<V = Record<string, unknown>>(
       } else {
         // via: "backend" — relay by form name; the backend resolves the destination
         // from the stored definition, so the URL + secret stay server-side.
-        if (!boundClient) {
-          return {
-            ok: false,
-            error:
-              "Backend submit requires install(client) (or useFormCollector) first.",
-          };
-        }
-        result = await boundClient.submitFormCollector(
+        result = await boundClient!.submitFormCollector(
           name,
           submitValues as Record<string, unknown>,
         );

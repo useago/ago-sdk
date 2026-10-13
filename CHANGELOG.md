@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.3] - 2026-10-13
+
 ### Added
+
+- **Form submission start notifications.** Use `form:submitting`, the
+  `onFormSubmitting` helper, or the widget callback to show a loading state
+  after validation and before submission starts. Concurrent submits share one
+  start notification; success and failure use the existing outcome events.
 
 - **WebMCP `consequentialHint` and `debugging` annotations.** Both are now
   supported in `webmcp.annotations` and forwarded to browser agents.
@@ -15,21 +22,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   effects; `debugging` marks developer tools. These annotations do not change
   AGO's in-app agent or approval behavior. `consequentialHint` remains
   independent of `requiresApproval`.
-
-## [1.13.2] - 2026-09-21
-
-### Fixed
-
-- Navigation tool descriptions now guide the agent to use the destination
-  page's functions and state to complete remaining requested actions, in both
-  inline and on-demand catalogue modes. The auto-continue helper is still
-  needed to wait for destination page-state registration before continuing.
-- Current-page context identifies the route by URL and matched page name,
-  without a potentially stale document title. Recent-activity context now
-  directs the agent to current-page context for the user's current location.
-- Empty page-state enums are omitted from advertised tool schemas so providers
-  do not reject them. Execution still rejects unavailable selections while
-  allowing empty arrays and clearing clearable strings.
 
 ## [1.13.1] - 2026-09-21
 
