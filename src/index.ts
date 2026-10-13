@@ -17,6 +17,7 @@ export type {
   AgoMessage,
   AgoSource,
   AudioTranscription,
+  BackgroundAgentRunState,
   ClientFunction,
   ClientFunctionInvocation,
   ClientFunctionsMode,

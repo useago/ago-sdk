@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Conversation history exposes background-agent outcome, checklist, execution
+  status and completion notice through `AgoMessage.backgroundAgent`, with the
+  exported `BackgroundAgentRunState` type. Available through `getConversation()`
+  and `getMessages()` when supported by the backend.
+
 - **`catalogue: "onDemand"` for navigation.** Route descriptions ride in the
   prompt on every message, so a large table costs on every turn. Pass
   `registerNavigationFunction(navigate, routes, { catalogue: "onDemand" })`, or
