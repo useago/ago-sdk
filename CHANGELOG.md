@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Backend form submissions include the current conversation reference, allowing administrators to open them from Conversations. Standalone submissions can pass an optional conversation ID to `submitFormCollector`.
+
 ## [1.13.3] - 2026-10-13
 
 ### Added

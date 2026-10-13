@@ -1,5 +1,5 @@
 import type { AgoClient } from "../client/AgoClient";
-import type { Conversation, ToolCallData } from "../client/types";
+import type { AgoClientEvents, Conversation, ToolCallData } from "../client/types";
 import type {
   ClientFunctionDefinition,
   ClientFunctionSchema,
@@ -411,6 +411,7 @@ export function createFormCollector<V = Record<string, unknown>>(
   };
 
   let boundClient: AgoClient | null = null;
+  let conversationId: string | undefined;
 
   // Surface a submit failure on the client event bus (no-op until installed).
   const emitFormError = (values: V, error: string): void => {
@@ -477,6 +478,7 @@ export function createFormCollector<V = Record<string, unknown>>(
         result = await boundClient!.submitFormCollector(
           name,
           submitValues as Record<string, unknown>,
+          conversationId,
         );
       }
       store.set({ ...store.get(), submitted: true, submitResult: result });
@@ -636,7 +638,12 @@ export function createFormCollector<V = Record<string, unknown>>(
     };
   };
 
+  const handleStreamMessage = (data: AgoClientEvents["stream:message"]): void => {
+    if (data.thread?.id) conversationId = data.thread.id;
+  };
+
   const handleConversationLoaded = (conversation: Conversation): void => {
+    conversationId = conversation.id;
     const toolCalls = (conversation.messages ?? []).flatMap(
       (m) => m.toolCalls ?? [],
     );
@@ -659,6 +666,7 @@ export function createFormCollector<V = Record<string, unknown>>(
     const unsubscribe = store.subscribe(() => client.notifyContextChanged());
     // Restore the form after a reload: a loaded conversation replays its tool calls.
     client.on("conversation:loaded", handleConversationLoaded);
+    client.on("stream:message", handleStreamMessage);
     return () => {
       unsubscribe();
       for (const fn of functions) {
@@ -667,8 +675,10 @@ export function createFormCollector<V = Record<string, unknown>>(
       client.removeDynamicContext(contextKey);
       client.removeDynamicContext(definitionContextKey);
       client.off("conversation:loaded", handleConversationLoaded);
+      client.off("stream:message", handleStreamMessage);
       if (boundClient === client) {
         boundClient = null;
+        conversationId = undefined;
       }
     };
   };
@@ -692,6 +702,7 @@ export function createFormCollector<V = Record<string, unknown>>(
       void maybeAutoSubmit();
     },
     reset: () => {
+      conversationId = undefined;
       store.set({
         values: initialValues,
         submitted: false,
