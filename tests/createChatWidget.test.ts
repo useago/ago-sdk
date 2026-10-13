@@ -194,6 +194,7 @@ describe("mountChatWidget", () => {
     const root = document.createElement("div");
     document.body.appendChild(root);
 
+    const onFormSubmitting = vi.fn();
     const onFormSubmitted = vi.fn();
     const widget = mountChatWidget(root, {
       client,
@@ -203,11 +204,15 @@ describe("mountChatWidget", () => {
           submit: { via: "client", handler: async () => ({ id: 42 }) },
         },
       ],
+      onFormSubmitting,
       onFormSubmitted,
     });
 
     await completeOrderForm(client);
 
+    expect(onFormSubmitting).toHaveBeenCalledExactlyOnceWith({
+      name: "order", values: { product: "Widget", quantity: 2 },
+    });
     expect(onFormSubmitted).toHaveBeenCalledWith({
       name: "order",
       values: { product: "Widget", quantity: 2 },
@@ -215,6 +220,8 @@ describe("mountChatWidget", () => {
     });
 
     widget.destroy();
+    client.emitFormEvent("form:submitting", { name: "order", values: {} });
+    expect(onFormSubmitting).toHaveBeenCalledTimes(1);
     root.remove();
     client.destroy();
   });

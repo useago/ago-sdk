@@ -40,6 +40,7 @@ const final = await client.waitFor("message:complete", { timeout: 10_000 });
 | `function:result` | `{ invocationId, result, error? }` |
 | `activity:recorded` | `ActivityEntry`: a user- or agent-action was recorded into the activity ledger (via `recordActivity`, or auto-recorded when the agent calls a client function). See [Activity ledger](functions-and-context.md#activity-ledger) |
 | `error:captured` | `CapturedError`: the error watcher captured a JavaScript error (uncaught exception, unhandled rejection, `console.error`, or `reportError`). Fires on repeats too, with the updated `count`. Needs `errorWatcher` in the config. See [JavaScript errors](functions-and-context.md#javascript-errors) |
+| `form:submitting` | `{ name, values }`: validated submission is about to start |
 | `form:submitted` | `{ name, values, result }`: a form collector submitted successfully; `result` is the submit response (the third-party API's answer) |
 | `form:error` | `{ name, values, error }`: a form collector submit failed at the network/server level (HTTP non-2xx or a thrown handler/fetch). Validation pre-checks (missing fields, no submit target) do not fire this |
 | `connection:status` | `{ connected }` |
@@ -80,6 +81,7 @@ onMessage(client, (msg) => console.log("complete:", msg.content));
 | `onMessageError(client, cb)` | `message:error` |
 | `onToolCall(client, cb)` | `toolCall:received` |
 | `onFunctionInvoke(client, cb)` | `function:invoke` |
+| `onFormSubmitting(client, cb)` | `form:submitting` |
 | `onFormSubmitted(client, cb)` | `form:submitted` |
 | `onFormError(client, cb)` | `form:error` |
 

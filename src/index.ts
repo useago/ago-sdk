@@ -136,6 +136,7 @@ export {
   createMessageStream,
   onFormError,
   onFormSubmitted,
+  onFormSubmitting,
   onFunctionInvoke,
   onMessage,
   onMessageChunk,

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.3] - 2026-10-13
+
+### Added
+
+- **Form submission start notifications.** Use `form:submitting`, the
+  `onFormSubmitting` helper, or the widget callback to show a loading state
+  after validation and before submission starts. Concurrent submits share one
+  start notification; success and failure use the existing outcome events.
+
+- **WebMCP `consequentialHint` and `debugging` annotations.** Both are now
+  supported in `webmcp.annotations` and forwarded to browser agents.
+  `consequentialHint` describes significant, real-world, or irreversible
+  effects; `debugging` marks developer tools. These annotations do not change
+  AGO's in-app agent or approval behavior. `consequentialHint` remains
+  independent of `requiresApproval`.
+
+## [1.13.1] - 2026-09-21
+
 ### Added
 
 - **`catalogue: "onDemand"` for navigation.** Route descriptions ride in the

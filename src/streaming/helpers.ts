@@ -202,3 +202,12 @@ export async function* createMessageStream(
     client.off("toolCall:received", onTool);
   }
 }
+
+/** Observe a validated form submission before its submit target runs. */
+export function onFormSubmitting(
+  client: AgoClient,
+  callback: (data: AgoClientEvents["form:submitting"]) => void,
+): () => void {
+  client.on("form:submitting", callback);
+  return () => client.off("form:submitting", callback);
+}

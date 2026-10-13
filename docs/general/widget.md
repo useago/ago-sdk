@@ -502,13 +502,16 @@ function the agent calls.
 > string from the submit response when present, otherwise `formSubmittedMessage`.
 
 To run your own logic on submit (and to catch failures, which show no notice), pass
-`onFormSubmitted` / `onFormError`. `result` is the raw submit response (the
+`onFormSubmitting` / `onFormSubmitted` / `onFormError`. `result` is the raw submit response (the
 third-party API's answer):
 
 ```js
 mountChatWidget("#ago-chat", {
   config: { baseUrl: "https://playground.api.useago.com" },
   forms: [{ name: "credit" }],
+  onFormSubmitting: ({ name }) => {
+    console.log(name, "submitting");
+  },
   onFormSubmitted: ({ name, values, result }) => {
     console.log(name, "submitted", result);
   },
@@ -518,7 +521,11 @@ mountChatWidget("#ago-chat", {
 });
 ```
 
-These forward the client's `form:submitted` / `form:error` events, so
+`onFormSubmitting` runs after validation, before the submit target is called.
+Concurrent submits share one request and one start event. Incomplete forms do not
+fire it. Use the success and error callbacks to clear your loading state.
+
+These forward the client's `form:submitting` / `form:submitted` / `form:error` events, so
 `widget.client.on("form:submitted", ...)` works too (see
 [Events](events-and-streaming.md)).
 

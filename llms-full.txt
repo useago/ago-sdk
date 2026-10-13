@@ -1830,10 +1830,27 @@ client.registerFunction({
   description: "The flights currently on screen, after filtering.",
   parameters: { type: "object", properties: {} },
   handler: () => visibleFlights(),
-  // Optional, WebMCP only: MCP behavior hints.
+  // Optional, WebMCP only: tool annotations.
   webmcp: { annotations: { readOnlyHint: true } },
 });
 ```
+
+The optional `webmcp.annotations` fields describe the tool to browser agents:
+
+| Annotation | Meaning when `true` |
+| --- | --- |
+| `readOnlyHint` | Only reads data and does not change state. |
+| `untrustedContentHint` | Returns content untrusted by the tool author, such as customer reviews. |
+| `consequentialHint` | Has significant, real-world, or irreversible effects, such as purchasing a flight. |
+| `debugging` | Is intended for debugging and developer tooling. |
+
+All four default to `false` in WebMCP. For example, a purchase tool can set
+`webmcp: { annotations: { consequentialHint: true } }`, and a diagnostic tool
+can set `webmcp: { annotations: { debugging: true } }`.
+
+The SDK forwards these annotations to the browser without changing AGO's
+in-app agent behavior. `consequentialHint` and `requiresApproval` are independent:
+neither sets the other, and annotations do not enforce confirmation dialogs.
 
 In React it is a prop:
 
@@ -2192,6 +2209,7 @@ const final = await client.waitFor("message:complete", { timeout: 10_000 });
 | `function:result` | `{ invocationId, result, error? }` |
 | `activity:recorded` | `ActivityEntry`: a user- or agent-action was recorded into the activity ledger (via `recordActivity`, or auto-recorded when the agent calls a client function). See [Activity ledger](functions-and-context.md#activity-ledger) |
 | `error:captured` | `CapturedError`: the error watcher captured a JavaScript error (uncaught exception, unhandled rejection, `console.error`, or `reportError`). Fires on repeats too, with the updated `count`. Needs `errorWatcher` in the config. See [JavaScript errors](functions-and-context.md#javascript-errors) |
+| `form:submitting` | `{ name, values }`: validated submission is about to start |
 | `form:submitted` | `{ name, values, result }`: a form collector submitted successfully; `result` is the submit response (the third-party API's answer) |
 | `form:error` | `{ name, values, error }`: a form collector submit failed at the network/server level (HTTP non-2xx or a thrown handler/fetch). Validation pre-checks (missing fields, no submit target) do not fire this |
 | `connection:status` | `{ connected }` |
@@ -2232,6 +2250,7 @@ onMessage(client, (msg) => console.log("complete:", msg.content));
 | `onMessageError(client, cb)` | `message:error` |
 | `onToolCall(client, cb)` | `toolCall:received` |
 | `onFunctionInvoke(client, cb)` | `function:invoke` |
+| `onFormSubmitting(client, cb)` | `form:submitting` |
 | `onFormSubmitted(client, cb)` | `form:submitted` |
 | `onFormError(client, cb)` | `form:error` |
 
