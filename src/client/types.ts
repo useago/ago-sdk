@@ -172,9 +172,22 @@ export interface AgoAttachment {
   isSafeImage: boolean;
 }
 
-/**
- * Message from AGO
- */
+/** Background run state loaded with a conversation's messages. */
+export interface BackgroundAgentRunState {
+  runId: string;
+  /** Backend execution status, separate from whether the objective was achieved. */
+  executionStatus: "pending" | "running" | "done" | "failed" | "waiting_approval";
+  /** Null while unfinished or when a historical run has no recorded outcome. */
+  outcome: "completed" | "incomplete" | "failed" | null;
+  checklist: Array<{
+    name: string;
+    status: "pending" | "in_progress" | "completed" | "failed" | "not_completed";
+    reason: string | null;
+  }> | null;
+  completionNotice: string | null;
+}
+
+/** Message from AGO. */
 export interface AgoMessage {
   id: string;
   conversationId: string;
@@ -185,6 +198,8 @@ export interface AgoMessage {
   sources?: AgoSource[];
   toolCalls?: ToolCallData[];
   followUpReplies?: string[];
+  /** Current background run state returned when loading conversation history. */
+  backgroundAgent?: BackgroundAgentRunState;
   /** Uploaded files on this message (usually the user's). */
   attachments?: AgoAttachment[];
   /**
