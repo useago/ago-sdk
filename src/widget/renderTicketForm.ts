@@ -102,6 +102,7 @@ export function createTicketFormState(
           (f) =>
             f.externalId === key ||
             f.id === key ||
+            f.prefillKey === key ||
             (f.title ? sanitizeTitle(f.title) === key : false),
         );
         if (match) customFields[fieldKey(match)] = value;
@@ -357,11 +358,16 @@ export interface TicketFormViewOptions {
 export interface TicketFormView {
   el: HTMLElement;
   /** Re-render from the current state (after the config arrives, for instance). */
-  rebuild: (next?: Partial<Pick<TicketFormViewOptions, "ticketForm" | "configLoading" | "allowFiles">>) => void;
+  rebuild: (next?: Partial<Pick<TicketFormViewOptions, "ticketForm" | "configLoading" | "allowFiles" | "labels">>) => void;
 }
 
 export function createTicketFormView(opts: TicketFormViewOptions): TicketFormView {
-  const { state, labels } = opts;
+  const { state } = opts;
+  let labels = opts.labels;
+  let submitFailure: { title: keyof ToolCallFormLabels; description: keyof ToolCallFormLabels; detail?: string } | undefined;
+  function refreshSubmitError(): void {
+    if (submitFailure) state.submitError = `${labels[submitFailure.title]}: ${submitFailure.detail || labels[submitFailure.description]}`;
+  }
   let ticketForm = opts.ticketForm;
   let configLoading = opts.configLoading;
   let allowFiles = opts.allowFiles;
@@ -391,8 +397,10 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
     pruneCustomFields(ticketForm, state.customFields, state.ticket.typology);
     state.submittedOnce = true;
     state.submitError = null;
+    submitFailure = undefined;
     if (!validate()) {
-      state.submitError = `${labels.validationFailed}: ${labels.pleaseCheckFields}`;
+      submitFailure = { title: "validationFailed", description: "pleaseCheckFields" };
+      refreshSubmitError();
       render();
       return;
     }
@@ -420,15 +428,13 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
       state.loading = false;
       const err = error instanceof Error ? error : new Error(String(error));
       const status = (err as { status?: number }).status;
-      let text = labels.submissionFailed;
-      let description = labels.submissionFailedDescription;
-      if (status === 413) text = labels.fileTooLarge;
-      else if (status === 403) text = labels.permissionDenied;
+      submitFailure = { title: "submissionFailed", description: "submissionFailedDescription" };
+      if (status === 413) submitFailure.title = "fileTooLarge";
+      else if (status === 403) submitFailure.title = "permissionDenied";
       else if (status === 422) {
-        text = labels.validationFailed;
-        description = err.message || labels.pleaseCheckFields;
-      } else if (err.message) description = err.message;
-      state.submitError = `${text}: ${description}`;
+        submitFailure = { title: "validationFailed", description: "pleaseCheckFields", detail: err.message };
+      } else submitFailure.detail = err.message;
+      refreshSubmitError();
       render();
       opts.onError?.(err);
     }
@@ -761,45 +767,46 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
       }
     }
 
-    // Detailed context, attachments, submit.
-    const bodyGroup = fieldGroup();
-    bodyGroup.dataset.agoErrorFor = "body";
-    bodyGroup.appendChild(labelEl(labels.detailedContext, "ago-ticket-body"));
-    const textarea = document.createElement("textarea");
-    textarea.id = "ago-ticket-body";
-    textarea.rows = 4;
-    textarea.value = state.ticket.body;
-    applyControlState(textarea, !!state.errors.body, disabled);
-    css(textarea, { resize: "vertical", maxHeight: "240px", overflowY: "auto" });
-    const counter = div({
-      fontSize: "14px",
-      lineHeight: "20px",
-      marginTop: "4px",
-      textAlign: "right",
-      display: "none",
-    });
-    counter.className = "ago-ticket-form__counter";
-    const paintCounter = (): void => {
-      const n = state.ticket.body.length;
-      counter.style.display = n > 60000 ? "block" : "none";
-      counter.style.color = n > 65535 ? "#dc2626" : "#d97706";
-      counter.textContent = `${n} / 65,535 · ${labels.maxCharacters}`;
-    };
-    const autosize = (): void => {
-      textarea.style.height = "auto";
-      textarea.style.height = `${textarea.scrollHeight}px`;
-    };
-    textarea.addEventListener("input", () => {
-      state.ticket.body = textarea.value;
-      onTicketInput();
-      paintErrors();
+    if (form.showBody !== false) {
+      const bodyGroup = fieldGroup();
+      bodyGroup.dataset.agoErrorFor = "body";
+      bodyGroup.appendChild(labelEl(labels.detailedContext, "ago-ticket-body"));
+      const textarea = document.createElement("textarea");
+      textarea.id = "ago-ticket-body";
+      textarea.rows = 4;
+      textarea.value = state.ticket.body;
+      applyControlState(textarea, !!state.errors.body, disabled);
+      css(textarea, { resize: "vertical", maxHeight: "240px", overflowY: "auto" });
+      const counter = div({
+        fontSize: "14px",
+        lineHeight: "20px",
+        marginTop: "4px",
+        textAlign: "right",
+        display: "none",
+      });
+      counter.className = "ago-ticket-form__counter";
+      const paintCounter = (): void => {
+        const n = state.ticket.body.length;
+        counter.style.display = n > 60000 ? "block" : "none";
+        counter.style.color = n > 65535 ? "#dc2626" : "#d97706";
+        counter.textContent = `${n} / 65,535 · ${labels.maxCharacters}`;
+      };
+      const autosize = (): void => {
+        textarea.style.height = "auto";
+        textarea.style.height = `${textarea.scrollHeight}px`;
+      };
+      textarea.addEventListener("input", () => {
+        state.ticket.body = textarea.value;
+        onTicketInput();
+        paintErrors();
+        paintCounter();
+        autosize();
+      });
+      bodyGroup.append(textarea, counter);
       paintCounter();
-      autosize();
-    });
-    bodyGroup.append(textarea, counter);
-    paintCounter();
-    if (state.errors.body) bodyGroup.appendChild(errorEl(state.errors.body));
-    root.appendChild(bodyGroup);
+      if (state.errors.body) bodyGroup.appendChild(errorEl(state.errors.body));
+      root.appendChild(bodyGroup);
+    }
 
     if (allowFiles) {
       const group = fieldGroup();
@@ -841,11 +848,12 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
           borderRadius: "4px",
         });
         const name = document.createElement("span");
-        name.textContent = `${file.name} - ${(file.size / 1024).toFixed(1)} KB`;
+        name.textContent = `${file.name} - ${(labels.fileSize ?? "{size} KB").replace("{size}", (file.size / 1024).toFixed(1))}`;
+        css(name, { minWidth: "0", overflowWrap: "anywhere" });
         const remove = document.createElement("button");
         remove.type = "button";
         remove.textContent = "×";
-        remove.setAttribute("aria-label", `Remove ${file.name}`);
+        remove.setAttribute("aria-label", (labels.removeFile ?? "Remove {fileName}").replace("{fileName}", file.name));
         remove.disabled = disabled;
         css(remove, {
           color: "#dc2626",
@@ -856,6 +864,7 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
           fontSize: "18px",
           lineHeight: "1",
           width: "44px",
+          flexShrink: "0",
           height: "44px",
           margin: "-10px -12px -10px 0",
         });
@@ -923,10 +932,23 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
   return {
     el: root,
     rebuild: (next) => {
+      const focused = root.contains(document.activeElement) ? document.activeElement as HTMLElement : null;
+      const selection = focused && (focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement)
+        ? { start: focused.selectionStart, end: focused.selectionEnd } : null;
       if (next && "ticketForm" in next) ticketForm = next.ticketForm ?? null;
       if (next && "configLoading" in next) configLoading = !!next.configLoading;
       if (next && "allowFiles" in next) allowFiles = !!next.allowFiles;
+      if (next?.labels) labels = next.labels;
+      if (state.submittedOnce) validate();
+      refreshSubmitError();
       render();
+      if (focused?.id) {
+        const control = Array.from(root.querySelectorAll<HTMLElement>("[id]")).find((element) => element.id === focused.id);
+        control?.focus();
+        if (selection?.start != null && selection.end != null && (control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement)) {
+          control.setSelectionRange(selection.start, selection.end);
+        }
+      }
     },
   };
 }

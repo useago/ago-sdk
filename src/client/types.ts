@@ -252,6 +252,9 @@ export interface TicketFieldOption {
 
 /** A custom field of a ticket form. */
 export interface TicketField {
+  /** Stable behavior metadata, independent of the localized title. */
+  semanticType?: string;
+  prefillKey?: string;
   id: string;
   /** The key the ticketing backend expects; used as the submit key when set. */
   externalId?: string;
@@ -278,6 +281,10 @@ export interface TicketField {
 
 /** The ticket form an agent's `ago_ticketing` tool opens in the conversation. */
 export interface TicketForm {
+  /** Backend-resolved display locale and standard form wording. */
+  locale?: string;
+  labels?: Record<string, string>;
+  embedDescription?: string;
   id: string;
   name?: string;
   /** `"form"` renders the SDK's own fields; `"embed"` hosts third-party HTML. */
@@ -618,6 +625,7 @@ export interface SSEChunkData {
  * SDK Events
  */
 export interface AgoClientEvents {
+  "language:changed": { language: string | null };
   /**
    * The client-side context changed: a context entry or dynamic provider was
    * added/removed, or a stateful helper (e.g. `createFormCollector`) updated its

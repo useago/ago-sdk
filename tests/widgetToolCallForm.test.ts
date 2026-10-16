@@ -141,6 +141,120 @@ function type(el: HTMLInputElement | HTMLTextAreaElement, value: string): void {
 }
 
 describe("ticket form tool call", () => {
+  it("hides the disabled description and reveals the tagger after Subject is completed", async () => {
+    const createTicket = vi.fn(async () => ({ id: "t-1" }));
+    const m = mount({ allowFiles: true }, {
+      getConfig: async () => ({ ...config, permissions: [{ ...config.permissions[0], ticketForm: {
+        ...ticketForm, showBody: false, showTypology: false, showPriority: false,
+        fields: [{ ...ticketForm.fields[0], type: "tagger" }],
+      } }] }),
+      sendMessage: async () => answer({ toolCalls: [formCall({ ticket: { subject: "", body: "" } })] }),
+      createTicket,
+    });
+    await m.widget.sendMessage("Help");
+    await flush();
+    expect(m.input("ago-ticket-body")).toBeNull();
+    expect(m.form()!.textContent).not.toContain("Detailed context");
+    expect(m.input("ago-ticket-files")).not.toBeNull();
+    expect(m.select("ago-ticket-field-product")).toBeNull();
+    type(m.input("ago-ticket-subject"), "A support request");
+    const tagger = m.select("ago-ticket-field-product");
+    expect(tagger).not.toBeNull();
+    tagger.value = "api";
+    tagger.dispatchEvent(new Event("change"));
+    m.submitBtn().click();
+    await flush();
+    expect(createTicket).toHaveBeenCalledWith(expect.objectContaining({
+      subject: "A support request", body: "", customFields: [{ id: "product", value: "api" }],
+    }));
+    m.cleanup();
+  });
+
+  it("refreshes an open form across rapid language changes, preserving answers, files, errors and host overrides", async () => {
+    const pending: Array<(value: SdkConfig) => void> = [];
+    const getConfig = vi.fn().mockResolvedValueOnce(config).mockImplementation(() => new Promise<SdkConfig>(resolve => pending.push(resolve)));
+    const createTicket = vi.fn(async () => ({ id: "t-1" }));
+    const m = mount({ allowFiles: true, toolCallForm: { labels: { submit: "Host submit" }, successMessage: "Host success" } }, { getConfig, createTicket });
+    await m.widget.sendMessage("Help");
+    await flush();
+    type(m.input("ago-ticket-subject"), "My draft");
+    const selection = m.select("ago-ticket-field-product");
+    selection.value = "api";
+    selection.dispatchEvent(new Event("change"));
+    const file = new File(["draft"], "draft.txt");
+    const fileInput = m.input("ago-ticket-files");
+    Object.defineProperty(fileInput, "files", { value: [file], configurable: true });
+    fileInput.dispatchEvent(new Event("change"));
+    type(m.input("ago-ticket-body"), "");
+    m.submitBtn().click();
+    expect(m.form()!.textContent).toContain("Detailed context is required");
+    const formNode = m.form();
+    m.client.__emitEvent("language:changed", { language: "fr" });
+    m.client.__emitEvent("language:changed", { language: "de" });
+    const localized: SdkConfig = { ...config, permissions: [{ ...config.permissions[0], ticketForm: {
+      ...ticketForm, locale: "de", labels: { submit: "Absenden", subject: "Betreff", detailedContextRequired: "Kontext erforderlich", ticketSubmitted: "Erstellt" },
+      fields: ticketForm.fields.map(field => ({ ...field, title: field.id === "f1" ? "Produkt" : "Region", options: field.options.map(option => ({ ...option, name: option.value === "api" ? "Schnittstelle" : "Anwendung" })) })),
+    } }] };
+    pending[1](localized);
+    await flush();
+    pending[0]({ ...config, permissions: [{ ...config.permissions[0], ticketForm: { ...ticketForm, labels: { subject: "Sujet" } } }] });
+    await flush();
+    expect(m.form()).toBe(formNode);
+    expect(m.form()!.textContent).toContain("Betreff");
+    expect(m.form()!.textContent).not.toContain("Sujet");
+    expect(m.form()!.textContent).toContain("Kontext erforderlich");
+    expect(m.form()!.textContent).toContain("draft.txt");
+    expect(m.submitBtn().textContent).toContain("Host submit");
+    expect(m.input("ago-ticket-subject").value).toBe("My draft");
+    expect(m.select("ago-ticket-field-product").value).toBe("api");
+    type(m.input("ago-ticket-body"), "Details");
+    m.submitBtn().click();
+    await flush();
+    expect(createTicket).toHaveBeenCalledWith(expect.objectContaining({ subject: "My draft", files: [file], customFields: expect.arrayContaining([{ id: "product", value: "api" }]) }));
+    expect(m.form()!.textContent).toContain("Host success");
+    m.cleanup();
+  });
+
+  it("keeps the current translated form when refreshing config fails", async () => {
+    const getConfig = vi.fn().mockResolvedValueOnce(config).mockRejectedValueOnce(new Error("offline"));
+    const m = mount({}, { getConfig });
+    await m.widget.sendMessage("Help");
+    await flush();
+    type(m.input("ago-ticket-subject"), "Keep this");
+    m.client.__emitEvent("language:changed", { language: "fr" });
+    await flush();
+    expect(m.input("ago-ticket-subject").value).toBe("Keep this");
+    expect(m.form()!.textContent).toContain("Product");
+    m.cleanup();
+  });
+
+  it("updates an existing denied form when localized configuration arrives", async () => {
+    const getConfig = vi.fn().mockResolvedValueOnce(config).mockResolvedValueOnce({ ...config, permissions: [{ ...config.permissions[0], ticketForm: { ...ticketForm, labels: { notAllowed: "Création non autorisée" } } }] });
+    const m = mount({}, { getConfig, sendMessage: async () => answer({ toolCalls: [formCall({ allowedToCreateTicket: false })] }) });
+    await m.widget.sendMessage("Help");
+    await flush();
+    expect(m.form()!.textContent).toContain("not allowed");
+    m.client.__emitEvent("language:changed", { language: "fr" });
+    await flush();
+    expect(m.form()!.textContent).toContain("Création non autorisée");
+    m.cleanup();
+  });
+
+  it("relocalizes submission failure text without losing the server detail", async () => {
+    const getConfig = vi.fn().mockResolvedValueOnce(config).mockResolvedValueOnce({ ...config, permissions: [{ ...config.permissions[0], ticketForm: { ...ticketForm, labels: { submissionFailed: "Échec de l'envoi" } } }] });
+    const m = mount({}, { getConfig, createTicket: async () => { throw new Error("Provider detail"); } });
+    await m.widget.sendMessage("Help");
+    await flush();
+    m.submitBtn().click();
+    await flush();
+    expect(m.form()!.textContent).toContain("Failed to submit ticket: Provider detail");
+    m.client.__emitEvent("language:changed", { language: "fr" });
+    await flush();
+    expect(m.form()!.textContent).toContain("Échec de l'envoi: Provider detail");
+    expect(m.input("ago-ticket-subject").value).toBe("Login broken");
+    m.cleanup();
+  });
+
   it("renders the pre-filled form above the answer once the turn completes", async () => {
     const m = mount();
     await m.widget.sendMessage("I need help");

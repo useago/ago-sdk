@@ -1063,7 +1063,7 @@ export function mountChatWidget(
   // tool call id, so a re-render moves the node instead of rebuilding it and
   // a half-typed description survives every streamed chunk.
   const toolCallFormOptions = options.toolCallForm ?? {};
-  const toolCallLabels: ToolCallFormLabels = {
+  let toolCallLabels: ToolCallFormLabels = {
     ...DEFAULT_TOOL_CALL_FORM_LABELS,
     ...toolCallFormOptions.labels,
   };
@@ -1074,10 +1074,12 @@ export function mountChatWidget(
   let ticketForm: TicketForm | null = null;
   let ticketFormLoaded = false;
   let ticketFormPromise: Promise<void> | undefined;
+  let ticketConfigSequence = 0;
   let fileAttachmentsEnabled = false;
   type ToolCallEntry =
     | {
         kind: "ticket";
+        hydrated: boolean;
         state: TicketFormState;
         view: TicketFormView;
         call: ToolCallData;
@@ -1091,27 +1093,36 @@ export function mountChatWidget(
 
   function ensureTicketFormConfig(): void {
     if (ticketFormPromise) return;
-    ticketFormPromise = client
-      .getConfig()
-      .then((config) => {
-        const permission = config.permissions[0];
-        ticketForm = permission?.ticketForm ?? null;
-        fileAttachmentsEnabled = !!permission?.fileAttachmentsEnabled;
-      })
-      .catch(() => {
-        ticketForm = null;
-      })
-      .then(() => {
-        ticketFormLoaded = true;
-        if (destroyed) return;
-        for (const entry of toolCallViews.values()) {
-          if (entry.kind !== "ticket") continue;
-          if (ticketForm) {
+    const sequence = ++ticketConfigSequence;
+    ticketFormPromise = client.getConfig().then((config) => {
+      if (destroyed || sequence !== ticketConfigSequence) return;
+      const permission = config.permissions[0];
+      ticketForm = permission?.ticketForm ?? null;
+      fileAttachmentsEnabled = !!permission?.fileAttachmentsEnabled;
+      toolCallLabels = { ...DEFAULT_TOOL_CALL_FORM_LABELS, ...ticketForm?.labels, ...toolCallFormOptions.labels };
+      ticketFormLoaded = true;
+      for (const entry of toolCallViews.values()) {
+        if (entry.kind === "ticket") {
+          if (ticketForm && !entry.hydrated) {
             hydrateTicketFormState(entry.state, entry.call.ticket, ticketForm);
+            entry.hydrated = true;
           }
-          entry.view.rebuild({ ticketForm, configLoading: false, allowFiles: allowFiles || fileAttachmentsEnabled });
+          entry.view.rebuild({ ticketForm, labels: toolCallLabels, configLoading: false, allowFiles: allowFiles || fileAttachmentsEnabled });
+        } else if (entry.kind === "embed") {
+          entry.view.updateText({ labels: toolCallLabels, successMessage: toolCallFormOptions.successMessage ?? ticketForm?.successMessageText, description: ticketForm?.locale ? ticketForm.embedDescription ?? "" : ticketForm?.embedDescription });
+        } else {
+          entry.el.replaceChildren(renderTicketDenied(toolCallLabels.notAllowed));
         }
-      });
+      }
+      render();
+    }).catch(() => {
+      if (destroyed || sequence !== ticketConfigSequence) return;
+      ticketFormPromise = undefined;
+      ticketFormLoaded = true;
+      for (const entry of toolCallViews.values()) {
+        if (entry.kind === "ticket") entry.view.rebuild({ configLoading: false });
+      }
+    });
   }
 
   function clearToolCallViews(): void {
@@ -1135,6 +1146,7 @@ export function mountChatWidget(
     const existing = toolCallViews.get(call.id);
     if (existing) return existing;
     let entry: ToolCallEntry;
+    ensureTicketFormConfig();
     if (call.allowedToCreateTicket === false) {
       const wrap = div({ display: "flex", flexDirection: "column", gap: "16px" });
       wrap.className = "ago-ticket-form ago-ticket-form--denied";
@@ -1147,12 +1159,12 @@ export function mountChatWidget(
       const view = createEmbedFormView({
         state,
         embedHtml: call.embedHtml,
-        description: call.embedDescription,
+        description: ticketForm?.embedDescription ?? call.embedDescription,
         ticket: call.ticket,
         email: identityEmail,
         labels: toolCallLabels,
         message: call.message,
-        successMessage: toolCallFormOptions.successMessage,
+        successMessage: toolCallFormOptions.successMessage ?? ticketForm?.successMessageText,
         onSubmitted: (captured) => {
           submittedToolCalls.add(call.id);
           void client
@@ -1255,7 +1267,7 @@ export function mountChatWidget(
         },
         onError: toolCallFormOptions.onError,
       });
-      entry = { kind: "ticket", state, view, call };
+      entry = { kind: "ticket", state, view, call, hydrated: !!ticketForm };
     }
     toolCallViews.set(call.id, entry);
     return entry;
@@ -1678,6 +1690,12 @@ export function mountChatWidget(
     render();
   };
 
+  const onLanguageChanged = (): void => {
+    ++ticketConfigSequence;
+    ticketFormPromise = undefined;
+    if (toolCallViews.size) ensureTicketFormConfig();
+  };
+  client.on("language:changed", onLanguageChanged);
   client.on("message:start", onStart);
   client.on("message:chunk", onChunk);
   client.on("message:answer-complete", onAnswerComplete);
@@ -2197,6 +2215,7 @@ export function mountChatWidget(
       if (teaserTimer) clearTimeout(teaserTimer);
       if (resizeTimer) clearTimeout(resizeTimer);
       teaser?.remove();
+      client.off("language:changed", onLanguageChanged);
       client.off("message:start", onStart);
       client.off("message:chunk", onChunk);
       client.off("message:answer-complete", onAnswerComplete);

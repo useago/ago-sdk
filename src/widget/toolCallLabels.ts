@@ -32,6 +32,8 @@ export interface ToolCallFormLabels {
   fieldFormatInvalid: string;
   attachments: string;
   selectFile: string;
+  fileSize?: string;
+  removeFile?: string;
   submit: string;
   loading: string;
   maxCharacters: string;
@@ -85,6 +87,8 @@ export const DEFAULT_TOOL_CALL_FORM_LABELS: ToolCallFormLabels = {
   fieldFormatInvalid: "{fieldTitle} has an invalid format.",
   attachments: "Attachments",
   selectFile: "Select file",
+  fileSize: "{size} KB",
+  removeFile: "Remove {fileName}",
   submit: "Submit",
   loading: "Loading...",
   maxCharacters: "Maximum characters",

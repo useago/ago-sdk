@@ -308,7 +308,7 @@ mountChatWidget("#ago-chat", {
 ```
 
 The fields come from the ticket form configured in your AGO dashboard (fetched
-once from `GET /api/sdk/v1/config`): subject, typology, priority, the custom fields, the
+from `GET /api/sdk/v1/config`, then refreshed when the host language changes): subject, typology, priority, the custom fields, the
 detailed context, and attachments when the tenant allows them. The form asks
 for an email when the client has neither `userEmail` nor `userJwt`. Submitting
 creates the ticket (`POST /api/sdk/v1/tickets`), completes the tool call
@@ -327,6 +327,13 @@ The form also respects `active`, `alwaysVisible`, option order and groups,
 `regexpForValidation`, and `priorityTypologies`. Required questions are checked
 before submission, including questions not yet revealed by progressive display.
 The dashboard's success message and link label are used unless overridden below.
+Backend labels are merged over SDK defaults, then explicit `toolCallForm.labels`
+win. Set `config.language` to your interface locale and update it with
+`widget.client.updateConfig({ language: "fr" })`. An open form keeps its answers,
+selected values and attachments while text and visible validation messages
+refresh. Success text follows the new language after submission too. Configured
+`successMessage` and `successUrlLabel` take precedence in every language.
+
 These settings must be included in the backend's SDK config response; a client
 cannot recover metadata omitted by an older API.
 
@@ -353,7 +360,7 @@ mountChatWidget("#ago-chat", {
 
 | Option              | Type                                                        | Default                            |
 | ------------------- | ----------------------------------------------------------- | ---------------------------------- |
-| `labels?`           | `Partial<ToolCallFormLabels>`                               | English strings                    |
+| `labels?`           | `Partial<ToolCallFormLabels>`                               | Localized backend strings, then English defaults |
 | `successMessage?`   | `string`                                                    | Dashboard message, else "Your ticket has been successfully submitted." |
 | `successUrlLabel?`  | `string`                                                    | Dashboard label, else "You can find it here:" |
 | `userEmail?`        | `string`                                                    | the client's `userEmail`           |

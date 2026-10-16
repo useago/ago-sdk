@@ -21,6 +21,39 @@ function captureRequests() {
 
 afterEach(() => vi.unstubAllGlobals());
 
+it("notifies language consumers only when the normalized language changes", () => {
+  const client = new AgoClient({ baseUrl: "https://example.test", language: "fr_FR" });
+  const changed = vi.fn();
+  client.on("language:changed", changed);
+  client.updateConfig({ language: "fr-FR" });
+  client.updateConfig({ language: "de" });
+  client.updateConfig({ language: undefined });
+  client.updateConfig({ language: null });
+  expect(changed.mock.calls).toEqual([[{ language: "de" }], [{ language: null }]]);
+  expect(client.getLanguage()).toBeNull();
+  client.destroy();
+});
+
+it("requests ready-to-render text and retries a headless config request superseded by a new language", async () => {
+  const pending: Array<(response: Response) => void> = [];
+  const fetcher = vi.fn(() => new Promise<Response>(resolve => pending.push(resolve)));
+  vi.stubGlobal("fetch", fetcher);
+  const client = new AgoClient({ baseUrl: "https://example.test", language: "fr" });
+  const loading = client.getConfig();
+  client.updateConfig({ language: "de" });
+  pending[0](new Response(JSON.stringify({ permissions: [{ ticket_form: { id: "f", locale: "fr" } }] })));
+  await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+  pending[1](new Response(JSON.stringify({ permissions: [{ ticket_form: {
+    id: "f", locale: "de", labels: { submit: "Absenden" }, fields: [{ id: "p", title: "Priorität", semantic_type: "priority", options: [{ id: "o", name: "Hoch", value: "High" }] }],
+  } }] })));
+  const form = (await loading).permissions[0].ticketForm!;
+  expect(form).toMatchObject({ locale: "de", labels: { submit: "Absenden" }, fields: [{ title: "Priorität", semanticType: "priority", options: [{ name: "Hoch", value: "High" }] }] });
+  expect(String(fetcher.mock.calls[0][0])).toContain("localized=true&language=fr");
+  expect(String(fetcher.mock.calls[1][0])).toContain("language=de");
+  expect(form.fields[0]).not.toHaveProperty("translations");
+  client.destroy();
+});
+
 describe.each([false, true])("SDK language (multipart: %s)", (multipart) => {
   const options = () => ({ files: multipart ? [new File(["text"], "note.txt")] : undefined });
 
