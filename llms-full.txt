@@ -2544,6 +2544,28 @@ the browser supplies its own language header. Each client has its own setting;
 the SDK does not read or change your
 page's language, global variables, or saved language preferences.
 
+Ticket forms are localized by the backend. `getConfig()` explicitly requests
+localized display text in the configured language, including standard `labels`,
+field titles, option names, groups, messages and configured success text. Each
+text falls back to the workspace's default language, then its original text;
+standard wording ultimately falls back to English. English, French, German,
+Spanish, Italian and Portuguese are supported, including `pt-BR` normalization.
+Full per-language translation maps are reserved for admin editing and export.
+
+Calling `updateConfig({ language: "fr" })` emits `language:changed`. Open widget
+forms refresh automatically and retain answers, files, validation and submission
+state. A failed refresh leaves the current form usable, and stale responses cannot
+replace newer-language text. Headless consumers can call `getConfig()` again in
+response to the same event and render the returned strings directly. The form
+language follows host configuration, not conversation language detection.
+
+Submit option `value`, not its translated `name`. `semanticType` identifies
+priority behavior and `prefillKey` matches answers independently of display text.
+Standard validation labels use single-brace parameters such as `{fieldTitle}`.
+Explicit widget `toolCallForm.labels` override backend labels; SDK defaults cover
+older backends or missing labels. `successMessage` and `successUrlLabel` override
+the form's configured localized success text.
+
 To refresh knowledge source titles already on screen, reload the conversation
 after changing the language. Existing answer text stays unchanged:
 

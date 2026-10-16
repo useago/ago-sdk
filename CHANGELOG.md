@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Backend-localized ticket forms through `getConfig()` and the widget. Host
+  language changes refresh open forms without losing answers, files or submission
+  state. Explicit label and success overrides take precedence. Older backends
+  continue using SDK defaults.
+- `language:changed` notifications, ticket form `locale`/`labels`, and stable
+  `semanticType`/`prefillKey` metadata for custom renderers.
+
+
 ## [1.13.3] - 2026-10-13
 
 ### Added

@@ -84,9 +84,13 @@ import type {
   TranscribeAudioOptions,
 } from "./types";
 import { validateConfig } from "./validateConfig";
+import { normalizeLanguage } from "./language";
 
 /** `GET /api/sdk/v1/config` as the backend serializes it (snake_case). */
 interface RawTicketForm {
+  locale?: string | null;
+  labels?: Record<string, string>;
+  embed_description?: string | null;
   id: string;
   name?: string | null;
   mode?: string | null;
@@ -99,6 +103,8 @@ interface RawTicketForm {
   success_message_url_label?: string | null;
   fields?: Array<{
     id: string;
+    semantic_type?: string | null;
+    prefill_key?: string | null;
     external_id?: string | null;
     title?: string | null;
     type?: string | null;
@@ -1257,10 +1263,14 @@ export class AgoClient {
    * The tenant's SDK configuration (`GET /api/sdk/v1/config`): per-permission
    * agents, the ticket form the agent's `ago_ticketing` tool opens, and the
    * file-attachment and speech-to-text flags. The vanilla widget fetches it
-   * once, when a ticket form first appears in a conversation.
+   * when a form first appears and whenever the configured language changes.
    */
   async getConfig(): Promise<SdkConfig> {
-    const raw = await this.httpClient.get<RawSdkConfig>("/api/sdk/v1/config");
+    const language = this.getLanguage();
+    const query = new URLSearchParams({ localized: "true" });
+    if (language) query.set("language", language);
+    const raw = await this.httpClient.get<RawSdkConfig>(`/api/sdk/v1/config?${query}`);
+    if (language !== this.getLanguage()) return this.getConfig();
     return {
       permissions: (raw.permissions ?? []).map((p) => ({
         id: p.id ?? undefined,
@@ -1320,6 +1330,9 @@ export class AgoClient {
     return {
       id: raw.id,
       name: raw.name ?? undefined,
+      locale: raw.locale ?? undefined,
+      labels: raw.labels,
+      embedDescription: raw.embed_description ?? undefined,
       mode: raw.mode === "embed" ? "embed" : "form",
       showSubject: raw.show_subject ?? true,
       showBody: raw.show_body ?? true,
@@ -1332,6 +1345,8 @@ export class AgoClient {
         id: f.id,
         externalId: f.external_id ?? undefined,
         title: f.title ?? undefined,
+        semanticType: f.semantic_type ?? (f.title === "Priority" ? "priority" : undefined),
+        prefillKey: f.prefill_key ?? undefined,
         type: f.type ?? undefined,
         required: !!f.required,
         hidden: !!f.hidden,
@@ -1342,7 +1357,7 @@ export class AgoClient {
         options: (f.options ?? []).map((o) => ({
           id: o.id,
           name: o.name ?? undefined,
-          value: o.value ?? undefined,
+          value: o.value ?? o.name ?? undefined,
           default: !!o.default,
           position: o.position ?? undefined,
           group: o.group ?? undefined,
@@ -2126,6 +2141,11 @@ export class AgoClient {
     return this.httpClient;
   }
 
+  /** The normalized language requested by the host, or null for browser defaults. */
+  getLanguage(): string | null {
+    return normalizeLanguage(this.config.language);
+  }
+
   /** @internal The agent (id or slug) the client is configured to talk to. */
   getConfiguredAgent(): string | undefined {
     return this.config.agent || this.config.defaultAgentId;
@@ -2407,8 +2427,11 @@ export class AgoClient {
     const merged = { ...this.config, ...cleaned };
     validateConfig(merged, "AgoClient.updateConfig");
 
+    const previousLanguage = this.getLanguage();
     this.config = merged;
     this.httpClient.updateConfig(cleaned);
+    const language = this.getLanguage();
+    if (language !== previousLanguage) this.eventEmitter.emit("language:changed", { language });
 
     if (cleaned.debug !== undefined) {
       if (cleaned.debug) {

@@ -91,8 +91,8 @@ describe("ticket form questions", () => {
     });
   });
 
-  it("does not validate native or custom priority when excluded by typology", () => {
-    const f = { ...form([field("priority", { title: "Priority", required: true })]), showPriority: true, priorityTypologies: ["Incident"] };
+  it.each(["Priority", "Priorité", "Prioridade"])("keeps priority typology behavior for %s", (title) => {
+    const f = { ...form([field("priority", { title, semanticType: "priority", required: true })]), showPriority: true, priorityTypologies: ["Incident"] };
     const state = createTicketFormState({ priority: "", typology: "Question" }, f, "");
     expect(computeTicketFormErrors(f, state, labels, false)).toEqual({});
     state.ticket.typology = "Incident";

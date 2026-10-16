@@ -39,7 +39,7 @@ export function fieldEnabled(
   visiting = new Set<string>(),
 ): boolean {
   if (field.active === false || visiting.has(field.id)) return false;
-  if (field.title === "Priority" && !priorityAllowed(form, typology)) return false;
+  if ((field.semanticType === "priority" || (!field.semanticType && field.title === "Priority")) && !priorityAllowed(form, typology)) return false;
   const path = new Set(visiting).add(field.id);
   return matchesParent(form, field.conditionalFieldId, conditionValues(field), values, typology, path);
 }
