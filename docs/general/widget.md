@@ -316,6 +316,20 @@ creates the ticket (`POST /api/sdk/v1/tickets`), completes the tool call
 ticket link. Fields pre-filled by the agent are kept, and what the visitor types
 survives every streamed chunk.
 
+Custom-field labels, help text and choices use the client's `language`
+when the backend supplies `translations`. Set `config.language` when
+mounting the widget, or call `client.updateConfig({ language: "fr" })` on a client
+passed to the widget. Open ticket forms update without losing drafts, selections
+or attachments. Missing translations fall back to the parent locale, then to
+the configured default text; no configured language uses the default. Labels edited
+in AGO take precedence. Submission IDs and values stay unchanged.
+The widget's built-in labels still use `toolCallForm.labels`.
+
+The `translations` format is independent of the ticketing provider. For a base
+language code, `en` prefers `en-US` and `pt` prefers `pt-BR`; other regional variants
+are used only when exactly one matches the requested base language. Without
+translation metadata, original field labels remain visible.
+
 Custom questions support multiple trigger values, nested conditions, and choices
 filtered by another answer, for every ticketing provider. Parent references can
 use the field UUID or its external ID. Both `conditionalFieldValues: ["billing",

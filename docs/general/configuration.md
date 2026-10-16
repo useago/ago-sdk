@@ -201,6 +201,14 @@ This header does not force the agent's reply language or translate your UI text.
 Continue passing translated labels, placeholders and welcome text from your
 application's translations.
 
+The widget's ticket-field labels, help text and choices also use
+`language` when the backend supplies translations. Existing forms refresh on
+`client.updateConfig({ language })`, preserving the visitor's input. With no
+language override, these fields use their configured default text. The `translations`
+format is independent of the ticketing provider. Custom form UIs can
+call `ticketFieldText(field.title, field.translations?.title, client.getLanguage())`
+(imported from `@useago/sdk`) and listen to `language:changed` to refresh their display.
+
 ### User and ticket metadata
 
 Pass JSON-serializable data in `config.metadata` to include it in every new

@@ -105,6 +105,7 @@ export function createMockClient(
     unregisterNavigationFunction: () => undefined,
     getConfiguredAgent: () => undefined,
     getUserIdentity: () => ({ email: undefined, hasJwt: false }),
+    getLanguage: () => null,
     // Minimal transport stub: a proactive engine attached to the mock sees an
     // empty config (→ kill-switch stays off) and swallows POSTs.
     getHttp: () => ({

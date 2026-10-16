@@ -1,6 +1,7 @@
 // Main SDK exports
 export { AgoClient } from "./client/AgoClient";
 export type { ResumeGate } from "./client/AgoClient";
+export { ticketFieldText } from "./client/ticketFieldTranslations";
 
 // Auto-continue after navigation (framework-agnostic; React/Angular wrap this)
 export { attachAutoContinueAfterNavigation } from "./client/autoContinue";
@@ -33,6 +34,10 @@ export type {
   SendMessageOptions,
   SdkConfig,
   SdkPermissionConfig,
+  TicketField,
+  TicketFieldOption,
+  TicketForm,
+  TicketTextTranslation,
   SSEChunkData,
   StopMessageResult,
   SubmitToolCallResult,

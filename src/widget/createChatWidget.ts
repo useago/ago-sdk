@@ -1194,6 +1194,7 @@ export function mountChatWidget(
       const done = submittedTicketOf(call);
       if (done) state.submitted = done;
       const view = createTicketFormView({
+        language: client.getLanguage(),
         state,
         ticketForm,
         configLoading: !ticketFormLoaded,
@@ -1678,6 +1679,12 @@ export function mountChatWidget(
     render();
   };
 
+  const onLanguageChanged = ({ language }: AgoClientEvents["language:changed"]): void => {
+    for (const entry of toolCallViews.values()) {
+      if (entry.kind === "ticket") entry.view.rebuild({ language });
+    }
+  };
+  client.on("language:changed", onLanguageChanged);
   client.on("message:start", onStart);
   client.on("message:chunk", onChunk);
   client.on("message:answer-complete", onAnswerComplete);
@@ -2198,6 +2205,7 @@ export function mountChatWidget(
       if (resizeTimer) clearTimeout(resizeTimer);
       teaser?.remove();
       client.off("message:start", onStart);
+      client.off("language:changed", onLanguageChanged);
       client.off("message:chunk", onChunk);
       client.off("message:answer-complete", onAnswerComplete);
       client.off("message:complete", onComplete);

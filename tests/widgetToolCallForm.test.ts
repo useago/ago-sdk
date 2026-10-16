@@ -141,6 +141,35 @@ function type(el: HTMLInputElement | HTMLTextAreaElement, value: string): void {
 }
 
 describe("ticket form tool call", () => {
+  it("uses the client language and refreshes open forms without losing drafts or choices", async () => {
+    const translated = structuredClone(config);
+    const field = translated.permissions[0].ticketForm!.fields[0];
+    field.description = "Choose a product";
+    field.translations = {
+      title: { source: "Product", default: "Product", values: { fr: "Produit" } },
+      description: { source: "Choose a product", default: "Choose a product", values: { fr: "Choisissez un produit" } },
+    };
+    field.options[0].translations = {
+      name: { source: "App", default: "App", values: { fr: "Application" } },
+    };
+    const m = mount({}, { getConfig: async () => translated, getLanguage: () => "fr" });
+    await m.widget.sendMessage("Help");
+    await flush();
+    expect(m.form()!.textContent).toContain("Produit");
+    expect(m.form()!.textContent).toContain("Choisissez un produit");
+    expect(m.select("ago-ticket-field-product").selectedOptions[0].textContent).toBe("Application");
+    type(m.input("ago-ticket-body"), "Draft body");
+    type(m.input("ago-ticket-field-f2"), "Draft region");
+    m.client.__emitEvent("language:changed", { language: "en" });
+    expect(m.form()!.textContent).toContain("Choose a product");
+    expect(m.select("ago-ticket-field-product").value).toBe("app");
+    expect(m.input("ago-ticket-body").value).toBe("Draft body");
+    expect(m.input("ago-ticket-field-f2").value).toBe("Draft region");
+    m.cleanup();
+    m.client.__emitEvent("language:changed", { language: "fr" });
+    expect(m.root.querySelector(".ago-ticket-form")).toBeNull();
+  });
+
   it("renders the pre-filled form above the answer once the turn completes", async () => {
     const m = mount();
     await m.widget.sendMessage("I need help");

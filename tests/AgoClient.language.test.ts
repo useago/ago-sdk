@@ -21,6 +21,25 @@ function captureRequests() {
 
 afterEach(() => vi.unstubAllGlobals());
 
+it("notifies mounted forms only when the normalized language changes", () => {
+  const client = new AgoClient({ baseUrl: "https://example.test", language: "fr_CA" });
+  const changed = vi.fn();
+  client.on("language:changed", changed);
+  try {
+    expect(client.getLanguage()).toBe("fr-CA");
+    client.updateConfig({ language: "fr-ca" });
+    client.updateConfig({ language: undefined, debug: false });
+    expect(() => client.updateConfig({ language: "invalid-language-tag-!" })).toThrow();
+    expect(changed).not.toHaveBeenCalled();
+    expect(client.getLanguage()).toBe("fr-CA");
+    client.updateConfig({ language: "de" });
+    client.updateConfig({ language: null });
+    expect(changed.mock.calls).toEqual([[{ language: "de" }], [{ language: null }]]);
+  } finally {
+    client.destroy();
+  }
+});
+
 describe.each([false, true])("SDK language (multipart: %s)", (multipart) => {
   const options = () => ({ files: multipart ? [new File(["text"], "note.txt")] : undefined });
 
