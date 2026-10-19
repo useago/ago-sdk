@@ -1,3 +1,4 @@
+import { uiCatalog } from "../i18n";
 /**
  * The chat widget's input row: a growing textarea, send button (with answering
  * spinner), and optional file attachment picker with removable chips.
@@ -40,6 +41,9 @@ export type InputLook = "classic" | "embed";
 
 /** Strings the embed composer shows; `{max}` / `{name}` are substituted. */
 export interface InputLabels {
+  send?: string;
+  stop?: string;
+  removeFile?: string;
   attachFiles: string;
   dismiss: string;
   tooManyFiles: string;
@@ -78,6 +82,7 @@ export interface InputHandle {
   restoreDraft: (content: string, files?: File[]) => void;
   /** Swap the placeholder (the bubble widget uses one per screen). */
   setPlaceholder: (text: string) => void;
+  setLabels: (labels: InputLabels, speechLabels?: Partial<SpeechToTextLabels>) => void;
   setSpeechToTextEnabled: (enabled: boolean) => void;
   cancelRecording: () => void;
   destroy: () => void;
@@ -245,7 +250,7 @@ export function buildInput(args: BuildInputArgs): InputHandle {
   const sendBtn = document.createElement("button");
   sendBtn.type = "submit";
   sendBtn.className = "ago-chat-input__send";
-  sendBtn.setAttribute("aria-label", "Send");
+  sendBtn.setAttribute("aria-label", args.labels?.send ?? "Send");
   if (embed) {
     css(sendBtn, {
       flexShrink: "0",
@@ -296,7 +301,7 @@ export function buildInput(args: BuildInputArgs): InputHandle {
     sendBtn.disabled = disabled;
     // `type` drives the click: a submit button would send instead of stopping.
     sendBtn.type = stopping ? "button" : "submit";
-    sendBtn.setAttribute("aria-label", stopping ? "Stop generating" : "Send");
+    sendBtn.setAttribute("aria-label", stopping ? (args.labels?.stop ?? "Stop generating") : (args.labels?.send ?? "Send"));
     if (embed) {
       sendBtn.replaceChildren(
         stopping ? stopIcon({ size: 16 }) : arrowUpwardIcon({ size: 16 }),
@@ -356,7 +361,10 @@ export function buildInput(args: BuildInputArgs): InputHandle {
     padding: "0",
     minHeight: "20px",
   });
+  let currentFileError: { key: "tooManyFiles" | "invalidFileType" | "fileTooLarge"; values: Record<string, string> } | undefined;
   errorDismiss.addEventListener("click", () => {
+    currentFileError = undefined;
+    speech?.clearError();
     errorBox.style.display = "none";
   });
   errorBox.append(errorText, errorDismiss);
@@ -366,37 +374,28 @@ export function buildInput(args: BuildInputArgs): InputHandle {
   };
 
   const fill = (template: string, vars: Record<string, string>): string =>
-    template.replace(/\{(\w+)\}/g, (_, key: string) => vars[key] ?? "");
+    template.replace(/\{(\w+)\}/g, (match, key: string) => Object.prototype.hasOwnProperty.call(vars, key) ? vars[key] : match);
 
   /** The reference's checks, in its order: count, type, size. */
   const acceptFiles = (incoming: File[]): File[] => {
     if (!embed) return incoming;
-    const labels = args.labels;
+    const fileError = (key: "tooManyFiles" | "invalidFileType" | "fileTooLarge", values: Record<string, string>) => {
+      speech?.clearError();
+      currentFileError = { key, values };
+      showFileError(fill(args.labels?.[key] ?? uiCatalog("en").widget[key], values));
+    };
     const accepted: File[] = [];
     for (const file of incoming) {
       if (files.length + accepted.length >= MAX_FILES) {
-        showFileError(
-          fill(labels?.tooManyFiles ?? "Too many files. Maximum allowed: {max}", {
-            max: String(MAX_FILES),
-          }),
-        );
+        fileError("tooManyFiles", { max: String(MAX_FILES) });
         break;
       }
       if (file.type && !ALLOWED_FILE_TYPES.includes(file.type)) {
-        showFileError(
-          fill(labels?.invalidFileType ?? "Invalid file type: {name}", {
-            name: file.name,
-          }),
-        );
+        fileError("invalidFileType", { name: file.name });
         continue;
       }
       if (file.size > MAX_FILE_SIZE) {
-        showFileError(
-          fill(labels?.fileTooLarge ?? "File too large: {name} (maximum {max})", {
-            name: file.name,
-            max: humanSize(MAX_FILE_SIZE),
-          }),
-        );
+        fileError("fileTooLarge", { name: file.name, max: humanSize(MAX_FILE_SIZE) });
         continue;
       }
       accepted.push(file);
@@ -546,7 +545,7 @@ export function buildInput(args: BuildInputArgs): InputHandle {
       }
       const remove = document.createElement("button");
       remove.type = "button";
-      remove.setAttribute("aria-label", `Remove ${file.name}`);
+      remove.setAttribute("aria-label", (args.labels?.removeFile ?? "Remove {filename}").replace("{filename}", () => file.name));
       if (embed) remove.appendChild(closeIcon({ size: 16 }));
       else remove.textContent = "×";
       css(remove, {
@@ -646,7 +645,7 @@ export function buildInput(args: BuildInputArgs): InputHandle {
       refreshSendBtn();
       textarea.focus();
     },
-    onError: showFileError,
+    onError: (message) => { currentFileError = undefined; showFileError(message); },
   }) : undefined;
 
   // Embed layout: [ left column: files / textarea / toolbar ] [ send ].
@@ -722,6 +721,18 @@ export function buildInput(args: BuildInputArgs): InputHandle {
     setPlaceholder: (text: string) => {
       textarea.placeholder = text;
       if (text) textarea.setAttribute("aria-label", text);
+    },
+    setLabels: (labels, speechLabels) => {
+      args.labels = labels;
+      attachBtn?.setAttribute("aria-label", labels.attachFiles);
+      errorDismiss.textContent = labels.dismiss;
+      errorDismiss.setAttribute("aria-label", labels.dismiss);
+      if (currentFileError && errorBox.style.display !== "none") {
+        errorText.textContent = fill(labels[currentFileError.key], currentFileError.values);
+      }
+      speech?.setLabels(speechLabels ?? uiCatalog("en").speech);
+      renderFiles();
+      refreshSendBtn();
     },
     setSpeechToTextEnabled: (enabled) => speech?.setEnabled(enabled),
     cancelRecording: () => speech?.cancel(),

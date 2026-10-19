@@ -8,7 +8,7 @@
 
 import type { AgoMessage, ToolCallData } from "../client/types";
 import { css, div } from "./styles";
-import type { ToolCallFormLabels } from "./toolCallLabels";
+import { formatFormTemplate, type ToolCallFormLabels } from "./toolCallLabels";
 
 /** The agent's built-in ticketing tool. */
 export const TICKETING_TOOL_NAME = "ago_ticketing";
@@ -167,6 +167,6 @@ export function renderUnknownToolCall(
     lineHeight: "20px",
   });
   box.className = "ago-toolcall-unknown";
-  box.textContent = labels.unknownToolCall.replace("{type}", type);
+  box.textContent = formatFormTemplate(labels.unknownToolCall, { type });
   return box;
 }

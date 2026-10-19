@@ -1,3 +1,4 @@
+import { uiCatalog } from "../src/i18n";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildInput } from "../src/widget/buildInput";
 import { mountChatWidget } from "../src/widget/createChatWidget";
@@ -139,14 +140,20 @@ describe("widget dictation", () => {
     expect(textarea.value).toBe("Keep this");
   });
 
-  it("shows API errors and keeps the draft", async () => {
-    const { mic, textarea, handle } = build(vi.fn().mockRejectedValue(new Error("No speech detected")));
+  it.each(["No speech detected", ""])("preserves transcription details or localizes the fallback (%j)", async (detail) => {
+    const { mic, textarea, handle } = build(vi.fn().mockRejectedValue(new Error(detail)));
     textarea.value = "Keep this";
     await begin(mic);
     mic.click();
-    await vi.waitFor(() => expect(handle.inputRow.textContent).toContain("No speech detected"));
+    await vi.waitFor(() => expect(handle.inputRow.textContent).toContain(detail || "Transcription failed. Please try again."));
+    handle.setLabels(uiCatalog("fr").widget, uiCatalog("fr").speech);
+    expect(handle.inputRow.textContent).toContain(detail || "La transcription a échoué. Veuillez réessayer.");
     expect(textarea.disabled).toBe(false);
     expect(textarea.value).toBe("Keep this");
+    const alert = handle.inputRow.querySelector<HTMLElement>(".ago-chat-input__error")!;
+    alert.querySelector("button")!.click();
+    handle.setLabels(uiCatalog("de").widget, uiCatalog("de").speech);
+    expect(alert.style.display).toBe("none");
   });
 
   it.each(["destroy", "cancelRecording", "getValueAndClear"] as const)("%s releases the microphone", async (method) => {

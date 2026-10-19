@@ -83,10 +83,12 @@ import type {
   ToolCallData,
   TranscribeAudioOptions,
 } from "./types";
+import { normalizeLanguage, formConfigLanguage } from "./language";
 import { validateConfig } from "./validateConfig";
 
 /** `GET /api/sdk/v1/config` as the backend serializes it (snake_case). */
 interface RawTicketForm {
+  embed_description?: string | null;
   id: string;
   name?: string | null;
   mode?: string | null;
@@ -100,6 +102,7 @@ interface RawTicketForm {
   fields?: Array<{
     id: string;
     external_id?: string | null;
+    prefill_aliases?: string[];
     title?: string | null;
     type?: string | null;
     required?: boolean;
@@ -1253,6 +1256,11 @@ export class AgoClient {
     return response.json();
   }
 
+  /** The requested language, before UI fallback. */
+  getLanguage(): string | null {
+    return normalizeLanguage(this.config.language);
+  }
+
   /**
    * The tenant's SDK configuration (`GET /api/sdk/v1/config`): per-permission
    * agents, the ticket form the agent's `ago_ticketing` tool opens, and the
@@ -1260,7 +1268,9 @@ export class AgoClient {
    * once, when a ticket form first appears in a conversation.
    */
   async getConfig(): Promise<SdkConfig> {
-    const raw = await this.httpClient.get<RawSdkConfig>("/api/sdk/v1/config");
+    const query = new URLSearchParams({ ticket_form_i18n: "1" });
+    query.set("language", formConfigLanguage(this.config.language));
+    const raw = await this.httpClient.get<RawSdkConfig>(`/api/sdk/v1/config?${query}`);
     return {
       permissions: (raw.permissions ?? []).map((p) => ({
         id: p.id ?? undefined,
@@ -1320,6 +1330,7 @@ export class AgoClient {
     return {
       id: raw.id,
       name: raw.name ?? undefined,
+      embedDescription: raw.embed_description ?? undefined,
       mode: raw.mode === "embed" ? "embed" : "form",
       showSubject: raw.show_subject ?? true,
       showBody: raw.show_body ?? true,
@@ -1332,6 +1343,7 @@ export class AgoClient {
         id: f.id,
         externalId: f.external_id ?? undefined,
         title: f.title ?? undefined,
+        prefillAliases: f.prefill_aliases,
         type: f.type ?? undefined,
         required: !!f.required,
         hidden: !!f.hidden,
@@ -2407,8 +2419,13 @@ export class AgoClient {
     const merged = { ...this.config, ...cleaned };
     validateConfig(merged, "AgoClient.updateConfig");
 
+    const language = normalizeLanguage(merged.language);
+    const languageChanged = language !== normalizeLanguage(this.config.language);
     this.config = merged;
     this.httpClient.updateConfig(cleaned);
+    if (languageChanged) {
+      this.eventEmitter.emit("config:changed", { language });
+    }
 
     if (cleaned.debug !== undefined) {
       if (cleaned.debug) {

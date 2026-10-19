@@ -1,3 +1,5 @@
+import { withOverrides } from "../i18n";
+import en from "../i18n/en";
 import type { AudioTranscription, TranscribeAudioOptions } from "../client/types";
 import { checkIcon, closeIcon, microphoneIcon, spinnerIcon } from "./icons";
 import { BRAND_COLOR, css, div, FONT_VAR, MUTED_TEXT_COLOR } from "./styles";
@@ -23,20 +25,7 @@ export interface SpeechToTextOptions {
   labels?: Partial<SpeechToTextLabels>;
 }
 
-export const DEFAULT_SPEECH_TO_TEXT_LABELS: SpeechToTextLabels = {
-  start: "Dictate a message",
-  finish: "Finish recording",
-  cancel: "Cancel dictation",
-  requesting: "Waiting for microphone…",
-  recording: "Recording…",
-  transcribing: "Transcribing…",
-  limitApproaching: "Recording will finish in 10 seconds.",
-  permissionDenied: "Allow microphone access in your browser to dictate a message.",
-  recordingFailed: "Could not record audio. Check your microphone and try again.",
-  tooLarge: "Recording is too large. Try a shorter message.",
-  noSpeech: "No audio was recorded. Please try again.",
-  transcriptionFailed: "Transcription failed. Please try again.",
-};
+export const DEFAULT_SPEECH_TO_TEXT_LABELS: SpeechToTextLabels = en.speech;
 
 interface SpeechToTextArgs {
   transcribe: (file: File, options: TranscribeAudioOptions) => Promise<AudioTranscription>;
@@ -48,7 +37,8 @@ interface SpeechToTextArgs {
 
 /** A microphone control that owns and releases its recording/upload resources. */
 export function createSpeechToText(args: SpeechToTextArgs) {
-  let labels = { ...DEFAULT_SPEECH_TO_TEXT_LABELS, ...args.labels };
+  let labels = withOverrides(DEFAULT_SPEECH_TO_TEXT_LABELS, args.labels);
+  let errorKey: keyof SpeechToTextLabels | undefined;
   const el = div({ display: "none", alignItems: "center", minWidth: "0", gap: "4px", flex: "1" });
   el.className = "ago-chat-input__speech";
   const button = document.createElement("button");
@@ -146,13 +136,15 @@ export function createSpeechToText(args: SpeechToTextArgs) {
     render();
   }
 
-  function fail(message: string): void {
+  function fail(key: keyof SpeechToTextLabels, detail?: string): void {
     cancel();
-    args.onError(message);
+    errorKey = detail ? undefined : key;
+    args.onError(detail || labels[key]);
   }
 
   async function start(): Promise<void> {
     if (!enabled || disabled || destroyed || state !== "idle" || !supported()) return;
+    errorKey = undefined;
     const run = ++generation;
     state = "requesting";
     args.onBusy(true);
@@ -175,13 +167,13 @@ export function createSpeechToText(args: SpeechToTextArgs) {
         if (run !== generation || !event.data.size) return;
         bytes += event.data.size;
         if (bytes > 25_000_000) {
-          fail(labels.tooLarge);
+          fail("tooLarge");
           return;
         }
         chunks.push(event.data);
       };
       active.onerror = () => {
-        if (run === generation) fail(labels.recordingFailed);
+        if (run === generation) fail("recordingFailed");
       };
       active.onstop = () => {
         if (run !== generation) return;
@@ -207,7 +199,7 @@ export function createSpeechToText(args: SpeechToTextArgs) {
     } catch (error) {
       if (run !== generation) return;
       fail(typeof error === "object" && error !== null && "name" in error && error.name === "NotAllowedError"
-        ? labels.permissionDenied : labels.recordingFailed);
+        ? "permissionDenied" : "recordingFailed");
     }
   }
 
@@ -215,7 +207,7 @@ export function createSpeechToText(args: SpeechToTextArgs) {
     const extension = mimeType.includes("mp4") ? "mp4" : mimeType.includes("webm") ? "webm"
       : mimeType.includes("ogg") ? "ogg" : undefined;
     if (!extension || chunks.length === 0) {
-      fail(labels.noSpeech);
+      fail("noSpeech");
       return;
     }
     state = "transcribing";
@@ -228,12 +220,13 @@ export function createSpeechToText(args: SpeechToTextArgs) {
         { signal: controller.signal },
       );
       if (run !== generation || destroyed) return;
-      cancel();
-      if (text.trim()) args.onText(text.trim());
-      else args.onError(labels.noSpeech);
+      if (text.trim()) {
+        cancel();
+        args.onText(text.trim());
+      } else fail("noSpeech");
     } catch (error) {
       if (run !== generation || destroyed) return;
-      fail(error instanceof Error ? error.message : labels.transcriptionFailed);
+      fail("transcriptionFailed", error instanceof Error ? error.message : undefined);
     }
   }
 
@@ -258,7 +251,12 @@ export function createSpeechToText(args: SpeechToTextArgs) {
   return {
     el,
     cancel,
-    setLabels(value?: Partial<SpeechToTextLabels>) { labels = { ...DEFAULT_SPEECH_TO_TEXT_LABELS, ...value }; render(); },
+    clearError() { errorKey = undefined; },
+    setLabels(value?: Partial<SpeechToTextLabels>) {
+      labels = withOverrides(DEFAULT_SPEECH_TO_TEXT_LABELS, value);
+      if (errorKey) args.onError(labels[errorKey]);
+      render();
+    },
     setEnabled(value: boolean) { enabled = value; if (!value) cancel(); render(); },
     setDisabled(value: boolean) { disabled = value; if (value) cancel(); render(); },
     destroy() {

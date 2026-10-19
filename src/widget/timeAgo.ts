@@ -1,3 +1,4 @@
+import en from "../i18n/en";
 /**
  * Relative time labels for the history screen ("5min ago", "2h ago", ...).
  * Mirrors the reference widget's buckets exactly: minutes under an hour, hours
@@ -14,13 +15,7 @@ export interface TimeAgoLabels {
   months: string;
 }
 
-export const DEFAULT_TIME_AGO_LABELS: TimeAgoLabels = {
-  minutes: "{n}min ago",
-  hours: "{n}h ago",
-  days: "{n}d ago",
-  weeks: "{n} weeks ago",
-  months: "{n} months ago",
-};
+export const DEFAULT_TIME_AGO_LABELS: TimeAgoLabels = en.timeAgo;
 
 const MINUTE = 60 * 1000;
 

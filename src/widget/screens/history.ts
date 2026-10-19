@@ -218,6 +218,7 @@ export function buildHistoryScreen(
   return {
     el: root,
     render: ({ threads, loading }) => {
+      pillLabel.textContent = opts.labels.newConversation;
       if (loading) renderLoading();
       else if (threads.length === 0) renderEmpty();
       else renderList(threads);

@@ -25,6 +25,7 @@ export interface LauncherOptions {
   edge: "left" | "right";
   /** Widget title, for the accessible name. */
   title: string;
+  labels?: { close: string; open: string };
   /** Optional image shown instead of the glyph. */
   icon?: string;
   onClick: () => void;
@@ -40,7 +41,7 @@ export function buildLauncher(opts: LauncherOptions): LauncherHandle {
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "ago-chat-widget-launcher";
-  btn.setAttribute("aria-label", `Open ${opts.title}`);
+  btn.setAttribute("aria-label", opts.labels?.open ?? `Open ${opts.title}`);
   btn.setAttribute("aria-expanded", "false");
 
   if (opts.look === "classic") {
@@ -78,7 +79,7 @@ export function buildLauncher(opts: LauncherOptions): LauncherHandle {
         btn.setAttribute("aria-expanded", open ? "true" : "false");
         btn.setAttribute(
           "aria-label",
-          `${open ? "Close" : "Open"} ${opts.title}`,
+          open ? (opts.labels?.close ?? `Close ${opts.title}`) : (opts.labels?.open ?? `Open ${opts.title}`),
         );
       },
     };
@@ -150,7 +151,7 @@ export function buildLauncher(opts: LauncherOptions): LauncherHandle {
       btn.setAttribute("aria-expanded", open ? "true" : "false");
       btn.setAttribute(
         "aria-label",
-        `${open ? "Close" : "Open"} ${opts.title}`,
+        open ? (opts.labels?.close ?? `Close ${opts.title}`) : (opts.labels?.open ?? `Open ${opts.title}`),
       );
     },
   };

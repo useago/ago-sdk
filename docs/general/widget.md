@@ -162,7 +162,7 @@ instead, set `--ago-header-text-color` alongside it.
 **Handle.** On top of the usual methods (including `newConversation()`, which
 every placement has), the bubble handle exposes `screen`,
 `showScreen("home" | "chat" | "history")`, and `openConversation(id)`. The
-chrome's strings are translated through `labels`:
+chrome follows the client's language. Use `labels` for explicit wording overrides:
 
 ```ts
 mountChatWidget(document.body, {
@@ -218,7 +218,7 @@ and `showAgentName` (its layout is the hosted widget's), defaults `title` to
 | `conversationStarters?` | `Array<{ label: string; message?: string; agentId?: string }>`                            | — (bubble home screen)                                     |
 | `autoResume?`           | `boolean`                                                                                 | `true` (bubble only)                                       |
 | `loadHomeConfig?`       | `boolean`                                                                                 | `false` (bubble only; home title/subtitle/cards from the dashboard) |
-| `labels?`               | `Partial<WidgetLabels>`                                                                   | English strings (bubble only)                              |
+| `labels?`               | `Partial<WidgetLabels>`                                                                   | Selected language (bubble only)                              |
 | `mobile?`               | `{ breakpoint?: number; trigger?: "tap" \| "focus" \| "manual" }`                         | — (automatic; see [Mobile fullscreen](#mobile-fullscreen)) |
 | `logoUrl?`              | `string`                                                                                  | —                                                          |
 | `showAgentName?`        | `boolean`                                                                                 | `false`                                                    |
@@ -286,7 +286,7 @@ mountChatWidget("#ago-chat", {
 | Option      | Type                                            | Default |
 | ----------- | ----------------------------------------------- | ------- |
 | `askWhy?`   | `boolean`                                       | `true` inline/side, `false` bubble |
-| `labels?`   | `Partial<FeedbackLabels>`                       | English strings |
+| `labels?`   | `Partial<FeedbackLabels>`                       | Selected language |
 | `onSubmit?` | `({ messageId, rating, reasons, comment }) => void` | — (fires per accepted report: once for the thumb, again for the detailed panel) |
 | `onError?`  | `(error: Error) => void`                        | — (the row keeps its state) |
 
@@ -326,7 +326,9 @@ Unconditional hidden defaults are still submitted.
 The form also respects `active`, `alwaysVisible`, option order and groups,
 `regexpForValidation`, and `priorityTypologies`. Required questions are checked
 before submission, including questions not yet revealed by progressive display.
-The dashboard's success message and link label are used unless overridden below.
+Form labels follow the client's language; defined `labels` overrides take precedence. `undefined` preserves the default, and templates keep `{fieldTitle}` placeholders.
+
+Success text uses `successMessage`/`successUrlLabel` first, explicit label overrides next, then the configured translation and standard fallback. For embedded forms, use the `embeddedFormSubmitted` label. See [language configuration](configuration.md#ticket-form-language).
 These settings must be included in the backend's SDK config response; a client
 cannot recover metadata omitted by an older API.
 
@@ -353,7 +355,7 @@ mountChatWidget("#ago-chat", {
 
 | Option              | Type                                                        | Default                            |
 | ------------------- | ----------------------------------------------------------- | ---------------------------------- |
-| `labels?`           | `Partial<ToolCallFormLabels>`                               | English strings                    |
+| `labels?`           | `Partial<ToolCallFormLabels>`                               | Selected language                  |
 | `successMessage?`   | `string`                                                    | Dashboard message, else "Your ticket has been successfully submitted." |
 | `successUrlLabel?`  | `string`                                                    | Dashboard label, else "You can find it here:" |
 | `userEmail?`        | `string`                                                    | the client's `userEmail`           |

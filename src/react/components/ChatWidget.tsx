@@ -1,3 +1,4 @@
+import { useUiCatalog } from "../hooks/useUiCatalog";
 import {
   forwardRef,
   useCallback,
@@ -68,7 +69,7 @@ export interface ChatWidgetProps {
   /**
    * Let the user report an answer that did not work: thumbs under each finished
    * answer, and after a thumbs-down a panel to say what went wrong. Off by
-   * default. `true` uses the English labels; pass the `<MessageFeedback>` props
+   * default. `true` uses the selected UI language; pass the `<MessageFeedback>` props
    * to translate the strings or observe what was sent.
    *
    * ```tsx
@@ -153,9 +154,9 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
   function ChatWidget({
   client,
   conversationId: initialConversationId,
-  title = "Chat",
-  welcomeMessage = "Hello! How can I help you today?",
-  placeholder = "Type a message...",
+  title: titleOverride,
+  welcomeMessage: welcomeMessageOverride,
+  placeholder: placeholderOverride,
   allowFiles = false,
   speechToText = false,
   allowStop = true,
@@ -169,10 +170,15 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
   onMessageSent,
   onMessageReceived,
   sheet: sheetOptions = false,
-  thinkingLabel = "Thinking...",
+  thinkingLabel: thinkingLabelOverride,
   functionLabels,
   showReasoning = true,
 }, ref) {
+  const text = useUiCatalog(client);
+  const title = titleOverride ?? text.common.chat;
+  const welcomeMessage = welcomeMessageOverride ?? text.common.welcome;
+  const placeholder = placeholderOverride ?? text.common.placeholder;
+  const thinkingLabel = thinkingLabelOverride ?? text.common.thinking;
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
   // Mirrors shouldAutoScrollRef for rendering: a ref alone can't drive the
@@ -501,7 +507,7 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
           type="button"
           className="ago-chat-widget__peek"
           aria-expanded={false}
-          aria-label="Open the conversation"
+          aria-label={text.common.openConversation}
           onClick={() => {
             setHasUnread(false);
             expand("user");
@@ -540,7 +546,7 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
             {title}
             {hasUnread && (
               <span
-                aria-label="New message"
+                aria-label={text.common.newMessage}
                 style={{
                   width: "6px",
                   height: "6px",
@@ -630,7 +636,7 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
           </span>
           <button
             type="button"
-            aria-label="Collapse the conversation"
+            aria-label={text.common.collapseConversation}
             onClick={() => collapse("user")}
             style={{
               marginLeft: "auto",
@@ -768,7 +774,7 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
           <button
             type="button"
             className="ago-chat-widget__jump"
-            aria-label="Jump to latest message"
+            aria-label={text.common.jumpToLatest}
             onClick={scrollToLatest}
             style={{
               position: "absolute",

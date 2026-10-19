@@ -1,3 +1,4 @@
+import en from "../i18n/en";
 /**
  * The "was this answer any good?" row under an assistant message: two thumbs,
  * and (after a thumbs-down) a small panel to say what went wrong.
@@ -46,20 +47,7 @@ export interface FeedbackLabels {
   thanks: string;
 }
 
-export const DEFAULT_FEEDBACK_LABELS: FeedbackLabels = {
-  helpful: "Helpful",
-  notHelpful: "Not helpful",
-  whatWentWrong: "What went wrong?",
-  reasons: {
-    inaccurate: "Inaccurate",
-    incomplete: "Incomplete",
-    information_not_found: "Information not found",
-    technical_issue: "Technical issue",
-  },
-  commentPlaceholder: "Anything else? (optional)",
-  send: "Send",
-  thanks: "Thanks, this was reported.",
-};
+export const DEFAULT_FEEDBACK_LABELS: FeedbackLabels = en.feedback;
 
 /** Per-message feedback state, kept by the widget across re-renders. */
 export interface MessageFeedbackState {

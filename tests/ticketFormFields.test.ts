@@ -91,12 +91,22 @@ describe("ticket form questions", () => {
     });
   });
 
-  it("does not validate native or custom priority when excluded by typology", () => {
-    const f = { ...form([field("priority", { title: "Priority", required: true })]), showPriority: true, priorityTypologies: ["Incident"] };
+  it.each(["Priority", "Priorité"])("restricts only native priority while custom %s stays visible and required", (title) => {
+    const f = { ...form([field("custom-priority", { title, required: true })]), showPriority: true, priorityTypologies: ["Incident"] };
     const state = createTicketFormState({ priority: "", typology: "Question" }, f, "");
-    expect(computeTicketFormErrors(f, state, labels, false)).toEqual({});
+    const view = createTicketFormView({ state, ticketForm: f, labels, requireEmail: false, allowFiles: false,
+      createTicket: async () => ({ id: "ticket" }), onCreated: () => {} });
+    expect(view.el.querySelector("#ago-ticket-priority")).toBeNull();
+    expect(view.el.querySelector("#ago-ticket-field-custom-priority")).not.toBeNull();
+    expect(computeTicketFormErrors(f, state, labels, false)).toEqual({ "custom-priority": `${title} is required.` });
     state.ticket.typology = "Incident";
-    expect(Object.keys(computeTicketFormErrors(f, state, labels, false))).toEqual(["priority"]);
+    expect(Object.keys(computeTicketFormErrors(f, state, labels, false))).toEqual(["priority", "custom-priority"]);
+    state.ticket.priority = "Normal";
+    state.customFields["custom-priority"] = "high";
+    state.ticket.typology = "Question";
+    pruneCustomFields(f, state.customFields, state.ticket.typology);
+    expect(state.customFields).toEqual({ "custom-priority": "high" });
+    expect(computeTicketFormErrors(f, state, labels, false)).toEqual({});
   });
 
   it("renders groups in order and keeps an empty conditional select as a select", () => {

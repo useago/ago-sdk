@@ -1,5 +1,18 @@
 import { AgoError } from "./errors";
 
+const UI_LANGUAGES = ["en", "fr", "de", "es", "it", "pt"] as const;
+export type UiLanguage = typeof UI_LANGUAGES[number];
+
+export function uiLanguage(language?: string | null): UiLanguage {
+  const base = language?.toLowerCase().split(/[-_]/)[0];
+  return UI_LANGUAGES.find((locale) => locale === base) ?? "en";
+}
+
+export function formConfigLanguage(language?: string | null): string {
+  const locale = normalizeLanguage(language);
+  return locale && UI_LANGUAGES.some((base) => locale.split("-")[0] === base) ? locale : "en";
+}
+
 /** Validate a host-supplied locale without limiting it to SDK interface bundles. */
 export function normalizeLanguage(language: unknown): string | null {
   if (language === undefined || language === null) return null;

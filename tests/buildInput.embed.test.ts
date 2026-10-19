@@ -1,3 +1,4 @@
+import { uiCatalog } from "../src/i18n";
 import { describe, expect, it, vi } from "vitest";
 import { buildInput, MAX_FILES, MAX_FILE_SIZE } from "../src/widget/buildInput";
 
@@ -177,6 +178,8 @@ describe("buildInput (embed look)", () => {
     expect(handle.inputRow.querySelector(".ago-chat-input__error")!.textContent).toContain(
       "Invalid file type: app.exe",
     );
+    handle.setLabels(uiCatalog("fr").widget);
+    expect(handle.inputRow.querySelector(".ago-chat-input__error")!.textContent).toContain("Type de fichier non valide : app.exe");
     handle.inputRow.remove();
   });
 });

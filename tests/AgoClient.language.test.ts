@@ -168,3 +168,40 @@ it.each([undefined, []])("leaves sources absent when a conversation has no citat
     client.destroy();
   }
 });
+
+it('requests the selected form language, returns prefill aliases and notifies language changes', async () => {
+  const fetchMock = vi.fn(async () => new Response(JSON.stringify({ permissions: [{ ticket_form: {
+    id: 'form',
+    fields: [{ id: 'priority', title: 'Priorité', prefill_aliases: ['priority'], options: [] }],
+  } }] })));
+  vi.stubGlobal('fetch', fetchMock);
+  const client = new AgoClient({ baseUrl: 'https://example.test', language: 'en' });
+  const changed = vi.fn(); client.on('config:changed', changed);
+  try {
+    client.updateConfig({ language: 'fr_FR' });
+    client.updateConfig({ language: 'fr-FR' });
+    const form = (await client.getConfig()).permissions[0].ticketForm!;
+    const request = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(request.pathname).toBe('/api/sdk/v1/config');
+    expect(Object.fromEntries(request.searchParams)).toEqual({ ticket_form_i18n: '1', language: 'fr-FR' });
+    expect(changed).toHaveBeenCalledExactlyOnceWith({ language: 'fr-FR' });
+    expect(form.fields[0]).toMatchObject({ title: 'Priorité', prefillAliases: ['priority'] });
+  } finally { client.destroy(); }
+});
+
+it.each([
+  [undefined, 'en', null], [null, 'en', null], ['fr', 'fr', 'fr'],
+  ['pt_PT', 'pt-PT', 'pt-PT'], ['nl', 'en', 'nl'],
+] as const)('requests supported form content for %s without changing other language headers', async (language, query, header) => {
+  const fetchMock = vi.fn(async () => Response.json({ permissions: [], id: 'c1', messages: [] }));
+  vi.stubGlobal('fetch', fetchMock);
+  const client = new AgoClient({ baseUrl: 'https://example.test', language });
+  try {
+    await client.getConfig();
+    await client.getConversation('c1');
+    const calls = fetchMock.mock.calls as unknown as Array<[string, RequestInit]>;
+    expect(new URL(String(calls[0][0])).searchParams.get('language')).toBe(query);
+    expect(new Headers(calls[1][1].headers).get('Accept-Language')).toBe(header);
+    expect(client.getLanguage()).toBe(header);
+  } finally { client.destroy(); }
+});

@@ -1,3 +1,6 @@
+import en from "../../i18n/en";
+import { useUiCatalog } from "../hooks/useUiCatalog";
+import { withOverrides } from "../../i18n";
 import React, { useState } from "react";
 import type { AgoClient } from "../../client/AgoClient";
 import type { FeedbackRating, FeedbackReason } from "../../client/types";
@@ -15,20 +18,7 @@ export interface MessageFeedbackLabels {
   thanks: string;
 }
 
-export const DEFAULT_MESSAGE_FEEDBACK_LABELS: MessageFeedbackLabels = {
-  helpful: "Helpful",
-  notHelpful: "Not helpful",
-  whatWentWrong: "What went wrong?",
-  reasons: {
-    inaccurate: "Inaccurate",
-    incomplete: "Incomplete",
-    information_not_found: "Information not found",
-    technical_issue: "Technical issue",
-  },
-  commentPlaceholder: "Anything else? (optional)",
-  send: "Send",
-  thanks: "Thanks, this was reported.",
-};
+export const DEFAULT_MESSAGE_FEEDBACK_LABELS: MessageFeedbackLabels = en.feedback;
 
 export interface MessageFeedbackProps {
   /** The answer being judged. */
@@ -98,13 +88,10 @@ export const MessageFeedback: React.FC<MessageFeedbackProps> = ({
   onError,
   className = "",
 }) => {
+  const text = useUiCatalog(client);
   const labels: MessageFeedbackLabels = {
-    ...DEFAULT_MESSAGE_FEEDBACK_LABELS,
-    ...labelOverrides,
-    reasons: {
-      ...DEFAULT_MESSAGE_FEEDBACK_LABELS.reasons,
-      ...labelOverrides?.reasons,
-    },
+    ...withOverrides(text.feedback, labelOverrides as Partial<MessageFeedbackLabels>),
+    reasons: withOverrides(text.feedback.reasons, labelOverrides?.reasons),
   };
 
   const { ratings, submitFeedback } = useFeedback({ client });
