@@ -499,7 +499,7 @@ export interface MountChatWidgetOptions {
    * under each finished answer, and after a thumbs-down a small panel to say
    * what went wrong (reason chips plus a free-text comment).
    *
-   * `true` turns it on with English labels. Pass an object to translate the
+   * `true` turns it on with localized labels. Pass an object to translate the
    * strings, skip the "why" panel, or observe what was sent. Off by default.
    *
    * ```ts

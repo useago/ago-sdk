@@ -3,37 +3,19 @@
  * layers a partial `labels` option on top of them.
  */
 
-import { DEFAULT_TIME_AGO_LABELS } from "./timeAgo";
+import { uiCatalog, withOverrides } from "../i18n";
 import type { MountChatWidgetOptions, WidgetLabels } from "./types";
 
 export const DEFAULT_WIDGET_LABELS: WidgetLabels = {
-  home: "Home",
-  chats: "Chats",
-  history: "History",
-  newConversation: "New conversation",
-  noHistory: "No chat history yet",
-  askQuestion: "Ask a question",
-  back: "Back",
-  close: "Close chat",
-  newChat: "New chat",
-  errorTitle: "Something went wrong",
-  errorDescription:
-    "The answer could not be generated. Please try again.",
-  scrollToBottom: "Scroll to bottom",
-  dismiss: "Dismiss",
-  attachFiles: "Attach files",
-  tooManyFiles: "Too many files. Maximum allowed: {max}",
-  invalidFileType: "Invalid file type: {name}",
-  fileTooLarge: "File too large: {name} (maximum {max})",
-  timeAgo: DEFAULT_TIME_AGO_LABELS,
+  ...uiCatalog("en").widget, timeAgo: uiCatalog("en").timeAgo,
 };
 
 export function resolveLabels(
   overrides: MountChatWidgetOptions["labels"],
+  language?: string | null,
 ): WidgetLabels {
   return {
-    ...DEFAULT_WIDGET_LABELS,
-    ...overrides,
-    timeAgo: { ...DEFAULT_WIDGET_LABELS.timeAgo, ...overrides?.timeAgo },
+    ...withOverrides(uiCatalog(language).widget, overrides),
+    timeAgo: withOverrides(uiCatalog(language).timeAgo, overrides?.timeAgo),
   };
 }

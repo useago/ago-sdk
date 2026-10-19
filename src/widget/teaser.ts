@@ -11,6 +11,7 @@ import { css, div, PANEL_SHADOW } from "./styles";
 
 export interface TeaserOptions {
   text: string;
+  dismissLabel?: string;
   /** Viewport edge the launcher pins to. */
   edge: "left" | "right";
   onOpen: () => void;
@@ -41,7 +42,7 @@ export function buildTeaser(opts: TeaserOptions): TeaserHandle {
   const close = document.createElement("button");
   close.type = "button";
   close.className = "ago-chat-widget-teaser__close";
-  close.setAttribute("aria-label", "Dismiss");
+  close.setAttribute("aria-label", opts.dismissLabel ?? "Dismiss");
   close.textContent = "X";
   css(close, {
     animation: "ago-appear 1000ms ease-in",

@@ -1,3 +1,4 @@
+import { uiCatalog, withOverrides } from "../i18n";
 import { AgoClient } from "../client/AgoClient";
 import { AgoError } from "../client/errors";
 import type {
@@ -52,12 +53,11 @@ import {
   ticketCreatedInThread,
 } from "./renderToolCall";
 import {
-  DEFAULT_TOOL_CALL_FORM_LABELS,
+  mergeToolCallFormLabels,
   type ToolCallFormLabels,
 } from "./toolCallLabels";
 import {
   createFeedbackState,
-  DEFAULT_FEEDBACK_LABELS,
   renderFeedbackRow,
   type FeedbackLabels,
   type MessageFeedbackState,
@@ -111,7 +111,6 @@ export type {
 } from "./types";
 
 /** Fallback text for the form-submitted notice when the response carries none. */
-const DEFAULT_FORM_SUBMITTED_MESSAGE = "Form submitted.";
 
 /**
  * Minimum comfortable touch target, in px. 44 is Apple's HIG floor (Material
@@ -147,7 +146,7 @@ function messageFromResult(result: unknown): string | null {
 let widgetSeq = 0;
 
 /** The hosted widget's teaser text when `prompt` is not set. */
-const DEFAULT_PROMPT = "Hello, how can I help you today?";
+
 /** Gap between the launcher and the panel / teaser (frame.js `BUTTON_GAP`). */
 const BUBBLE_GAP = 6;
 /** The panel never grows taller than this (frame.js `MAX_PANEL_HEIGHT`). */
@@ -227,8 +226,17 @@ export function mountChatWidget(
   // The bubble placement reproduces the hosted embed widget; several defaults
   // follow that widget rather than the inline card, so they resolve here.
   const isBubble = placement === "bubble";
+  if (!options.client && !options.config?.baseUrl) {
+    throw new AgoError(
+      "mountChatWidget requires either `client` or `config` (with a baseUrl).",
+      "config_missing_base_url",
+    );
+  }
+  const client = options.client ?? new AgoClient(options.config as AgoConfig);
+  let requestedLanguage = client.getLanguage?.() ?? null;
+  let text = uiCatalog(requestedLanguage);
   const {
-    welcomeMessage = "Hello! How can I help you today?",
+    welcomeMessage = text.common.welcome,
     allowFiles = false,
     allowStop = true,
     autoScroll: autoScrollEnabled = true,
@@ -240,7 +248,7 @@ export function mountChatWidget(
     bubbleStyle = "default",
     showHeader = true,
     forms,
-    formSubmittedMessage = DEFAULT_FORM_SUBMITTED_MESSAGE,
+    formSubmittedMessage,
     onFollowUpClick,
     onMessageSent,
     onMessageReceived,
@@ -256,15 +264,14 @@ export function mountChatWidget(
     hideFooter = false,
     loadHomeConfig = false,
   } = options;
-  const title = options.title ?? (isBubble ? "AGO Chatbot" : "Chat");
+  let title = options.title ?? (isBubble ? "AGO Chatbot" : text.common.chat);
   const width = options.width ?? (isBubble ? 550 : 400);
   const loadThreads = options.loadThreads ?? isBubble;
   // The hosted widget always shows thumbs under an answer.
   const feedback = options.feedback ?? isBubble;
-  const labels = resolveLabels(options.labels);
-  const placeholder =
-    options.placeholder ?? (isBubble ? labels.askQuestion : "Type a message...");
-  const prompt = options.prompt === undefined ? DEFAULT_PROMPT : options.prompt;
+  const labels = resolveLabels(options.labels, requestedLanguage);
+  let placeholder = options.placeholder ?? (isBubble ? labels.askQuestion : text.common.placeholder);
+  let prompt = options.prompt === undefined ? text.common.prompt : options.prompt;
   // `colors` is the embed snippet's palette; `theme` wins over it key by key.
   const theme: WidgetTheme | undefined = isBubble
     ? { ...colorsToTheme(options.colors), ...options.theme }
@@ -277,19 +284,12 @@ export function mountChatWidget(
     typeof welcomeMessage === "string"
       ? { message: welcomeMessage, mode: "static" as const }
       : welcomeMessage;
-  const welcomeText = wm.message;
+  let welcomeText = wm.message;
   const welcomeMode = wm.mode ?? "static";
   const welcomeSpeed = ("speed" in wm && wm.speed) || 45;
   const welcomeFollowUps =
     ("followUpReplies" in wm && wm.followUpReplies) || undefined;
 
-  if (!options.client && !options.config?.baseUrl) {
-    throw new AgoError(
-      "mountChatWidget requires either `client` or `config` (with a baseUrl).",
-      "config_missing_base_url",
-    );
-  }
-  const client = options.client ?? new AgoClient(options.config as AgoConfig);
   const root = resolveTarget(target);
 
   // Side-panel mode: a fixed, full-height panel pinned to the left/right edge that
@@ -364,11 +364,11 @@ export function mountChatWidget(
   let introTimer: ReturnType<typeof setInterval> | undefined;
   // Resolved confirmation text for each submitted form, in submit order — each
   // renders a "form submitted" notice appended below the conversation.
-  const formNotices: string[] = [];
+  const formNotices: Array<string | null> = [];
 
   // Build the notice text for a submit response: a custom function wins, else a
   // server-returned `message`, else the configured/default fallback string.
-  function resolveNoticeText(result: unknown): string {
+  function resolveNoticeText(result: unknown): string | null {
     if (typeof formSubmittedMessage === "function") {
       const custom = formSubmittedMessage(result);
       if (typeof custom === "string" && custom) return custom;
@@ -377,7 +377,7 @@ export function mountChatWidget(
     if (fromResponse) return fromResponse;
     return typeof formSubmittedMessage === "string"
       ? formSubmittedMessage
-      : DEFAULT_FORM_SUBMITTED_MESSAGE;
+      : null;
   }
   // The visitor's conversation list, exposed on the handle. Loaded on mount and
   // kept in place (same array reference) so consumers can hold onto `widget.threads`.
@@ -448,6 +448,7 @@ export function mountChatWidget(
       header.appendChild(logo);
     }
     const titleEl = document.createElement("h3");
+    titleEl.className = "ago-chat-widget__title";
     titleEl.textContent = title;
     css(titleEl, { margin: "0", fontSize: "15px", fontWeight: "600" });
     header.appendChild(titleEl);
@@ -457,7 +458,7 @@ export function mountChatWidget(
       const closeBtn = document.createElement("button");
       closeBtn.type = "button";
       closeBtn.className = "ago-chat-widget__close";
-      closeBtn.setAttribute("aria-label", "Close");
+      closeBtn.setAttribute("aria-label", text.common.close);
       closeBtn.textContent = "×";
       css(closeBtn, {
         marginLeft: "auto",
@@ -557,7 +558,7 @@ export function mountChatWidget(
   const jumpBtn = document.createElement("button");
   jumpBtn.type = "button";
   jumpBtn.className = "ago-chat-widget__jump";
-  jumpBtn.setAttribute("aria-label", "Jump to latest message");
+  jumpBtn.setAttribute("aria-label", text.common.jumpToLatest);
   jumpBtn.innerHTML =
     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" ' +
     'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
@@ -663,6 +664,7 @@ export function mountChatWidget(
     setPlaceholder,
     getValueAndClear,
     setSpeechToTextEnabled,
+    setLabels: setInputLabels,
     cancelRecording,
     destroy: destroyInput,
   } = buildInput({
@@ -671,19 +673,11 @@ export function mountChatWidget(
     transcribeAudio: options.speechToText
       ? (file, opts) => client.transcribeAudio(file, opts)
       : undefined,
-    speechToTextLabels: typeof options.speechToText === "object" ? options.speechToText.labels : undefined,
+    speechToTextLabels: withOverrides(text.speech, typeof options.speechToText === "object" ? options.speechToText.labels : undefined),
     onSend: (content, files) => void send(content, files),
     onStop: allowStop ? () => void stop() : undefined,
     look: isBubble ? "embed" : "classic",
-    labels: isBubble
-      ? {
-          attachFiles: labels.attachFiles,
-          dismiss: labels.dismiss,
-          tooManyFiles: labels.tooManyFiles,
-          invalidFileType: labels.invalidFileType,
-          fileTooLarge: labels.fileTooLarge,
-        }
-      : undefined,
+    labels: { ...labels, attachFiles: isBubble ? labels.attachFiles : (options.labels?.attachFiles ?? text.common.attachFile), send: text.common.send, stop: text.common.stop, removeFile: text.form.removeFile },
   });
 
   ensureKeyframes();
@@ -857,9 +851,11 @@ export function mountChatWidget(
     mountInto = wrapper;
   }
 
+  const launcherLabels = { open: text.common.openTitle.replace("{title}", () => title), close: text.common.closeTitle.replace("{title}", () => title) };
   if (showLauncher) {
     launcher = buildLauncher({
       look: isBubble ? "bubble" : "classic",
+      labels: launcherLabels,
       edge,
       title,
       icon: isBubble ? icon : logoUrl,
@@ -990,10 +986,10 @@ export function mountChatWidget(
   // ── Feedback ───────────────────────────────────────────────────────
   const feedbackOptions = feedback === true ? {} : feedback || null;
   const feedbackLabels: FeedbackLabels = {
-    ...DEFAULT_FEEDBACK_LABELS,
+    ...text.feedback,
     ...feedbackOptions?.labels,
     reasons: {
-      ...DEFAULT_FEEDBACK_LABELS.reasons,
+      ...text.feedback.reasons,
       ...feedbackOptions?.labels?.reasons,
     },
   };
@@ -1058,21 +1054,19 @@ export function mountChatWidget(
   // ── Tool calls: the ticket form ────────────────────────────────────
   // The agent's `ago_ticketing` tool opens a contact form in the conversation
   // as a `form` tool call. Its fields come from the tenant's ticket form
-  // (`GET /config`), fetched once, the first time such a call shows up. Like
+  // (`GET /config`), fetched alongside the reply or conversation history. Like
   // the feedback row, every form's state and DOM node live here, keyed by
   // tool call id, so a re-render moves the node instead of rebuilding it and
   // a half-typed description survives every streamed chunk.
   const toolCallFormOptions = options.toolCallForm ?? {};
-  const toolCallLabels: ToolCallFormLabels = {
-    ...DEFAULT_TOOL_CALL_FORM_LABELS,
-    ...toolCallFormOptions.labels,
-  };
+  const toolCallLabels = mergeToolCallFormLabels(text.form, options.toolCallForm?.labels);
+  let ticketFormReady = false;
   const identity = client.getUserIdentity();
   const identityEmail = toolCallFormOptions.userEmail ?? identity.email;
   // No email and no JWT: the SDK cannot name the reporter, so the form asks.
   const requireEmail = !identityEmail && !identity.hasJwt;
   let ticketForm: TicketForm | null = null;
-  let ticketFormLoaded = false;
+  let ticketFormError = false;
   let ticketFormPromise: Promise<void> | undefined;
   let ticketFormGeneration = 0;
   let fileAttachmentsEnabled = false;
@@ -1084,7 +1078,7 @@ export function mountChatWidget(
         call: ToolCallData;
         hydrated: boolean;
       }
-    | { kind: "embed"; state: EmbedFormState; view: EmbedFormView }
+    | { kind: "embed"; state: EmbedFormState; view: EmbedFormView; call: ToolCallData }
     | { kind: "static"; el: HTMLElement };
   const toolCallViews = new Map<string, ToolCallEntry>();
   // Tool calls whose ticket was created in this session (before a reload
@@ -1092,42 +1086,106 @@ export function mountChatWidget(
   const submittedToolCalls = new Set<string>();
 
   function ensureTicketFormConfig(): void {
-    if (ticketFormPromise) return;
+    if (ticketFormPromise || ticketFormError) return;
     const generation = ++ticketFormGeneration;
+    const requestLanguage = requestedLanguage;
     ticketFormPromise = client.getConfig().then((config) => {
       if (destroyed || generation !== ticketFormGeneration) return;
+      ticketFormReady = true;
+      applyLanguage(requestLanguage);
       const permission = config.permissions[0];
       ticketForm = permission?.ticketForm ?? null;
       fileAttachmentsEnabled = !!permission?.fileAttachmentsEnabled;
-      ticketFormLoaded = true;
+      ticketFormError = false;
       for (const entry of toolCallViews.values()) {
-        if (entry.kind !== "ticket") continue;
+        if (entry.kind === "embed") {
+          entry.view.updateText({
+            description: ticketForm?.embedDescription ?? entry.call.embedDescription,
+            successMessage: toolCallFormOptions.successMessage || toolCallFormOptions.labels?.embeddedFormSubmitted || ticketForm?.successMessageText,
+          });
+          continue;
+        }
+        if (entry.kind === "static") continue;
         if (ticketForm && !entry.hydrated) {
           hydrateTicketFormState(entry.state, entry.call.ticket, ticketForm);
           entry.hydrated = true;
         }
-        entry.view.rebuild({ ticketForm, configLoading: false, allowFiles: allowFiles || fileAttachmentsEnabled });
+        entry.view.rebuild({ ticketForm, allowFiles: allowFiles || fileAttachmentsEnabled });
       }
+      render();
     }).catch((error: unknown) => {
       if (destroyed || generation !== ticketFormGeneration) return;
       ticketFormPromise = undefined;
       const status = (error as { statusCode?: number; status?: number }).statusCode ?? (error as { status?: number }).status;
-      if (status === 401 || status === 403) ticketForm = null;
-      ticketFormLoaded = true;
-      for (const entry of toolCallViews.values()) {
-        if (entry.kind === "ticket") entry.view.rebuild({ ticketForm, configLoading: false });
+      ticketFormError = true;
+      if (status === 401 || status === 403) {
+        ticketForm = null;
+        ticketFormReady = false;
+        for (const entry of toolCallViews.values()) {
+          if (entry.kind === "ticket") entry.view.rebuild({ ticketForm: null });
+        }
+        clearToolCallViews();
       }
+      if (hasConfiguredForm()) render();
     });
   }
 
-  function onConfigChanged(): void {
+  function applyLanguage(language: string | null): void {
+    text = uiCatalog(language);
+    Object.assign(labels, resolveLabels(options.labels, language));
+    Object.assign(toolCallLabels, mergeToolCallFormLabels(text.form, toolCallFormOptions.labels));
+    for (const entry of toolCallViews.values()) {
+      if (entry.kind === "static") entry.el.replaceChildren(renderTicketDenied(toolCallLabels.notAllowed));
+    }
+    Object.assign(feedbackLabels, withOverrides(text.feedback, feedbackOptions?.labels as Partial<FeedbackLabels>));
+    feedbackLabels.reasons = withOverrides(text.feedback.reasons, feedbackOptions?.labels?.reasons);
+    placeholder = options.placeholder ?? (isBubble ? labels.askQuestion : text.common.placeholder);
+    if (options.welcomeMessage === undefined) welcomeText = text.common.welcome;
+    if (options.title === undefined && !isBubble) title = text.common.chat;
+    if (options.prompt === undefined) prompt = text.common.prompt;
+    setInputLabels({ ...labels, attachFiles: isBubble ? labels.attachFiles : (options.labels?.attachFiles ?? text.common.attachFile), send: text.common.send, stop: text.common.stop, removeFile: text.form.removeFile },
+      withOverrides(text.speech, typeof options.speechToText === "object" ? options.speechToText.labels : undefined));
+    setPlaceholder(isBubble && screen === "chat" ? "" : placeholder);
+    jumpBtn.setAttribute("aria-label", labels.scrollToBottom);
+    embedHeader?.update({ screen });
+    footer?.setActive(screen);
+    if (screen === "history") historyScreen?.render({ threads, loading: threadsLoading });
+    for (const button of container.querySelectorAll(".ago-chat-widget__close")) button.setAttribute("aria-label", isBubble ? labels.close : text.common.close);
+    const heading = header?.querySelector(".ago-chat-widget__title");
+    if (heading) heading.textContent = title;
+    const mobileHeading = mobileBar?.querySelector(".ago-chat-widget__title");
+    if (mobileHeading) mobileHeading.textContent = title;
+    mobileBar?.querySelector("button")?.setAttribute("aria-label", text.common.close);
+    if (container.hasAttribute("aria-label")) container.setAttribute("aria-label", title);
+    launcherLabels.open = text.common.openTitle.replace("{title}", () => title);
+    launcherLabels.close = text.common.closeTitle.replace("{title}", () => title);
+    launcher?.setOpen(panelOpen);
+    if (teaser) {
+      teaser.remove();
+      teaser = undefined;
+      if (!panelOpen) showTeaser();
+    }
+  }
+
+  function onConfigChanged({ language }: { language: string | null }): void {
+    requestedLanguage = language;
     ticketFormGeneration += 1;
     ticketFormPromise = undefined;
-    if (toolCallViews.size) ensureTicketFormConfig();
+    ticketFormError = false;
+    if (hasConfiguredForm()) ensureTicketFormConfig();
+    else {
+      ticketFormReady = false;
+      applyLanguage(requestedLanguage);
+      render();
+    }
   }
 
   function retryTicketFormConfig(): void {
-    if (toolCallViews.size && !ticketFormPromise) ensureTicketFormConfig();
+    if (hasConfiguredForm() && !ticketFormPromise) {
+      ticketFormError = false;
+      ensureTicketFormConfig();
+      render();
+    }
   }
 
   function clearToolCallViews(): void {
@@ -1147,7 +1205,7 @@ export function mountChatWidget(
   }
 
   /** Build (once) the node for a ticketing `form` tool call. */
-  function ticketFormEntry(call: ToolCallData): ToolCallEntry {
+  function ticketFormEntry(call: ToolCallData, toolCallLabels: ToolCallFormLabels): ToolCallEntry {
     const existing = toolCallViews.get(call.id);
     if (existing) return existing;
     let entry: ToolCallEntry;
@@ -1163,12 +1221,12 @@ export function mountChatWidget(
       const view = createEmbedFormView({
         state,
         embedHtml: call.embedHtml,
-        description: call.embedDescription,
+        description: ticketForm?.embedDescription ?? call.embedDescription,
         ticket: call.ticket,
         email: identityEmail,
         labels: toolCallLabels,
         message: call.message,
-        successMessage: toolCallFormOptions.successMessage,
+        successMessage: toolCallFormOptions.successMessage || toolCallFormOptions.labels?.embeddedFormSubmitted || ticketForm?.successMessageText,
         onSubmitted: (captured) => {
           submittedToolCalls.add(call.id);
           void client
@@ -1203,22 +1261,20 @@ export function mountChatWidget(
             });
         },
       });
-      entry = { kind: "embed", state, view };
+      entry = { kind: "embed", state, view, call };
     } else {
-      ensureTicketFormConfig();
       const state = createTicketFormState(call.ticket, ticketForm, identityEmail ?? "");
       const done = submittedTicketOf(call);
       if (done) state.submitted = done;
       const view = createTicketFormView({
         state,
         ticketForm,
-        configLoading: !ticketFormLoaded,
         labels: toolCallLabels,
         message: call.message,
         requireEmail,
         allowFiles: allowFiles || fileAttachmentsEnabled,
-        successMessage: toolCallFormOptions.successMessage,
-        successUrlLabel: toolCallFormOptions.successUrlLabel,
+        successMessage: toolCallFormOptions.successMessage || toolCallFormOptions.labels?.ticketSubmitted,
+        successUrlLabel: toolCallFormOptions.successUrlLabel || toolCallFormOptions.labels?.findTicketHere,
         createTicket: (payload) =>
           client.createTicket({
             subject: payload.subject,
@@ -1303,7 +1359,18 @@ export function mountChatWidget(
     if (!isTicketingCall(call)) {
       return renderGenericFormPlaceholder(call, toolCallLabels);
     }
-    const entry = ticketFormEntry(call);
+    if (call.allowedToCreateTicket !== false) {
+      ensureTicketFormConfig();
+      if (!ticketFormReady) {
+        if (ticketFormError) return null;
+        const loading = div({ padding: "16px", textAlign: "center", fontWeight: "700", fontSize: "20px" });
+        loading.className = "ago-ticket-form__config-loading";
+        loading.setAttribute("role", "status");
+        loading.textContent = toolCallLabels.loading;
+        return loading;
+      }
+    }
+    const entry = ticketFormEntry(call, toolCallLabels);
     return entry.kind === "static" ? entry.el : entry.view.el;
   }
 
@@ -1318,6 +1385,11 @@ export function mountChatWidget(
       submittedToolCalls.size > 0 || ticketCreatedInThread(messages);
     if (!hasPendingForm && !ticketCreated) {
       inputRow.style.display = "";
+      blockedCard?.remove();
+      return;
+    }
+    if (!ticketFormReady && hasConfiguredForm()) {
+      inputRow.style.display = "none";
       blockedCard?.remove();
       return;
     }
@@ -1382,6 +1454,12 @@ export function mountChatWidget(
     }
     inputRow.style.display = "none";
     inputRow.parentElement?.insertBefore(blockedCard, inputRow);
+  }
+
+  function hasConfiguredForm(): boolean {
+    const latest = latestFormToolCallId(messages);
+    const call = latest ? findToolCall(latest) : undefined;
+    return !!call && isTicketingCall(call) && call.displayMode !== "collapsible" && call.allowedToCreateTicket !== false;
   }
 
   /** Build the DOM node for the message at `index`, in the placement's look. */
@@ -1522,8 +1600,13 @@ export function mountChatWidget(
       });
     }
     // One confirmation per submitted form, below the conversation.
-    for (const text of formNotices) {
-      listEl.appendChild(renderFormNotice(text));
+    for (const notice of formNotices) {
+      listEl.appendChild(renderFormNotice(notice ?? text.common.formSubmitted));
+    }
+    if (ticketFormError && hasConfiguredForm()) {
+      const alert = buildEmbedAlert(labels.errorTitle, "");
+      alert.classList.add("ago-ticket-form-config-error");
+      listEl.appendChild(alert);
     }
     if (errorMessage) {
       if (isBubble) {
@@ -1770,6 +1853,7 @@ export function mountChatWidget(
     onMessageSent?.(trimmed);
     isLoading = true;
     errorMessage = null;
+    ticketFormError = false;
     // In automatic mode, sending re-attaches even if the reader scrolled away.
     stickToBottom = true;
 
@@ -1851,7 +1935,7 @@ export function mountChatWidget(
       if (loadThreads) void refreshThreads();
     } catch (err) {
       errorMessage =
-        err instanceof Error ? err.message : "Failed to send message";
+        err instanceof Error ? err.message : text.common.sendFailed;
       isLoading = false;
       messages = messages.filter((m) => !m.id.startsWith("temp-"));
       // The composer was cleared the moment the message was submitted, and the
@@ -1893,6 +1977,7 @@ export function mountChatWidget(
   // Resuming a thread (restored from storage or passed via `conversationId`):
   // fetch its history so a reload shows the previous messages, not an empty panel.
   async function loadHistory(id: string): Promise<void> {
+    ticketFormError = false;
     try {
       const conv = await client.getConversation(id);
       // The visitor moved on (new conversation, another thread) meanwhile.
@@ -2091,6 +2176,7 @@ export function mountChatWidget(
     if (destroyed || panelOpen || prompt === false || teaser) return;
     teaser = buildTeaser({
       text: prompt,
+      dismissLabel: labels.dismiss,
       edge,
       onOpen: () => openPanel(),
       onDismiss: () => {
@@ -2330,6 +2416,8 @@ export function mountChatWidget(
   function applyBubbleGeometry(): void {
     if (!wrapper) return;
     wrapper.style.display = panelOpen ? "block" : "none";
+    launcherLabels.open = text.common.openTitle.replace("{title}", () => title);
+    launcherLabels.close = text.common.closeTitle.replace("{title}", () => title);
     launcher?.setOpen(panelOpen);
     const compact = isCompact();
     if (launcherBtn) {
@@ -2607,6 +2695,7 @@ export function mountChatWidget(
       bar.appendChild(img);
     } else if (title) {
       const label = document.createElement("span");
+      label.className = "ago-chat-widget__title";
       label.textContent = title;
       css(label, {
         fontSize: "15px",
@@ -2622,7 +2711,7 @@ export function mountChatWidget(
     }
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
-    closeBtn.setAttribute("aria-label", "Close");
+    closeBtn.setAttribute("aria-label", text.common.close);
     closeBtn.textContent = "×";
     css(closeBtn, {
       // Full 44px hit area; margin keeps the glyph optically at the bar edge so

@@ -101,6 +101,17 @@ describe("getConfig", () => {
     client.destroy();
   });
 
+  it("exposes configured text to headless clients", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ permissions: [{ ticket_form: {
+      id: "form", embed_description: "Description traduite", success_message_text: "Merci", success_message_url_label: "Voir",
+      fields: [{ id: "field", title: "Champ", options: [{ id: "option", name: "Choix", value: "canonical", group: "Groupe", message: "Note traduite" }] }],
+    } }] })));
+    const client = new AgoClient({ baseUrl: "https://x.example.com", language: "fr" });
+    const result = await client.getConfig();
+    expect(result.permissions[0].ticketForm).toMatchObject({ embedDescription: "Description traduite", successMessageText: "Merci", successMessageUrlLabel: "Voir", fields: [{ title: "Champ", options: [{ name: "Choix", value: "canonical", group: "Groupe", message: "Note traduite" }] }] });
+    client.destroy();
+  });
+
   it("preserves conditional question and option metadata from the API", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ permissions: [{ ticket_form: {
       id: "form", priority_typologies: ["Incident"], success_message_text: "Done",

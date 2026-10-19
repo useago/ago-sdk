@@ -1,3 +1,4 @@
+import { useUiCatalog } from "../hooks/useUiCatalog";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { AgoClient } from "../../client/AgoClient";
 import type { SpeechToTextOptions } from "../../widget/speechToText";
@@ -38,13 +39,15 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   onSend,
   onStop,
   disabled = false,
-  placeholder = "Type a message...",
+  placeholder: placeholderOverride,
   allowFiles = false,
   speechToText = false,
   client,
   scopeKey,
   className = "",
 }) => {
+  const text = useUiCatalog(client);
+  const placeholder = placeholderOverride ?? text.common.placeholder;
   const [message, setMessage] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [dictating, setDictating] = useState(false);
@@ -176,7 +179,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
               <button
                 type="button"
                 onClick={() => removeFile(i)}
-                aria-label={`Remove ${file.name}`}
+                aria-label={text.form.removeFile.replace("{filename}", () => file.name)}
                 style={{
                   // 44px hit area (Apple HIG minimum). Negative margins keep the
                   // chip visually the same size: only the tap target grows.
@@ -217,7 +220,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={disabled}
-              aria-label="Attach file"
+              aria-label={text.common.attachFile}
               style={{
                 // 44px minimum touch target (Apple HIG).
                 flexShrink: 0,
@@ -305,7 +308,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           <button
             type="button"
             onClick={onStop}
-            aria-label="Stop generating"
+            aria-label={text.common.stop}
             style={{
               // 44px minimum height (Apple HIG touch target).
               minHeight: "44px",
@@ -320,7 +323,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
               transition: "background-color 0.15s",
             }}
           >
-            Stop
+            {text.common.stopButton}
           </button>
         ) : (
           <button
@@ -340,7 +343,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
               transition: "background-color 0.15s",
             }}
           >
-            Send
+            {text.common.send}
           </button>
         ))}
       </div>

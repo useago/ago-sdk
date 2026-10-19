@@ -83,11 +83,12 @@ import type {
   ToolCallData,
   TranscribeAudioOptions,
 } from "./types";
-import { normalizeLanguage } from "./language";
+import { normalizeLanguage, formConfigLanguage } from "./language";
 import { validateConfig } from "./validateConfig";
 
 /** `GET /api/sdk/v1/config` as the backend serializes it (snake_case). */
 interface RawTicketForm {
+  embed_description?: string | null;
   id: string;
   name?: string | null;
   mode?: string | null;
@@ -1255,6 +1256,11 @@ export class AgoClient {
     return response.json();
   }
 
+  /** The requested language, before UI fallback. */
+  getLanguage(): string | null {
+    return normalizeLanguage(this.config.language);
+  }
+
   /**
    * The tenant's SDK configuration (`GET /api/sdk/v1/config`): per-permission
    * agents, the ticket form the agent's `ago_ticketing` tool opens, and the
@@ -1263,8 +1269,7 @@ export class AgoClient {
    */
   async getConfig(): Promise<SdkConfig> {
     const query = new URLSearchParams({ ticket_form_i18n: "1" });
-    const language = normalizeLanguage(this.config.language);
-    if (language) query.set("language", language);
+    query.set("language", formConfigLanguage(this.config.language));
     const raw = await this.httpClient.get<RawSdkConfig>(`/api/sdk/v1/config?${query}`);
     return {
       permissions: (raw.permissions ?? []).map((p) => ({
@@ -1325,6 +1330,7 @@ export class AgoClient {
     return {
       id: raw.id,
       name: raw.name ?? undefined,
+      embedDescription: raw.embed_description ?? undefined,
       mode: raw.mode === "embed" ? "embed" : "form",
       showSubject: raw.show_subject ?? true,
       showBody: raw.show_body ?? true,

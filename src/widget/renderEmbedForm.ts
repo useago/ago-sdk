@@ -53,6 +53,7 @@ export interface EmbedFormView {
   el: HTMLElement;
   /** Detach listeners and observers; the node itself stays. */
   destroy: () => void;
+  updateText: (next: Pick<EmbedFormViewOptions, "description" | "successMessage">) => void;
 }
 
 let embedSeq = 0;
@@ -310,6 +311,7 @@ export function createEmbedFormView(opts: EmbedFormViewOptions): EmbedFormView {
     animation: "ago-spin 1s linear infinite",
   });
   spinner.setAttribute("role", "status");
+  spinner.setAttribute("aria-label", labels.loading);
   overlay.appendChild(spinner);
 
   function render(): void {
@@ -366,6 +368,7 @@ export function createEmbedFormView(opts: EmbedFormViewOptions): EmbedFormView {
     }
     if (opts.description) {
       const p = document.createElement("p");
+      p.className = "ago-embed-form__description";
       p.textContent = opts.description;
       css(p, { fontSize: "14px", lineHeight: "20px", margin: "0" });
       body.appendChild(p);
@@ -392,6 +395,7 @@ export function createEmbedFormView(opts: EmbedFormViewOptions): EmbedFormView {
         color: EMBED_MUTED_TEXT,
         fontSize: "14px",
       });
+      empty.className = "ago-embed-form__empty";
       empty.textContent = labels.noEmbedConfigured;
       frame.appendChild(empty);
     }
@@ -402,6 +406,26 @@ export function createEmbedFormView(opts: EmbedFormViewOptions): EmbedFormView {
 
   return {
     el: root,
+    updateText: (next) => {
+      Object.assign(opts, next);
+      spinner.setAttribute("aria-label", labels.loading);
+      if (state.status === "submitted" || state.status === "timeout") {
+        render();
+        return;
+      }
+      // Updating AGO's wrapper must not remount a third-party form or erase its draft.
+      const description = body.querySelector(".ago-embed-form__description");
+      if (description) description.textContent = opts.description ?? "";
+      else if (opts.description) {
+        const p = document.createElement("p");
+        p.className = "ago-embed-form__description";
+        p.textContent = opts.description;
+        css(p, { fontSize: "14px", lineHeight: "20px", margin: "0" });
+        body.prepend(p);
+      }
+      const empty = body.querySelector(".ago-embed-form__empty");
+      if (empty) empty.textContent = labels.noEmbedConfigured;
+    },
     destroy: () => {
       if (submitTimer) clearTimeout(submitTimer);
       frameCleanup?.();

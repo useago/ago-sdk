@@ -335,17 +335,31 @@ describe("ticket form tool call", () => {
     m.cleanup();
   });
 
-  it("shows the not-allowed notice and still blocks the composer", async () => {
+  it.each([
+    { call: { allowedToCreateTicket: false }, selector: ".ago-ticket-form__denied", french: "Vous n’êtes pas autorisé" },
+    { call: { toolName: "other_tool" }, selector: ".ago-toolcall-form-placeholder", french: "Formulaire générique" },
+  ])("shows local form notices without configuration ($selector)", async ({ call, selector, french }) => {
+    const getConfig = vi.fn().mockRejectedValue(new Error("offline"));
     const m = mount({}, {
+      getConfig,
       sendMessage: async () =>
-        answer({ toolCalls: [formCall({ allowedToCreateTicket: false })] }),
+        answer({ toolCalls: [formCall({ id: "older" }), formCall(call)] }),
     });
-    await m.widget.sendMessage("I need help");
-    await flush();
-    expect(m.root.querySelector(".ago-ticket-form__denied")).not.toBeNull();
-    expect(m.root.querySelector("#ago-ticket-subject")).toBeNull();
-    expect(m.composer().style.display).toBe("none");
-    m.cleanup();
+    try {
+      await m.widget.sendMessage("I need help");
+      await flush();
+      expect(m.root.querySelector(selector)).not.toBeNull();
+      expect(m.root.querySelector(".ago-toolcall-status")).not.toBeNull();
+      expect(m.root.querySelector("#ago-ticket-subject")).toBeNull();
+      expect(m.composer().style.display).toBe("none");
+      expect(m.blocked()).not.toBeNull();
+      m.client.__emitEvent("config:changed", { language: "fr" });
+      window.dispatchEvent(new Event("online"));
+      window.dispatchEvent(new Event("focus"));
+      await flush();
+      expect(m.root.querySelector(selector)?.textContent).toContain(french);
+      expect(getConfig).not.toHaveBeenCalled();
+    } finally { m.cleanup(); }
   });
 
   it("renders only the newest form; the older one becomes a status line", async () => {
@@ -461,15 +475,19 @@ describe("ticket form tool call", () => {
     viaOption.cleanup();
   });
 
-  it("enables attachments when the form configuration arrives after rendering", async () => {
+  it.each(["inline", "bubble"] as const)("shows the answer while form configuration loads (%s)", async (placement) => {
     let resolveConfig!: (value: SdkConfig) => void;
     const createTicket = vi.fn(async () => ({ id: "ticket" }));
-    const m = mount({}, { createTicket, getConfig: () => new Promise<SdkConfig>(resolve => { resolveConfig = resolve; }) });
+    const m = mount({ placement, loadThreads: false }, { createTicket, getConfig: () => new Promise<SdkConfig>(resolve => { resolveConfig = resolve; }) });
     await m.widget.sendMessage("help");
     await flush();
-    expect(m.root.querySelector(".ago-ticket-form__config-loading")).not.toBeNull();
+    expect(m.form()).toBeNull();
+    expect(m.root.textContent).toContain("Let me open a ticket for you.");
+    expect(m.root.querySelector(".ago-ticket-form__config-loading")?.getAttribute("role")).toBe("status");
+    expect(m.root.querySelector("[aria-busy=true]")).toBeNull();
     resolveConfig({ ...config, permissions: [{ ...config.permissions[0], fileAttachmentsEnabled: true }] });
     await flush();
+    expect(m.root.querySelector(".ago-ticket-form__config-loading")).toBeNull();
     const files = m.input("ago-ticket-files");
     expect(files).not.toBeNull();
     const file = new File(["details"], "details.txt", { type: "text/plain" });
@@ -608,6 +626,29 @@ function localizedConfig(title: string): SdkConfig {
   } }] };
 }
 
+it('waits for current-language configuration when a form appears in a new conversation', async () => {
+  const getConfig = vi.fn().mockResolvedValue(config);
+  const m = mount({}, { getConfig });
+  try {
+    await m.widget.sendMessage('help'); await flush();
+    m.widget.newConversation();
+    let rejectConfig!: (error: Error) => void;
+    getConfig.mockImplementation(() => new Promise<SdkConfig>((_, reject) => { rejectConfig = reject; }));
+    m.client.__emitEvent('config:changed', { language: 'fr' });
+    expect(getConfig).toHaveBeenCalledTimes(1);
+    await m.widget.sendMessage('help again'); await flush();
+    expect(m.root.textContent).toContain('Let me open a ticket for you.');
+    expect(m.root.querySelector('.ago-ticket-form__config-loading')).not.toBeNull();
+    expect(m.form()).toBeNull();
+    rejectConfig(new Error('offline')); await flush();
+    expect(m.form()).toBeNull();
+    getConfig.mockResolvedValue(localizedConfig('Produit'));
+    window.dispatchEvent(new Event('online')); await flush();
+    expect(m.form()?.textContent).toContain('Produit');
+    expect(m.submitBtn().textContent).toContain('Envoyer');
+  } finally { m.cleanup(); }
+});
+
 it('keeps answers, attachments and submission status when the language changes', async () => {
   const getConfig = vi.fn().mockResolvedValue(config);
   let finish!: (result: { id: string }) => void;
@@ -628,6 +669,7 @@ it('keeps answers, attachments and submission status when the language changes',
     expect(m.input('ago-ticket-subject').value).toBe('My draft');
     expect(m.select('ago-ticket-field-product').value).toBe('api');
     expect(m.form()?.textContent).toContain('draft.txt');
+    expect(m.form()?.querySelector('[aria-label="Supprimer draft.txt"]')).not.toBeNull();
     expect(m.root.querySelector('.ago-ticket-form__error')).toBeNull();
     m.submitBtn().click(); await flush();
     getConfig.mockResolvedValue(localizedConfig('Product'));
@@ -637,28 +679,39 @@ it('keeps answers, attachments and submission status when the language changes',
     expect(createTicket).toHaveBeenCalledWith(expect.objectContaining({ subject: 'My draft', files: [file], customFields: [{ id: 'product', value: 'api' }] }));
     getConfig.mockResolvedValue(localizedConfig('Produit'));
     m.client.__emitEvent('config:changed', { language: 'fr' }); await flush();
-    expect(m.root.querySelector('.ago-ticket-form__success')).not.toBeNull();
+    expect(m.root.querySelector('.ago-ticket-form__success')?.textContent).toContain('Votre ticket a été soumis avec succès.');
     expect(m.root.querySelector('.ago-ticket-form__submit')).toBeNull();
   } finally { m.cleanup(); }
 });
 
-it('shows the latest selected language and keeps the form usable until a failed refresh recovers', async () => {
+it('keeps drafts and wording through stale/failed refreshes, recovering when back online', async () => {
   const getConfig = vi.fn().mockResolvedValue(config);
   const m = mount({}, { getConfig });
   try {
     await m.widget.sendMessage('help'); await flush();
+    type(m.input('ago-ticket-subject'), 'Unsent draft');
+    const originalInput = m.input('ago-ticket-subject');
     const pending: Array<(config: SdkConfig) => void> = [];
     getConfig.mockImplementation(() => new Promise<SdkConfig>((resolve) => pending.push(resolve)));
     for (const language of ['fr', 'en', 'fr']) m.client.__emitEvent('config:changed', { language });
+    expect(m.input('ago-ticket-subject')).toBe(originalInput);
+    expect(m.submitBtn().textContent).toContain('Submit');
+    expect(m.root.querySelector('[aria-busy=true]')).toBeNull();
     pending[2](localizedConfig('Latest')); await flush();
     pending[0](localizedConfig('Old French')); pending[1](localizedConfig('Old English')); await flush();
     expect(m.form()?.textContent).toContain('Latest');
     expect(m.form()?.textContent).not.toContain('Old');
+    const refreshedInput = m.input('ago-ticket-subject');
     getConfig.mockRejectedValue(new Error('offline'));
     m.client.__emitEvent('config:changed', { language: 'de' }); await flush();
     expect(m.form()?.textContent).toContain('Latest');
+    expect(m.input('ago-ticket-subject')).toBe(refreshedInput);
+    expect(refreshedInput.value).toBe('Unsent draft');
     getConfig.mockResolvedValue(localizedConfig('Recovered'));
-    window.dispatchEvent(new Event('online')); await flush();
+    window.dispatchEvent(new Event('online'));
+    await flush();
+    expect(m.submitBtn().textContent).toContain('Absenden');
+    expect(m.input('ago-ticket-subject').value).toBe('Unsent draft');
     expect(m.form()?.textContent).toContain('Recovered');
   } finally { m.cleanup(); }
 });
@@ -674,7 +727,7 @@ it('updates validation labels when the language changes and clears answers for a
     expect(m.form()?.textContent).toContain('Product is required.');
     getConfig.mockResolvedValue(localizedConfig('Produit'));
     m.client.__emitEvent('config:changed', { language: 'fr' }); await flush();
-    expect(m.form()?.textContent).toContain('Produit is required.');
+    expect(m.form()?.textContent).toContain('Produit est requis.');
     expect(m.select('ago-ticket-field-product').value).toBe('');
     const changed = localizedConfig('Another');
     changed.permissions[0].ticketForm!.id = 'another-form';
@@ -701,5 +754,44 @@ it('clears a form when a language refresh is forbidden and ignores its pending s
     finish({ id: 'submitted-ticket' }); await flush();
     expect(submitToolCallForm).not.toHaveBeenCalled();
     expect(m.root.querySelector('.ago-ticket-form__success')).toBeNull();
+  } finally { m.cleanup(); }
+});
+
+it.each([false, true])('keeps explicit success overrides above configured success text (dedicated override: %s)', async (dedicated) => {
+  const m = mount({ toolCallForm: { labels: { subject: 'Host subject', ticketSubmitted: 'Host label success', findTicketHere: 'Host link' }, ...(dedicated ? { successMessage: 'Host dedicated success', successUrlLabel: 'Host dedicated link' } : {}) } }, {
+    getConfig: async () => ({ ...config, permissions: [{ ...config.permissions[0], ticketForm: { ...ticketForm, successMessageText: 'Configured success', successMessageUrlLabel: 'Configured link' } }] }),
+  });
+  try {
+    await m.widget.sendMessage('help'); await flush();
+    expect(m.form()!.textContent).toContain('Host subject');
+    m.submitBtn().click(); await flush();
+    expect(m.form()!.textContent).toContain(dedicated ? 'Host dedicated success' : 'Host label success');
+    expect(m.form()!.textContent).toContain(dedicated ? 'Host dedicated link' : 'Host link');
+  } finally { m.cleanup(); }
+});
+
+it('refreshes embed wrapper text without remounting the third-party form or resubmitting', async () => {
+  let current = config;
+  const submitted = vi.fn(async () => ({ status: 'completed', result: {} }));
+  const m = mount({}, {
+    getConfig: async () => current,
+    submitToolCallForm: submitted,
+    sendMessage: async () => answer({ toolCalls: [formCall({ mode: 'embed', embedHtml: '<form id="hosted-local"><input name="email" /></form>', embedDescription: 'Source wrapper' })] }),
+  });
+  try {
+    await m.widget.sendMessage('help'); await flush();
+    const host = m.root.querySelector<HTMLFormElement>('#hosted-local')!;
+    host.querySelector('input')!.value = 'draft@example.test';
+    current = { ...config, permissions: [{ ...config.permissions[0], ticketForm: { ...ticketForm, embedDescription: 'Translated wrapper' } }] };
+    m.client.__emitEvent('config:changed', { language: 'fr' }); await flush();
+    expect(m.root.querySelector('#hosted-local')).toBe(host);
+    expect(host.querySelector('input')!.value).toBe('draft@example.test');
+    expect(m.root.textContent).toContain('Translated wrapper');
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'hsFormCallback', eventName: 'onFormSubmitted' } })); await flush();
+    expect(m.root.textContent).toContain('Votre formulaire a été soumis avec succès.');
+    current = config;
+    m.client.__emitEvent('config:changed', { language: 'en' }); await flush();
+    expect(m.root.textContent).toContain('Your form has been submitted successfully.');
+    expect(submitted).toHaveBeenCalledTimes(1);
   } finally { m.cleanup(); }
 });

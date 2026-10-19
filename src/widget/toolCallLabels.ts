@@ -1,7 +1,9 @@
+import en from "../i18n/en";
+import { withOverrides } from "../i18n";
+
 /**
- * Every string the ticket form and its surrounding chrome show, with the
- * hosted widget's English defaults, so a non-English site can translate them
- * through `toolCallForm.labels`.
+ * Client-owned wording for the ticket form and its surrounding chrome.
+ * Hosts can customize individual strings through `toolCallForm.labels`.
  */
 
 export interface ToolCallFormLabels {
@@ -42,6 +44,8 @@ export interface ToolCallFormLabels {
   submissionFailed: string;
   submissionFailedDescription: string;
   fileTooLarge: string;
+  fileSize: string;
+  removeFile: string;
   permissionDenied: string;
   validationFailed: string;
   pleaseCheckFields: string;
@@ -58,59 +62,16 @@ export interface ToolCallFormLabels {
   newConversation: string;
 }
 
-export const DEFAULT_TOOL_CALL_FORM_LABELS: ToolCallFormLabels = {
-  useFormToCreateTicket: "You can use the following form to create a ticket",
-  yourEmail: "Your Email",
-  emailPlaceholder: "Enter your email address",
-  emailRequired: "Email is required",
-  emailInvalid: "Please enter a valid email address",
-  subject: "Subject",
-  subjectRequired: "Subject is required.",
-  typology: "Typology",
-  selectTypology: "Select a typology",
-  typologyRequired: "Typology is required.",
-  question: "Question",
-  task: "Task",
-  incident: "Incident",
-  priority: "Priority",
-  selectPriority: "Select a priority",
-  priorityRequired: "Priority is required.",
-  low: "Low",
-  normal: "Normal",
-  high: "High",
-  urgent: "Urgent",
-  detailedContext: "Detailed context",
-  detailedContextRequired: "Detailed context is required.",
-  fieldRequired: "{fieldTitle} is required.",
-  fieldFormatInvalid: "{fieldTitle} has an invalid format.",
-  attachments: "Attachments",
-  selectFile: "Select file",
-  submit: "Submit",
-  loading: "Loading...",
-  maxCharacters: "Maximum characters",
-  ticketSubmitted: "Your ticket has been successfully submitted.",
-  findTicketHere: "You can find it here:",
-  noTicketForm: "No ticket form found",
-  notAllowed: "You are not allowed to create a ticket.",
-  submissionFailed: "Failed to submit ticket",
-  submissionFailedDescription:
-    "There was an error submitting your ticket. Please try again.",
-  fileTooLarge: "File too large",
-  permissionDenied: "Permission denied",
-  validationFailed: "Validation error",
-  pleaseCheckFields: "Please check your form fields and try again.",
-  embeddedFormSubmitted: "Your form has been submitted successfully.",
-  noEmbedConfigured: "No embed URL or HTML configured for this form.",
-  embedSubmitTimeout:
-    "The form submission could not be confirmed. Please try again.",
-  tryAgain: "Try again",
-  contactFormCreated:
-    "A new contact form has been created, see below to fill it out.",
-  contactFormRejected: "You are not allowed to create a ticket. See below why.",
-  genericFormComingSoon: "Generic form rendering (Coming soon)",
-  unknownToolCall: "Unknown tool call type: {type}",
-  formPending: "Please complete the form above to continue the conversation",
-  ticketCreatedBlocked:
-    "A ticket has been created for this conversation.\n Please create a new conversation to continue.",
-  newConversation: "New conversation",
-};
+export const DEFAULT_TOOL_CALL_FORM_LABELS: ToolCallFormLabels = en.form;
+
+export function mergeToolCallFormLabels(
+  localized: Partial<ToolCallFormLabels> | undefined,
+  overrides: Partial<ToolCallFormLabels> | undefined,
+): ToolCallFormLabels {
+  return withOverrides(withOverrides(DEFAULT_TOOL_CALL_FORM_LABELS, localized), overrides);
+}
+
+export function formatFormTemplate(template: string, values: Record<string, string>): string {
+  return template.replace(/(?<!\{)\{(\w+)\}(?!\})/g, (match, key: string) =>
+    Object.prototype.hasOwnProperty.call(values, key) ? values[key] : match);
+}

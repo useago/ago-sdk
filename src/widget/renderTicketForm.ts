@@ -35,7 +35,7 @@ import {
   PANEL_BACKGROUND,
   TEXT_COLOR,
 } from "./styles";
-import type { ToolCallFormLabels } from "./toolCallLabels";
+import { formatFormTemplate, type ToolCallFormLabels } from "./toolCallLabels";
 
 /** Submit button: the design-system accent, or `colors.button` when set. */
 const SUBMIT_BACKGROUND =
@@ -61,7 +61,11 @@ export interface TicketFormState {
   submittedOnce: boolean;
   loading: boolean;
   /** Last submission failure, shown under the button. */
-  submitError: string | null;
+  submitError: {
+    title: "validationFailed" | "submissionFailed" | "fileTooLarge" | "permissionDenied";
+    description: "pleaseCheckFields" | "submissionFailedDescription";
+    detail?: string;
+  } | null;
   /** Set once the ticket exists; the form then shows the success block. */
   submitted?: { ticketId: string; ticketUrl?: string };
 }
@@ -138,10 +142,6 @@ export function hydrateTicketFormState(
   pruneCustomFields(form, state.customFields, state.ticket.typology);
 }
 
-function fill(template: string, vars: Record<string, string>): string {
-  return template.replace(/\{(\w+)\}/g, (_, k: string) => vars[k] ?? "");
-}
-
 /** Port of `computeErrorsContactForm` plus the unknown-visitor email check. */
 export function computeTicketFormErrors(
   form: TicketForm,
@@ -161,14 +161,14 @@ export function computeTicketFormErrors(
     if (field.hidden || !fieldEnabled(form, field, state.customFields, t.typology)) continue;
     const value = state.customFields[fieldKey(field)];
     if (field.required && !value?.trim()) {
-      errors[fieldKey(field)] = fill(labels.fieldRequired, {
+      errors[fieldKey(field)] = formatFormTemplate(labels.fieldRequired, {
         fieldTitle: field.title ?? "",
       });
     } else if (field.regexpForValidation && value?.trim()) {
       // Invalid admin patterns should not crash the entire form.
       try {
         if (!new RegExp(field.regexpForValidation).test(value)) {
-          errors[fieldKey(field)] = fill(labels.fieldFormatInvalid, { fieldTitle: field.title ?? "" });
+          errors[fieldKey(field)] = formatFormTemplate(labels.fieldFormatInvalid, { fieldTitle: field.title ?? "" });
         }
       } catch {
         // Leave malformed patterns to server validation.
@@ -326,9 +326,8 @@ export function renderTicketDenied(markdown: string): HTMLElement {
 
 export interface TicketFormViewOptions {
   state: TicketFormState;
-  /** Null while the config loads or when the tenant has no ticket form. */
+  /** Null when the tenant has no ticket form. */
   ticketForm: TicketForm | null;
-  configLoading: boolean;
   labels: ToolCallFormLabels;
   /** The tool call's `message`, shown as a blue banner above the form. */
   message?: string;
@@ -357,14 +356,13 @@ export interface TicketFormViewOptions {
 export interface TicketFormView {
   el: HTMLElement;
   /** Re-render from the current state (after the config arrives, for instance). */
-  rebuild: (next?: Partial<Pick<TicketFormViewOptions, "ticketForm" | "configLoading" | "allowFiles">>) => void;
+  rebuild: (next?: Partial<Pick<TicketFormViewOptions, "ticketForm" | "allowFiles">>) => void;
 }
 
 export function createTicketFormView(opts: TicketFormViewOptions): TicketFormView {
   const { state, labels } = opts;
   let ticketForm = opts.ticketForm;
   let formRevision = 0;
-  let configLoading = opts.configLoading;
   let allowFiles = opts.allowFiles;
 
   const root = div({
@@ -388,12 +386,12 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
   }
 
   async function submit(): Promise<void> {
-    if (state.loading || !ticketForm) return;
+    if (state.loading || state.submitted || !ticketForm) return;
     pruneCustomFields(ticketForm, state.customFields, state.ticket.typology);
     state.submittedOnce = true;
     state.submitError = null;
     if (!validate()) {
-      state.submitError = `${labels.validationFailed}: ${labels.pleaseCheckFields}`;
+      state.submitError = { title: "validationFailed", description: "pleaseCheckFields" };
       render();
       return;
     }
@@ -423,16 +421,12 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
       if (revision !== formRevision) return;
       state.loading = false;
       const err = error instanceof Error ? error : new Error(String(error));
-      const status = (err as { status?: number }).status;
-      let text = labels.submissionFailed;
-      let description = labels.submissionFailedDescription;
-      if (status === 413) text = labels.fileTooLarge;
-      else if (status === 403) text = labels.permissionDenied;
-      else if (status === 422) {
-        text = labels.validationFailed;
-        description = err.message || labels.pleaseCheckFields;
-      } else if (err.message) description = err.message;
-      state.submitError = `${text}: ${description}`;
+      const status = (err as { status?: number; statusCode?: number }).statusCode ?? (err as { status?: number }).status;
+      state.submitError = {
+        title: status === 413 ? "fileTooLarge" : status === 403 ? "permissionDenied" : status === 422 ? "validationFailed" : "submissionFailed",
+        description: status === 422 ? "pleaseCheckFields" : "submissionFailedDescription",
+        detail: status === 413 || status === 403 ? undefined : err.message,
+      };
       render();
       opts.onError?.(err);
     }
@@ -589,15 +583,6 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
           urlLabel: opts.successUrlLabel || ticketForm?.successMessageUrlLabel || labels.findTicketHere,
         }),
       );
-      return;
-    }
-
-    if (configLoading) {
-      const box = div({ padding: "16px", textAlign: "center", fontWeight: "700", fontSize: "20px" });
-      box.className = "ago-ticket-form__config-loading";
-      box.setAttribute("role", "status");
-      box.textContent = labels.loading;
-      root.appendChild(box);
       return;
     }
 
@@ -845,11 +830,11 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
           borderRadius: "4px",
         });
         const name = document.createElement("span");
-        name.textContent = `${file.name} - ${(file.size / 1024).toFixed(1)} KB`;
+        name.textContent = `${file.name} - ${formatFormTemplate(labels.fileSize, { size: (file.size / 1024).toFixed(1) })}`;
         const remove = document.createElement("button");
         remove.type = "button";
         remove.textContent = "×";
-        remove.setAttribute("aria-label", `Remove ${file.name}`);
+        remove.setAttribute("aria-label", formatFormTemplate(labels.removeFile, { filename: file.name }));
         remove.disabled = disabled;
         css(remove, {
           color: "#dc2626",
@@ -875,7 +860,8 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
     }
 
     if (state.submitError) {
-      const alert = errorEl(state.submitError);
+      const { title, description, detail } = state.submitError;
+      const alert = errorEl(`${labels[title]}: ${detail || labels[description]}`);
       alert.setAttribute("role", "alert");
       alert.className = "ago-ticket-form__error ago-ticket-form__submit-error";
       root.appendChild(alert);
@@ -936,7 +922,6 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
         ticketForm = updated;
         if (state.submittedOnce && !state.submitted) validate();
       }
-      if (next && "configLoading" in next) configLoading = !!next.configLoading;
       if (next && "allowFiles" in next) allowFiles = !!next.allowFiles;
       render();
     },

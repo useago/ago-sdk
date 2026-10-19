@@ -1,3 +1,4 @@
+import { useUiCatalog } from "../hooks/useUiCatalog";
 import React, { useEffect } from "react";
 import type { AgoClient } from "../../client/AgoClient";
 import {
@@ -35,9 +36,11 @@ export const AgoNudge: React.FC<AgoNudgeProps> = ({
   onExpand,
   autoHideMs,
   position = "bottom-right",
-  openChatLabel = "Open chat",
+  openChatLabel: openChatOverride,
   className = "",
 }) => {
+  const text = useUiCatalog(client);
+  const openChatLabel = openChatOverride ?? text.common.openChat;
   const { nudge, accept, dismiss } = useProactiveNudge({ client, onExpand });
 
   // Optional auto-hide, reset per nudge instance.
@@ -78,7 +81,7 @@ export const AgoNudge: React.FC<AgoNudgeProps> = ({
       <button
         type="button"
         className="ago-nudge__close"
-        aria-label="Dismiss"
+        aria-label={text.widget.dismiss}
         onClick={dismiss}
         style={{
           position: "absolute",

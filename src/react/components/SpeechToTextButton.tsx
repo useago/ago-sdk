@@ -1,3 +1,5 @@
+import { useUiCatalog } from "../hooks/useUiCatalog";
+import { withOverrides } from "../../i18n";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { AgoClient } from "../../client/AgoClient";
 import { createSpeechToText } from "../../widget/speechToText";
@@ -24,6 +26,7 @@ export interface SpeechToTextButtonProps {
 export function SpeechToTextButton(props: SpeechToTextButtonProps) {
   const contextClient = useOptionalAgoClient();
   const client = props.client ?? contextClient;
+  const text = useUiCatalog(client);
   const host = useRef<HTMLDivElement>(null);
   const control = useRef<ReturnType<typeof createSpeechToText>>();
   const callbacks = useRef(props);
@@ -50,7 +53,7 @@ export function SpeechToTextButton(props: SpeechToTextButtonProps) {
         callbacks.current.onBusyChange?.(value);
       },
       onError: (message) => { if (active) setError(message); },
-      labels: callbacks.current.labels,
+      labels: withOverrides(text.speech, callbacks.current.labels),
     });
     host.current.append(mounted.el);
     control.current = mounted;
@@ -74,7 +77,7 @@ export function SpeechToTextButton(props: SpeechToTextButtonProps) {
 
   useIsomorphicLayoutEffect(() => { control.current?.setDisabled(!!props.disabled); }, [props.disabled]);
   useIsomorphicLayoutEffect(() => { control.current?.cancel(); }, [props.scopeKey, client]);
-  useIsomorphicLayoutEffect(() => { control.current?.setLabels(props.labels); }, [props.labels]);
+  useIsomorphicLayoutEffect(() => { control.current?.setLabels(withOverrides(text.speech, props.labels)); }, [text, props.labels]);
 
   return (
     <div className={`ago-speech-to-text ${props.className ?? ""}`}

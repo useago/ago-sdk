@@ -279,6 +279,7 @@ export interface TicketField {
 
 /** The ticket form an agent's `ago_ticketing` tool opens in the conversation. */
 export interface TicketForm {
+  embedDescription?: string;
   id: string;
   name?: string;
   /** `"form"` renders the SDK's own fields; `"embed"` hosts third-party HTML. */

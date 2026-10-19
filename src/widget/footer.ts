@@ -100,6 +100,8 @@ export function buildFooter(opts: FooterOptions): FooterHandle {
     // footer is hidden there anyway, but the state stays consistent.
     active = screen === "history" ? "history" : "home";
     for (const [key, btn] of tabs) {
+      const span = btn.querySelector("span");
+      if (span) span.textContent = key === "home" ? opts.labels.home : opts.labels.chats;
       const on = key === active;
       btn.style.color = on ? PRIMARY_ACCENT : BRAND_COLOR;
       btn.style.backgroundColor = on ? TAB_TINT : "transparent";

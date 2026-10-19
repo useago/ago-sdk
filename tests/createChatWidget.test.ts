@@ -2074,3 +2074,21 @@ describe("mountChatWidget", () => {
     });
   });
 });
+
+it("switches text-only widget chrome without fetching form config or losing the composer draft", () => {
+  const getConfig = vi.fn();
+  const client = createMockClient({ overrides: { getConfig, getLanguage: () => "fr" } });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const widget = mountChatWidget(host, { client });
+  try {
+    const input = host.querySelector("textarea")!;
+    expect(input.placeholder).toBe("Écrivez un message...");
+    input.value = "Unsent draft";
+    client.__emitEvent("config:changed", { language: "de-DE" });
+    expect(input.placeholder).toBe("Nachricht eingeben...");
+    expect(input.value).toBe("Unsent draft");
+    expect(host.querySelector('button[aria-label="Senden"]')).not.toBeNull();
+    expect(getConfig).not.toHaveBeenCalled();
+  } finally { widget.destroy(); host.remove(); }
+});

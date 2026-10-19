@@ -140,6 +140,9 @@ export function buildEmbedHeader(opts: EmbedHeaderOptions): EmbedHeaderHandle {
   return {
     el: header,
     update: ({ screen }) => {
+      back.setAttribute("aria-label", opts.labels.back);
+      newChat.setAttribute("aria-label", opts.labels.newChat);
+      close.setAttribute("aria-label", opts.labels.close);
       back.style.display = screen === "chat" ? "flex" : "none";
       newChat.style.display = screen === "home" ? "none" : "flex";
       titleEl.textContent =
