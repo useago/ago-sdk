@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-10-19
+
+### Added
+
+- UI and configured ticket-form translations in six languages. Language switching preserves drafts, attachments and submission state; explicit wording overrides remain supported.
+
 ## [1.13.3] - 2026-10-13
 
 ### Added

@@ -45,6 +45,25 @@ interface AgoConfig {
 
 ---
 
+## Ticket-form language
+
+```ts
+import { AgoClient } from '@useago/sdk';
+
+const client = new AgoClient({
+  baseUrl: 'https://playground.api.useago.com',
+  language: 'fr',
+});
+const config = await client.getConfig();
+client.updateConfig({ language: 'pt-PT' });
+```
+
+The SDK includes English, French, German, Spanish, Italian and Brazilian Portuguese UI wording. Regional tags use the corresponding base-language UI. Omitted, `null` or unsupported languages use English; `undefined` leaves the current setting unchanged.
+
+`getConfig()` requests translated form content with `ticket_form_i18n=1` and `language`. Supported regional tags are preserved. Each string tries the exact locale, base language, preferred region (`en-GB`, `fr-FR` or `pt-PT`), then other matching regions alphabetically. It repeats that sequence for the tenant default before using the original text. Translated labels do not change submitted values.
+
+Change language with `updateConfig()`. SDK UI components preserve drafts, attachments and submission state while loading translated forms; a failed switch keeps the previous wording. Headless integrations must call `getConfig()` again and update their own UI. Explicit wording overrides remain in effect.
+
 ## Debug logging
 
 `debug: true` turns on the SDK's internal logger. While enabled, the client
@@ -197,9 +216,10 @@ const sources = conversation.messages?.flatMap((message) => message.sources ?? [
 `createAgo({ language: "fr" })` also accepts an explicit locale when your API
 configuration is detected from the page.
 
-This header does not force the agent's reply language or translate your UI text.
-Continue passing translated labels, placeholders and welcome text from your
-application's translations.
+The language setting also selects the SDK's standard UI wording, as described in
+[ticket-form language](#ticket-form-language). It does not force the agent's reply
+language. Host-authored welcome text and explicit label overrides remain your
+application's responsibility.
 
 ### User and ticket metadata
 
