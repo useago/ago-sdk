@@ -252,6 +252,7 @@ export interface TicketFieldOption {
 
 /** A custom field of a ticket form. */
 export interface TicketField {
+  prefillAliases?: string[];
   id: string;
   /** The key the ticketing backend expects; used as the submit key when set. */
   externalId?: string;
@@ -618,6 +619,7 @@ export interface SSEChunkData {
  * SDK Events
  */
 export interface AgoClientEvents {
+  "config:changed": { language: string | null };
   /**
    * The client-side context changed: a context entry or dynamic provider was
    * added/removed, or a stateful helper (e.g. `createFormCollector`) updated its

@@ -83,6 +83,7 @@ import type {
   ToolCallData,
   TranscribeAudioOptions,
 } from "./types";
+import { normalizeLanguage } from "./language";
 import { validateConfig } from "./validateConfig";
 
 /** `GET /api/sdk/v1/config` as the backend serializes it (snake_case). */
@@ -100,6 +101,7 @@ interface RawTicketForm {
   fields?: Array<{
     id: string;
     external_id?: string | null;
+    prefill_aliases?: string[];
     title?: string | null;
     type?: string | null;
     required?: boolean;
@@ -1260,7 +1262,10 @@ export class AgoClient {
    * once, when a ticket form first appears in a conversation.
    */
   async getConfig(): Promise<SdkConfig> {
-    const raw = await this.httpClient.get<RawSdkConfig>("/api/sdk/v1/config");
+    const query = new URLSearchParams({ ticket_form_i18n: "1" });
+    const language = normalizeLanguage(this.config.language);
+    if (language) query.set("language", language);
+    const raw = await this.httpClient.get<RawSdkConfig>(`/api/sdk/v1/config?${query}`);
     return {
       permissions: (raw.permissions ?? []).map((p) => ({
         id: p.id ?? undefined,
@@ -1332,6 +1337,7 @@ export class AgoClient {
         id: f.id,
         externalId: f.external_id ?? undefined,
         title: f.title ?? undefined,
+        prefillAliases: f.prefill_aliases,
         type: f.type ?? undefined,
         required: !!f.required,
         hidden: !!f.hidden,
@@ -2407,8 +2413,13 @@ export class AgoClient {
     const merged = { ...this.config, ...cleaned };
     validateConfig(merged, "AgoClient.updateConfig");
 
+    const language = normalizeLanguage(merged.language);
+    const languageChanged = language !== normalizeLanguage(this.config.language);
     this.config = merged;
     this.httpClient.updateConfig(cleaned);
+    if (languageChanged) {
+      this.eventEmitter.emit("config:changed", { language });
+    }
 
     if (cleaned.debug !== undefined) {
       if (cleaned.debug) {

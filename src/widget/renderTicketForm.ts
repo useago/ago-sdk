@@ -102,7 +102,7 @@ export function createTicketFormState(
           (f) =>
             f.externalId === key ||
             f.id === key ||
-            (f.title ? sanitizeTitle(f.title) === key : false),
+            (f.prefillAliases?.length ? f.prefillAliases.includes(key) : (f.title ? sanitizeTitle(f.title) === key : false)),
         );
         if (match) customFields[fieldKey(match)] = value;
       }
@@ -363,6 +363,7 @@ export interface TicketFormView {
 export function createTicketFormView(opts: TicketFormViewOptions): TicketFormView {
   const { state, labels } = opts;
   let ticketForm = opts.ticketForm;
+  let formRevision = 0;
   let configLoading = opts.configLoading;
   let allowFiles = opts.allowFiles;
 
@@ -397,6 +398,7 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
       return;
     }
     state.loading = true;
+    const revision = formRevision;
     render();
     try {
       const result = await opts.createTicket({
@@ -412,11 +414,13 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
         email: opts.requireEmail ? state.email : undefined,
         ticketFormId: ticketForm.id,
       });
+      if (revision !== formRevision) return;
       state.loading = false;
       state.submitted = { ticketId: result.id, ticketUrl: result.url };
       render();
       opts.onCreated(result, state);
     } catch (error) {
+      if (revision !== formRevision) return;
       state.loading = false;
       const err = error instanceof Error ? error : new Error(String(error));
       const status = (err as { status?: number }).status;
@@ -923,7 +927,15 @@ export function createTicketFormView(opts: TicketFormViewOptions): TicketFormVie
   return {
     el: root,
     rebuild: (next) => {
-      if (next && "ticketForm" in next) ticketForm = next.ticketForm ?? null;
+      if (next && "ticketForm" in next) {
+        const updated = next.ticketForm ?? null;
+        if (ticketForm && ticketForm.id !== updated?.id) {
+          formRevision += 1;
+          Object.assign(state, createTicketFormState(undefined, updated, state.email), { submitted: undefined });
+        }
+        ticketForm = updated;
+        if (state.submittedOnce && !state.submitted) validate();
+      }
       if (next && "configLoading" in next) configLoading = !!next.configLoading;
       if (next && "allowFiles" in next) allowFiles = !!next.allowFiles;
       render();

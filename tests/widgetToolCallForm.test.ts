@@ -596,3 +596,110 @@ describe("ticket form tool call", () => {
     widget.destroy();
   });
 });
+
+function localizedConfig(title: string): SdkConfig {
+  return { ...config, permissions: [{ ...config.permissions[0], ticketForm: {
+    ...ticketForm,
+    fields: ticketForm.fields.map((field) => ({ ...field,
+      title: field.id === 'f1' ? title : field.title,
+      prefillAliases: [field.id, 'product'],
+      options: field.options.map((option) => ({ ...option, name: `${title} ${option.value}` })),
+    })),
+  } }] };
+}
+
+it('keeps answers, attachments and submission status when the language changes', async () => {
+  const getConfig = vi.fn().mockResolvedValue(config);
+  let finish!: (result: { id: string }) => void;
+  const createTicket = vi.fn(() => new Promise<{ id: string }>((resolve) => { finish = resolve; }));
+  const m = mount({ allowFiles: true }, { getConfig, createTicket });
+  try {
+    await m.widget.sendMessage('help'); await flush();
+    type(m.input('ago-ticket-subject'), 'My draft');
+    const select = m.select('ago-ticket-field-product');
+    select.value = 'api'; select.dispatchEvent(new Event('change'));
+    const file = new File(['body'], 'draft.txt');
+    Object.defineProperty(m.input('ago-ticket-files'), 'files', { value: [file] });
+    m.input('ago-ticket-files').dispatchEvent(new Event('change'));
+    getConfig.mockResolvedValue(localizedConfig('Produit'));
+    m.client.__emitEvent('config:changed', { language: 'fr' }); await flush();
+    expect(m.root.querySelector('label[for="ago-ticket-field-product"]')?.textContent).toContain('Produit');
+    expect(m.select('ago-ticket-field-product').selectedOptions[0].textContent).toBe('Produit api');
+    expect(m.input('ago-ticket-subject').value).toBe('My draft');
+    expect(m.select('ago-ticket-field-product').value).toBe('api');
+    expect(m.form()?.textContent).toContain('draft.txt');
+    expect(m.root.querySelector('.ago-ticket-form__error')).toBeNull();
+    m.submitBtn().click(); await flush();
+    getConfig.mockResolvedValue(localizedConfig('Product'));
+    m.client.__emitEvent('config:changed', { language: 'en' }); await flush();
+    expect(m.submitBtn().disabled).toBe(true);
+    finish({ id: 'submitted' }); await flush();
+    expect(createTicket).toHaveBeenCalledWith(expect.objectContaining({ subject: 'My draft', files: [file], customFields: [{ id: 'product', value: 'api' }] }));
+    getConfig.mockResolvedValue(localizedConfig('Produit'));
+    m.client.__emitEvent('config:changed', { language: 'fr' }); await flush();
+    expect(m.root.querySelector('.ago-ticket-form__success')).not.toBeNull();
+    expect(m.root.querySelector('.ago-ticket-form__submit')).toBeNull();
+  } finally { m.cleanup(); }
+});
+
+it('shows the latest selected language and keeps the form usable until a failed refresh recovers', async () => {
+  const getConfig = vi.fn().mockResolvedValue(config);
+  const m = mount({}, { getConfig });
+  try {
+    await m.widget.sendMessage('help'); await flush();
+    const pending: Array<(config: SdkConfig) => void> = [];
+    getConfig.mockImplementation(() => new Promise<SdkConfig>((resolve) => pending.push(resolve)));
+    for (const language of ['fr', 'en', 'fr']) m.client.__emitEvent('config:changed', { language });
+    pending[2](localizedConfig('Latest')); await flush();
+    pending[0](localizedConfig('Old French')); pending[1](localizedConfig('Old English')); await flush();
+    expect(m.form()?.textContent).toContain('Latest');
+    expect(m.form()?.textContent).not.toContain('Old');
+    getConfig.mockRejectedValue(new Error('offline'));
+    m.client.__emitEvent('config:changed', { language: 'de' }); await flush();
+    expect(m.form()?.textContent).toContain('Latest');
+    getConfig.mockResolvedValue(localizedConfig('Recovered'));
+    window.dispatchEvent(new Event('online')); await flush();
+    expect(m.form()?.textContent).toContain('Recovered');
+  } finally { m.cleanup(); }
+});
+
+it('updates validation labels when the language changes and clears answers for a different form', async () => {
+  const getConfig = vi.fn().mockResolvedValue(config);
+  const m = mount({}, { getConfig });
+  try {
+    await m.widget.sendMessage('help'); await flush();
+    const select = m.select('ago-ticket-field-product');
+    select.value = ''; select.dispatchEvent(new Event('change'));
+    m.submitBtn().click(); await flush();
+    expect(m.form()?.textContent).toContain('Product is required.');
+    getConfig.mockResolvedValue(localizedConfig('Produit'));
+    m.client.__emitEvent('config:changed', { language: 'fr' }); await flush();
+    expect(m.form()?.textContent).toContain('Produit is required.');
+    expect(m.select('ago-ticket-field-product').value).toBe('');
+    const changed = localizedConfig('Another');
+    changed.permissions[0].ticketForm!.id = 'another-form';
+    getConfig.mockResolvedValue(changed);
+    m.client.__emitEvent('config:changed', { language: 'de' }); await flush();
+    expect(m.input('ago-ticket-subject').value).toBe('');
+    expect(m.root.querySelector('.ago-ticket-form__error')).toBeNull();
+  } finally { m.cleanup(); }
+});
+
+it('clears a form when a language refresh is forbidden and ignores its pending submission', async () => {
+  const getConfig = vi.fn().mockResolvedValue(config);
+  let finish!: (result: { id: string }) => void;
+  const createTicket = vi.fn(() => new Promise<{ id: string }>(resolve => { finish = resolve; }));
+  const submitToolCallForm = vi.fn();
+  const m = mount({}, { getConfig, createTicket, submitToolCallForm });
+  try {
+    await m.widget.sendMessage('help'); await flush();
+    type(m.input('ago-ticket-subject'), 'My draft');
+    m.submitBtn().click(); await flush();
+    getConfig.mockRejectedValue({ statusCode: 403 });
+    m.client.__emitEvent('config:changed', { language: 'fr' }); await flush();
+    expect(m.root.querySelector('#ago-ticket-subject')).toBeNull();
+    finish({ id: 'submitted-ticket' }); await flush();
+    expect(submitToolCallForm).not.toHaveBeenCalled();
+    expect(m.root.querySelector('.ago-ticket-form__success')).toBeNull();
+  } finally { m.cleanup(); }
+});

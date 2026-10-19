@@ -168,3 +168,23 @@ it.each([undefined, []])("leaves sources absent when a conversation has no citat
     client.destroy();
   }
 });
+
+it('requests the selected form language, returns prefill aliases and notifies language changes', async () => {
+  const fetchMock = vi.fn(async () => new Response(JSON.stringify({ permissions: [{ ticket_form: {
+    id: 'form',
+    fields: [{ id: 'priority', title: 'Priorité', prefill_aliases: ['priority'], options: [] }],
+  } }] })));
+  vi.stubGlobal('fetch', fetchMock);
+  const client = new AgoClient({ baseUrl: 'https://example.test', language: 'en' });
+  const changed = vi.fn(); client.on('config:changed', changed);
+  try {
+    client.updateConfig({ language: 'fr_FR' });
+    client.updateConfig({ language: 'fr-FR' });
+    const form = (await client.getConfig()).permissions[0].ticketForm!;
+    const request = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(request.pathname).toBe('/api/sdk/v1/config');
+    expect(Object.fromEntries(request.searchParams)).toEqual({ ticket_form_i18n: '1', language: 'fr-FR' });
+    expect(changed).toHaveBeenCalledExactlyOnceWith({ language: 'fr-FR' });
+    expect(form.fields[0]).toMatchObject({ title: 'Priorité', prefillAliases: ['priority'] });
+  } finally { client.destroy(); }
+});

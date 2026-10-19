@@ -1074,6 +1074,7 @@ export function mountChatWidget(
   let ticketForm: TicketForm | null = null;
   let ticketFormLoaded = false;
   let ticketFormPromise: Promise<void> | undefined;
+  let ticketFormGeneration = 0;
   let fileAttachmentsEnabled = false;
   type ToolCallEntry =
     | {
@@ -1081,6 +1082,7 @@ export function mountChatWidget(
         state: TicketFormState;
         view: TicketFormView;
         call: ToolCallData;
+        hydrated: boolean;
       }
     | { kind: "embed"; state: EmbedFormState; view: EmbedFormView }
     | { kind: "static"; el: HTMLElement };
@@ -1091,27 +1093,41 @@ export function mountChatWidget(
 
   function ensureTicketFormConfig(): void {
     if (ticketFormPromise) return;
-    ticketFormPromise = client
-      .getConfig()
-      .then((config) => {
-        const permission = config.permissions[0];
-        ticketForm = permission?.ticketForm ?? null;
-        fileAttachmentsEnabled = !!permission?.fileAttachmentsEnabled;
-      })
-      .catch(() => {
-        ticketForm = null;
-      })
-      .then(() => {
-        ticketFormLoaded = true;
-        if (destroyed) return;
-        for (const entry of toolCallViews.values()) {
-          if (entry.kind !== "ticket") continue;
-          if (ticketForm) {
-            hydrateTicketFormState(entry.state, entry.call.ticket, ticketForm);
-          }
-          entry.view.rebuild({ ticketForm, configLoading: false, allowFiles: allowFiles || fileAttachmentsEnabled });
+    const generation = ++ticketFormGeneration;
+    ticketFormPromise = client.getConfig().then((config) => {
+      if (destroyed || generation !== ticketFormGeneration) return;
+      const permission = config.permissions[0];
+      ticketForm = permission?.ticketForm ?? null;
+      fileAttachmentsEnabled = !!permission?.fileAttachmentsEnabled;
+      ticketFormLoaded = true;
+      for (const entry of toolCallViews.values()) {
+        if (entry.kind !== "ticket") continue;
+        if (ticketForm && !entry.hydrated) {
+          hydrateTicketFormState(entry.state, entry.call.ticket, ticketForm);
+          entry.hydrated = true;
         }
-      });
+        entry.view.rebuild({ ticketForm, configLoading: false, allowFiles: allowFiles || fileAttachmentsEnabled });
+      }
+    }).catch((error: unknown) => {
+      if (destroyed || generation !== ticketFormGeneration) return;
+      ticketFormPromise = undefined;
+      const status = (error as { statusCode?: number; status?: number }).statusCode ?? (error as { status?: number }).status;
+      if (status === 401 || status === 403) ticketForm = null;
+      ticketFormLoaded = true;
+      for (const entry of toolCallViews.values()) {
+        if (entry.kind === "ticket") entry.view.rebuild({ ticketForm, configLoading: false });
+      }
+    });
+  }
+
+  function onConfigChanged(): void {
+    ticketFormGeneration += 1;
+    ticketFormPromise = undefined;
+    if (toolCallViews.size) ensureTicketFormConfig();
+  }
+
+  function retryTicketFormConfig(): void {
+    if (toolCallViews.size && !ticketFormPromise) ensureTicketFormConfig();
   }
 
   function clearToolCallViews(): void {
@@ -1255,7 +1271,7 @@ export function mountChatWidget(
         },
         onError: toolCallFormOptions.onError,
       });
-      entry = { kind: "ticket", state, view, call };
+      entry = { kind: "ticket", state, view, call, hydrated: !!ticketForm };
     }
     toolCallViews.set(call.id, entry);
     return entry;
@@ -1678,6 +1694,9 @@ export function mountChatWidget(
     render();
   };
 
+  client.on("config:changed", onConfigChanged);
+  window.addEventListener("online", retryTicketFormConfig);
+  window.addEventListener("focus", retryTicketFormConfig);
   client.on("message:start", onStart);
   client.on("message:chunk", onChunk);
   client.on("message:answer-complete", onAnswerComplete);
@@ -2197,6 +2216,9 @@ export function mountChatWidget(
       if (teaserTimer) clearTimeout(teaserTimer);
       if (resizeTimer) clearTimeout(resizeTimer);
       teaser?.remove();
+      client.off("config:changed", onConfigChanged);
+      window.removeEventListener("online", retryTicketFormConfig);
+      window.removeEventListener("focus", retryTicketFormConfig);
       client.off("message:start", onStart);
       client.off("message:chunk", onChunk);
       client.off("message:answer-complete", onAnswerComplete);
