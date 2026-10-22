@@ -265,6 +265,8 @@ describe("placement: bubble (launcher, teaser, panel)", () => {
     expect(panel.style.getPropertyValue("--ago-panel-background")).toBe("#f0f0f0");
     const header = panel.querySelector<HTMLElement>(".ago-chat-widget__header")!;
     expect(header.style.background).toContain("--ago-header-background");
+    // The launcher sits outside the panel, so it carries the token itself.
+    expect(b.launcher().style.getPropertyValue("--ago-launcher-background")).toBe("#ff0000");
     b.cleanup();
   });
 

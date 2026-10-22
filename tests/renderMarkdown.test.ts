@@ -91,6 +91,41 @@ describe("renderMarkdown", () => {
       expect(out).toContain("second");
     });
 
+    it("keeps steps separated by blank lines in one ordered list", () => {
+      const host = document.createElement("div");
+      host.appendChild(renderMarkdown("1. first\n\n2. second\n\n3. third"));
+      expect(host.querySelectorAll("ol")).toHaveLength(1);
+      expect(host.querySelectorAll("li")).toHaveLength(3);
+    });
+
+    it("keeps indented paragraphs inside their list item", () => {
+      const host = document.createElement("div");
+      host.appendChild(
+        renderMarkdown("1. **Step one**\n\n   Details\n\n2. **Step two**\n   more"),
+      );
+      const items = host.querySelectorAll("ol > li");
+      expect(host.querySelectorAll("ol")).toHaveLength(1);
+      expect(items).toHaveLength(2);
+      expect(items[0].textContent).toContain("Details");
+      expect(items[1].innerHTML).toContain("<br>more");
+    });
+
+    it("keeps the numbering when a list resumes after a paragraph", () => {
+      const host = document.createElement("div");
+      host.appendChild(renderMarkdown("1. first\n\nA note.\n\n2. second"));
+      const lists = host.querySelectorAll("ol");
+      expect(lists).toHaveLength(2);
+      expect(lists[0].hasAttribute("start")).toBe(false);
+      expect(lists[1].getAttribute("start")).toBe("2");
+    });
+
+    it("splits a blank-separated ordered list from a bullet list", () => {
+      const host = document.createElement("div");
+      host.appendChild(renderMarkdown("1. first\n\n- bullet"));
+      expect(host.querySelectorAll("ol")).toHaveLength(1);
+      expect(host.querySelectorAll("ul")).toHaveLength(1);
+    });
+
     it("renders nested lists", () => {
       const out = html("- parent\n  - child");
       expect(out).toContain("child");

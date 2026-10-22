@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Launcher theming.** `colors.button` (and `theme.launcherBg`, `theme.brand` for side panels) now reaches the floating launcher. It is mounted outside the panel, so it never inherited the `--ago-*` tokens and stayed `#007bff`.
+- **Numbered lists in the widget.** Steps separated by blank lines (`1. ...\n\n2. ...`) now render as one list instead of a run of "1." lists. Indented paragraphs under an item stay inside it, and a list that resumes after other content keeps its number (`start`).
+
 ## [1.14.0] - 2026-10-19
 
 ### Added
