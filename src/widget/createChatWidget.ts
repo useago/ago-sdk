@@ -864,6 +864,9 @@ export function mountChatWidget(
       onClick: () => (isBubble ? togglePanel() : openPanel()),
     });
     launcherBtn = launcher.el;
+    // The launcher is mounted next to the panel, not inside it, so it doesn't
+    // inherit the container's tokens (`colors.button`, `theme.launcherBg`, ...).
+    applyTheme(launcherBtn, theme);
   }
 
   // ── Mobile-fullscreen state (inert unless inline in a browser) ──

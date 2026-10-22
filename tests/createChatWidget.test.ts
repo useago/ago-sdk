@@ -497,6 +497,27 @@ describe("mountChatWidget", () => {
       client.destroy();
     });
 
+    it("themes the launcher, which is mounted outside the panel", () => {
+      const client = new AgoClient({ baseUrl: "https://example.test" });
+      const root = document.createElement("div");
+      document.body.appendChild(root);
+
+      const widget = mountChatWidget(root, {
+        client,
+        placement: "right",
+        theme: { brand: "#ff0000" },
+      });
+
+      const launcher = root.querySelector<HTMLElement>(
+        ".ago-chat-widget-launcher",
+      )!;
+      expect(launcher.style.getPropertyValue("--ago-brand-color")).toBe("#ff0000");
+
+      widget.destroy();
+      root.remove();
+      client.destroy();
+    });
+
     it("opens and closes the panel (launcher hides while open)", () => {
       const client = new AgoClient({ baseUrl: "https://example.test" });
       const root = document.createElement("div");

@@ -161,25 +161,46 @@ function startsBlock(line: string): boolean {
   );
 }
 
-/** Build a `<ul>`/`<ol>` from a slice of list lines, recursing for nested items. */
+const isOrdered = (marker: string): boolean => /\d/.test(marker);
+
+/** Strip the common leading indent so nested content parses as top-level. */
+function dedent(lines: string[]): string[] {
+  const indents = lines.filter((l) => l.trim() !== "").map(indentOf);
+  const min = indents.length > 0 ? Math.min(...indents) : 0;
+  return lines.map((l) => l.slice(Math.min(min, indentOf(l))));
+}
+
+/**
+ * Build a `<ul>`/`<ol>` from a slice of list lines. Each item keeps its
+ * deeper-indented lines (and blank lines between them); those are rendered
+ * recursively, so nested lists, extra paragraphs and code blocks all work.
+ */
 function renderList(lines: string[]): HTMLElement {
   const first = lines[0].match(LIST_RE)!;
   const baseIndent = first[1].length;
-  const ordered = /\d/.test(first[2]);
+  const ordered = isOrdered(first[2]);
   const list = el(ordered ? "ol" : "ul", {
     margin: "0 0 8px 0",
     paddingLeft: "20px",
     listStyleType: ordered ? "decimal" : "disc",
     listStylePosition: "outside",
   });
+  // Keep the author's numbering when a list resumes after other content.
+  const start = parseInt(first[2], 10);
+  if (ordered && start !== 1) list.setAttribute("start", String(start));
 
   let i = 0;
   while (i < lines.length) {
-    const m = lines[i].match(LIST_RE)!;
-    // Gather this item's own text plus any deeper-indented continuation lines.
-    const childLines: string[] = [];
+    const m = lines[i].match(LIST_RE);
     i++;
-    while (i < lines.length && indentOf(lines[i]) > baseIndent) {
+    // Blank lines between items of a loose list.
+    if (!m) continue;
+    // Gather this item's deeper-indented continuation lines.
+    const childLines: string[] = [];
+    while (
+      i < lines.length &&
+      (lines[i].trim() === "" || indentOf(lines[i]) > baseIndent)
+    ) {
       childLines.push(lines[i]);
       i++;
     }
@@ -202,10 +223,16 @@ function renderList(lines: string[]): HTMLElement {
       li.innerHTML = renderInline(m[3]);
     }
 
-    const nested = childLines.filter((l) => LIST_RE.test(l));
-    if (nested.length > 0) {
-      // Re-indent nested lines to the child level so the recursion sees a fresh list.
-      li.appendChild(renderList(childLines.filter((l) => l.trim() !== "")));
+    const body = dedent(childLines);
+    // Plain lines right under the item text continue it, like a paragraph.
+    let j = 0;
+    while (j < body.length && !startsBlock(body[j])) {
+      li.innerHTML += `<br>${renderInline(body[j])}`;
+      j++;
+    }
+    const rest = body.slice(j);
+    if (rest.some((l) => l.trim() !== "")) {
+      li.appendChild(renderMarkdown(rest.join("\n")));
     }
     list.appendChild(li);
   }
@@ -393,8 +420,26 @@ export function renderMarkdown(source: string): DocumentFragment {
     if (LIST_RE.test(line)) {
       const listLines: string[] = [];
       const baseIndent = indentOf(line);
+      const ordered = isOrdered(line.match(LIST_RE)![2]);
       while (i < lines.length) {
-        if (lines[i].trim() === "") break;
+        if (lines[i].trim() === "") {
+          // A blank line only ends the list if what follows is neither another
+          // item of the same kind nor an indented continuation. LLMs often
+          // space out steps ("1. ...\n\n2. ..."); splitting there would
+          // restart the numbering at 1 for every step.
+          let j = i + 1;
+          while (j < lines.length && lines[j].trim() === "") j++;
+          const next = lines[j];
+          const item = next?.match(LIST_RE);
+          const continues =
+            next !== undefined &&
+            (indentOf(next) > baseIndent ||
+              (!!item && isOrdered(item[2]) === ordered));
+          if (!continues) break;
+          listLines.push(...lines.slice(i, j));
+          i = j;
+          continue;
+        }
         if (LIST_RE.test(lines[i]) || indentOf(lines[i]) > baseIndent) {
           listLines.push(lines[i]);
           i++;
