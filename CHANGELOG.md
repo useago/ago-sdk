@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.1] - 2026-10-22
+
 ### Fixed
 
 - **Launcher theming.** `colors.button` (and `theme.launcherBg`, `theme.brand` for side panels) now reaches the floating launcher. It is mounted outside the panel, so it never inherited the `--ago-*` tokens and stayed `#007bff`.
