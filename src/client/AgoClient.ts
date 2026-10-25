@@ -1156,6 +1156,13 @@ export class AgoClient {
         attachments?: Array<Record<string, unknown>>;
         sources?: Array<{ id: string; title: string; url?: string | null }>;
         follow_up_replies?: string[];
+        background_agent?: {
+          run_id: string;
+          execution_status: NonNullable<AgoMessage["backgroundAgent"]>["executionStatus"];
+          outcome: NonNullable<AgoMessage["backgroundAgent"]>["outcome"];
+          checklist: NonNullable<AgoMessage["backgroundAgent"]>["checklist"];
+          completion_notice: string | null;
+        } | null;
       }>;
     }>(`/api/sdk/v1/conversations/${conversationId}`);
 
@@ -1173,6 +1180,15 @@ export class AgoClient {
         status: m.status as AgoMessage["status"],
         createdAt: new Date(m.created_at),
         hidden: m.hidden,
+        backgroundAgent: m.background_agent
+          ? {
+              runId: m.background_agent.run_id,
+              executionStatus: m.background_agent.execution_status,
+              outcome: m.background_agent.outcome,
+              checklist: m.background_agent.checklist,
+              completionNotice: m.background_agent.completion_notice,
+            }
+          : undefined,
         sources:
           m.sources && m.sources.length > 0
             ? m.sources.map(({ id, title, url }) => ({ id, title, url: url ?? undefined }))
