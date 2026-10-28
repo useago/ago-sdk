@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.2] - 2026-10-28
+
+### Added
+
+- Tool identity metadata in streamed events and conversation history, including `toolType` for ticket-form loading UIs.
+
+### Fixed
+
+- Tool statuses such as `running` and `waiting_input` no longer overwrite the assistant message status.
+
 ## [1.14.1] - 2026-10-22
 
 ### Fixed

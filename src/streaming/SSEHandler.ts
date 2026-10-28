@@ -239,8 +239,8 @@ export class SSEHandler {
     }
 
     // Handle status
-    if (data.status) {
-      this.message.status = data.status;
+    if (data.status && !data.tool_call_data) {
+      this.message.status = data.status as AgoMessage["status"];
     }
 
     // Handle agent
@@ -360,6 +360,9 @@ export class SSEHandler {
       status: data.status || "unknown",
       toolName: data.tool_name || "",
       toolDisplayName: data.tool_display_name,
+      toolType: data.tool_type ?? undefined,
+      messageId: data.message_id ?? undefined,
+      conversationId: data.thread?.id,
       message: data.message,
       formSchema: data.form_schema,
       data: data.data,

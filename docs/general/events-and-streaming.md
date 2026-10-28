@@ -49,6 +49,11 @@ const final = await client.waitFor("message:complete", { timeout: 10_000 });
 
 ---
 
+For ticket preparation, `toolCall:received` sends `type: "progress_indicator"`
+with `toolType: "ago_ticketing"`, then `type: "form"` with the same `id`.
+Use that ID to replace your loader with the form. `getConversation()` restores
+the saved tool state without replaying live events or starting polling.
+
 ## 2. Callback helpers
 
 Thin wrappers that return an **unsubscribe** function, handy when you don't want
