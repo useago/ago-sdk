@@ -478,6 +478,10 @@ export interface PaginatedResult<T> {
  */
 export interface ToolCallData {
   id: string;
+  /** Canonical tool type, independent of its configured name. */
+  toolType?: string;
+  messageId?: string;
+  conversationId?: string;
   type: ToolCallType;
   status: string;
   toolName: string;
@@ -576,8 +580,9 @@ export interface ClientFunctionInvocation {
 export interface SSEChunkData {
   content?: string;
   full_content?: string;
-  message_id?: string;
-  status?: MessageStatus;
+  message_id?: string | null;
+  /** Assistant message status, or tool status when tool_call_data is true. */
+  status?: string;
   thread?: { id: string };
   /** Generated conversation title, streamed once at the end of the first turn. */
   title?: string;
@@ -593,6 +598,7 @@ export interface SSEChunkData {
     position: number;
   }>;
   tool_call_data?: boolean;
+  tool_type?: string | null;
   type?: string;
   id?: string;
   tool_name?: string;

@@ -16,7 +16,7 @@ function sseResponse(chunks: string[]): Response {
 }
 
 describe("SSEHandler: ticketing form tool call", () => {
-  it("maps the ticketing fields of a form tool call onto camelCase", async () => {
+  it("maps a form over its running tool call without changing the assistant status", async () => {
     const onToolCall = vi.fn();
     const handler = new SSEHandler({ onToolCall });
     const payload = {
@@ -25,6 +25,8 @@ describe("SSEHandler: ticketing form tool call", () => {
       id: "tc-1",
       status: "waiting_input",
       tool_name: "ago_ticketing",
+      tool_type: "ago_ticketing",
+      message_id: "m-1",
       display_mode: "display",
       ask_to_talk_to_human: true,
       allowed_to_create_ticket: false,
@@ -40,14 +42,21 @@ describe("SSEHandler: ticketing form tool call", () => {
       embed_description: "Fill in",
       thread: { id: "t-1" },
     };
-    await handler.processStream(
-      sseResponse([`data: ${JSON.stringify(payload)}\n\n`]),
+    const message = await handler.processStream(
+      sseResponse([
+        'data: {"message_id":"m-1","thread":{"id":"t-1"},"status":"IN_PROGRESS"}\n\n',
+        'data: {"tool_call_data":true,"id":"tc-1","type":"progress_indicator","status":"running","tool_type":null,"message_id":null}\n\n',
+        `data: ${JSON.stringify(payload)}\n\n`,
+      ]),
     );
     expect(onToolCall).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "tc-1",
         type: "form",
         toolName: "ago_ticketing",
+        toolType: "ago_ticketing",
+        messageId: "m-1",
+        conversationId: "t-1",
         displayMode: "display",
         askToTalkToHuman: true,
         allowedToCreateTicket: false,
@@ -63,5 +72,12 @@ describe("SSEHandler: ticketing form tool call", () => {
         embedDescription: "Fill in",
       }),
     );
+    expect(onToolCall).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      id: "tc-1", type: "progress_indicator", toolType: undefined, messageId: undefined,
+    }));
+    expect(message.status).toBe("IN_PROGRESS");
+    expect(message.toolCalls).toEqual([
+      expect.objectContaining({ id: "tc-1", type: "form", status: "waiting_input" }),
+    ]);
   });
 });
