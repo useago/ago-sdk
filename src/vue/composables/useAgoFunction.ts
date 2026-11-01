@@ -90,6 +90,7 @@ export function useAgoNavigation(
   onMounted(() => {
     client.registerNavigationFunction(navigate, routes, {
       catalogue: opts?.catalogue === "onDemand" ? "onDemand" : "inline",
+      getCurrentPath: opts?.getCurrentPath,
     });
   });
 

@@ -40,6 +40,7 @@ the same two steps through its own guide:
 | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/react/react-original.svg" width="14" /> React | **you're reading it**, just scroll down |
 | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/vuejs/vuejs-original.svg" width="14" /> Vue 3 | [Vue guide](docs/frameworks/vue.md) |
 | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/angular/angular-original.svg" width="14" /> Angular | [Angular guide](docs/frameworks/angular.md) |
+| <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/react/react-original.svg" width="14" /> React Native (Expo) | [React Native guide](docs/frameworks/react-native.md) |
 | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/typescript/typescript-original.svg" width="14" /> Plain JavaScript / TypeScript | [Core guide](docs/general/core.md) |
 | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/html5/html5-original.svg" width="14" /> Any website, no build step (`<script>`) | [Widget guide](docs/general/widget.md) |
 
@@ -488,7 +489,8 @@ npm install && npm run dev
 
 The examples ship pre-configured against the demo account, so they answer
 immediately. [`examples/`](examples/) has one per stack: React (with
-react-router navigation), Vue, Angular, plain TypeScript, and no-build HTML.
+react-router navigation), React Native (Expo), Vue, Angular, plain TypeScript,
+and no-build HTML.
 
 ---
 
@@ -516,6 +518,7 @@ what you use:
 | --- | --- |
 | `@useago/sdk` | Core client, types, functions, helpers, streaming, store, testing |
 | `@useago/sdk/react` | React provider, hooks and components |
+| `@useago/sdk/native` | React Native: provider and hooks, no DOM components |
 | `@useago/sdk/vue` | Vue plugin and composables |
 | `@useago/sdk/angular` | Angular service and provider |
 | `@useago/sdk/helpers` | Pre-built client functions only |

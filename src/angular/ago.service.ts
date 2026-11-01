@@ -204,6 +204,7 @@ export class AgoService {
   ): void {
     this.client.registerNavigationFunction(navigate, routes, {
       catalogue: opts?.catalogue === "onDemand" ? "onDemand" : "inline",
+      getCurrentPath: opts?.getCurrentPath,
     });
   }
 

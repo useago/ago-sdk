@@ -2,6 +2,7 @@ import type { AgoClient } from "../client/AgoClient";
 import type {
   AgoMessage,
   AgoClientEvents,
+  AgoUploadFile,
   ToolCallData,
   ClientFunctionInvocation,
 } from "../client/types";
@@ -125,7 +126,7 @@ export function onFunctionInvoke(
 export async function* createMessageStream(
   client: AgoClient,
   content: string,
-  options?: { conversationId?: string; agentId?: string; files?: File[] }
+  options?: { conversationId?: string; agentId?: string; files?: AgoUploadFile[] }
 ): AsyncGenerator<
   | { type: "start"; data: AgoClientEvents["message:start"] }
   | { type: "chunk"; data: AgoClientEvents["message:chunk"] }

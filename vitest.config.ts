@@ -17,6 +17,7 @@ export default defineConfig({
     // match, so a bare `@useago/sdk` entry would swallow the subpaths.
     alias: [
       { find: "@useago/sdk/react", replacement: fromRoot("./src/react/index.ts") },
+      { find: "@useago/sdk/native", replacement: fromRoot("./src/native/index.ts") },
       { find: "@useago/sdk/vue", replacement: fromRoot("./src/vue/index.ts") },
       { find: "@useago/sdk/angular", replacement: fromRoot("./src/angular/index.ts") },
       { find: "@useago/sdk/helpers", replacement: fromRoot("./src/helpers/index.ts") },

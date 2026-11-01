@@ -58,6 +58,16 @@
         "default": "./dist/helpers.cjs"
       }
     },
+    "./native": {
+      "import": {
+        "types": "./dist/native.d.ts",
+        "default": "./dist/native.js"
+      },
+      "require": {
+        "types": "./dist/native.d.cts",
+        "default": "./dist/native.cjs"
+      }
+    },
     "./widget": {
       "import": {
         "types": "./dist/widget.d.ts",

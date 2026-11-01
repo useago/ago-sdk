@@ -76,6 +76,7 @@ export function useAgo(
         metadata: config.metadata ?? null,
         debug: config.debug,
         warnOnEmptyReply: config.warnOnEmptyReply,
+        fetch: config.fetch,
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -89,6 +90,7 @@ export function useAgo(
     config?.metadata,
     config?.debug,
     config?.warnOnEmptyReply,
+    config?.fetch,
   ]);
 
   return {

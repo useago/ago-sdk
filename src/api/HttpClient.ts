@@ -1,6 +1,7 @@
 import { AgoApiError, AgoNetworkError, ApiErrorResponse } from "../client/errors";
 import { normalizeLanguage } from "../client/language";
-import type { AgoConfig } from "../client/types";
+import type { AgoConfig, AgoFetch } from "../client/types";
+import type { StorageLike } from "../state/createStore";
 import { logger } from "../utils/logger";
 
 const WIDGET_ID_KEY = "ago_widget_id";
@@ -19,11 +20,19 @@ export function isAbortError(error: unknown): boolean {
   );
 }
 
-function generateAnonId(): string {
-  // Try to reuse a previously generated ID from localStorage
-  if (typeof localStorage !== "undefined") {
-    const stored = localStorage.getItem(WIDGET_ID_KEY);
-    if (stored) return stored;
+function generateAnonId(storage?: StorageLike): string {
+  // Reuse a previously generated ID: the host's storage, else localStorage.
+  // Without either (React Native without a `storage`, SSR) the id lives in
+  // memory only.
+  const store =
+    storage ?? (typeof localStorage !== "undefined" ? localStorage : undefined);
+  if (store) {
+    try {
+      const stored = store.getItem(WIDGET_ID_KEY);
+      if (stored) return stored;
+    } catch {
+      // Storage may be unavailable (e.g., private browsing)
+    }
   }
 
   // Global WebCrypto is flag-gated on Node 18 (unflagged in 19+), and this
@@ -34,15 +43,68 @@ function generateAnonId(): string {
       ? crypto.randomUUID()
       : `ago-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 
-  if (typeof localStorage !== "undefined") {
+  if (store) {
     try {
-      localStorage.setItem(WIDGET_ID_KEY, id);
+      store.setItem(WIDGET_ID_KEY, id);
     } catch {
-      // localStorage may be unavailable (e.g., private browsing)
+      // Storage may be unavailable (e.g., private browsing)
     }
   }
 
   return id;
+}
+
+/**
+ * POST a multipart body with `XMLHttpRequest`, the one transport that uploads
+ * React Native `{ uri }` file parts. Resolves with a minimal bodyless
+ * `Response` (status + `text()`/`json()`), which the SSE handler reads in one
+ * piece. An abort rejects with an `AbortError`, like `fetch`.
+ */
+function xhrPost(
+  url: string,
+  headers: Record<string, string>,
+  body: FormData,
+  signal?: AbortSignal
+): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const abortError = () => {
+      const error = new Error("The operation was aborted.");
+      error.name = "AbortError";
+      return error;
+    };
+    if (signal?.aborted) return reject(abortError());
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    for (const [name, value] of Object.entries(headers)) {
+      xhr.setRequestHeader(name, value);
+    }
+    const onAbort = () => xhr.abort();
+    signal?.addEventListener("abort", onAbort);
+    const done = () => signal?.removeEventListener("abort", onAbort);
+
+    xhr.onload = () => {
+      done();
+      const text = xhr.responseText ?? "";
+      resolve({
+        ok: xhr.status >= 200 && xhr.status < 300,
+        status: xhr.status,
+        statusText: xhr.statusText,
+        body: null,
+        text: async () => text,
+        json: async () => JSON.parse(text),
+      } as unknown as Response);
+    };
+    xhr.onerror = () => {
+      done();
+      reject(new TypeError("Network request failed"));
+    };
+    xhr.onabort = () => {
+      done();
+      reject(abortError());
+    };
+    xhr.send(body);
+  });
 }
 
 /**
@@ -51,12 +113,15 @@ function generateAnonId(): string {
 export class HttpClient {
   private baseUrl: string;
   private headers: Record<string, string>;
+  /** `config.fetch`, or `undefined` to use the global `fetch` at call time. */
+  private customFetch: AgoFetch | undefined;
 
   constructor(config: AgoConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, "");
+    this.customFetch = config.fetch;
     this.headers = {
       // Header carrying the end-user's anonymous id.
-      "X-User-Anon-Id": config.widgetId || generateAnonId(),
+      "X-User-Anon-Id": config.widgetId || generateAnonId(config.storage),
     };
 
     if (config.userEmail) {
@@ -85,6 +150,9 @@ export class HttpClient {
     }
     if (config.widgetId) {
       this.headers["X-User-Anon-Id"] = config.widgetId;
+    }
+    if (config.fetch) {
+      this.customFetch = config.fetch;
     }
     if (config.userEmail) {
       this.headers["X-User-Email"] = config.userEmail;
@@ -146,7 +214,7 @@ export class HttpClient {
     logger.debug("POST (stream)", url, body);
 
     try {
-      const response = await fetch(url, {
+      const response = await this.doFetch(url, {
         method: "POST",
         headers: {
           ...this.headers,
@@ -174,12 +242,18 @@ export class HttpClient {
   }
 
   /**
-   * Make a POST request with FormData (for file uploads)
+   * Make a POST request with FormData (for file uploads).
+   *
+   * `uriFiles` marks a body carrying React Native `{ uri, name, type }` files.
+   * No `fetch` available there can upload those (`expo/fetch`, which Expo also
+   * installs as the global `fetch`, rejects them), but React Native's
+   * `XMLHttpRequest` streams them from disk. The reply is then read in one
+   * piece instead of token by token.
    */
   async postFormData(
     path: string,
     formData: FormData,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; uriFiles?: boolean }
   ): Promise<Response> {
     const url = `${this.baseUrl}${path}`;
     logger.debug("POST (formData)", url);
@@ -188,12 +262,15 @@ export class HttpClient {
     const headers = { ...this.headers };
 
     try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers,
-        body: formData,
-        signal: options?.signal,
-      });
+      const response =
+        options?.uriFiles && typeof XMLHttpRequest !== "undefined"
+          ? await xhrPost(url, headers, formData, options.signal)
+          : await this.doFetch(url, {
+              method: "POST",
+              headers,
+              body: formData,
+              signal: options?.signal,
+            });
 
       if (!response.ok) {
         await this.handleErrorResponse(response);
@@ -222,7 +299,7 @@ export class HttpClient {
     logger.debug(method, url, body);
 
     try {
-      const response = await fetch(url, {
+      const response = await this.doFetch(url, {
         method,
         headers: {
           ...this.headers,
@@ -252,6 +329,17 @@ export class HttpClient {
         error instanceof Error ? error : undefined
       );
     }
+  }
+
+  /**
+   * The global `fetch` is resolved per call (not captured at construction) so
+   * a polyfill or test stub installed later still applies, and it is called
+   * unbound: invoking it as a method of another object throws "Illegal
+   * invocation" in browsers.
+   */
+  private doFetch(url: string, init: RequestInit): Promise<Response> {
+    const fetchImpl: AgoFetch = this.customFetch ?? fetch;
+    return fetchImpl(url, init);
   }
 
   private async handleErrorResponse(response: Response): Promise<never> {

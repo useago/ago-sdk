@@ -1,5 +1,5 @@
 import type { AgoClient } from "../../client/AgoClient";
-import type { AgoMessage, Conversation } from "../../client/types";
+import type { AgoMessage, AgoUploadFile, Conversation } from "../../client/types";
 import { useOptionalAgoClient } from "../context/AgoContext";
 import { useConversation } from "./useConversation";
 import { useMessages } from "./useMessages";
@@ -21,7 +21,7 @@ export interface UseChatResult {
   /** Current error */
   error: Error | null;
   /** Send a message */
-  sendMessage: (content: string, files?: File[]) => Promise<AgoMessage | null>;
+  sendMessage: (content: string, files?: AgoUploadFile[]) => Promise<AgoMessage | null>;
   /** Stop the turn that is generating (the "Stop" button). No-op when idle. */
   stop: () => Promise<void>;
   /** Clear current messages */

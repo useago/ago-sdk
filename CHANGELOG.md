@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **React Native (Expo) support.** New `@useago/sdk/native` entry with the provider and hooks, without DOM components. See the [React Native guide](docs/frameworks/react-native.md) and `examples/simple-expo`.
+- `fetch` config option to pass the `fetch` implementation (e.g. `expo/fetch`, which streams).
+- `storage` config option to persist the generated `widgetId` where there is no `localStorage`.
+- File uploads (`sendMessage`, `transcribeAudio`, `createTicket`) accept React Native `{ uri, name, type }` files, sent with `XMLHttpRequest` (no `fetch` can upload them). `toAgoFile` maps Expo picker assets to that shape.
+- `getCurrentPath` navigation option, so the `current-page` context works without a URL bar (e.g. expo-router's `usePathname()`).
+
+### Changed
+
+- A reply without a streaming body (React Native's built-in `fetch`) is now read in one piece instead of failing with `stream_no_body`.
+- Streamed replies decode without a global `TextDecoder`.
+
 ## [1.14.2] - 2026-10-28
 
 ### Added

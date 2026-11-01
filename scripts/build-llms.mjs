@@ -25,6 +25,8 @@ const skills = [
   'docs/agents/ago-react.md',
   'docs/agents/ago-vue.md',
   'docs/agents/ago-angular.md',
+  // No separate skill for React Native: the guide is already self-contained.
+  'docs/frameworks/react-native.md',
 ];
 
 // The "understand it" layer: cross-cutting concepts the skills reference but

@@ -12,6 +12,8 @@ auto-detection, and error handling.
 interface AgoConfig {
   baseUrl: string;          // required, e.g. https://YOUR-DOMAIN.useago.com
   widgetId?: string;        // X-User-Anon-Id header; auto-generated + persisted if omitted
+  storage?: StorageLike;    // where the generated widgetId is persisted; default localStorage
+  fetch?: AgoFetch;         // fetch implementation; default the global fetch
   agent?: string;           // default agent (id or slug) for new conversations
   defaultAgentId?: string;  // same as `agent`; `agent` is preferred
   permission?: string;      // X-Widget-Permission header
@@ -31,6 +33,8 @@ interface AgoConfig {
 | --- | :---: | --- | --- |
 | `baseUrl` | ✅ | request URL | Trailing slash is trimmed automatically. Missing/empty throws `config_missing_base_url` at construct time. `/path` values (same-origin proxy) are allowed. |
 | `widgetId` | — | `X-User-Anon-Id` | Per-visitor anonymous id. If omitted, a UUID is generated and cached in `localStorage` (`ago_widget_id`) so a returning visitor keeps the same id. |
+| `storage` | — | — | Synchronous `{ getItem, setItem }` that persists the generated `widgetId`. Defaults to `localStorage`; in-memory when there is none. React Native: see the [React Native guide](../frameworks/react-native.md). |
+| `fetch` | — | — | Used for every request. Must expose `response.body` as a readable stream for token-by-token replies; otherwise replies arrive in one piece. Pass `expo/fetch` in React Native. |
 | `agent` / `defaultAgentId` | — | `agent_id` in the body | Per-message `agentId` overrides it. `agent` wins if both are set. |
 | `permission` | — | `X-Widget-Permission` | Mirrors the widget's `window.AGO.permission`. |
 | `language` | No | `Accept-Language` | Pass your interface locale, such as `fr` or `pt-BR`. `null` clears the override. |

@@ -6,6 +6,7 @@ import type {
 } from "../client/types";
 import { AgoStreamError } from "../client/errors";
 import { logger } from "../utils/logger";
+import { createStreamDecoder } from "./utf8";
 
 /**
  * Deterministic JSON serialization with object keys sorted recursively, so the
@@ -107,15 +108,11 @@ export class SSEHandler {
    */
   async processStream(response: Response): Promise<AgoMessage> {
     if (!response.body) {
-      throw new AgoStreamError(
-        "Response has no body. The endpoint did not return a stream: check that " +
-          "`baseUrl` points at an AGO API and nothing (proxy, mock) strips the SSE body.",
-        "stream_no_body"
-      );
+      return this.processWholeBody(response);
     }
 
     const reader = response.body.getReader();
-    const decoder = new TextDecoder();
+    const decoder = createStreamDecoder();
 
     try {
       while (true) {
@@ -125,8 +122,7 @@ export class SSEHandler {
           break;
         }
 
-        const text = decoder.decode(value, { stream: true });
-        this.buffer += text;
+        this.buffer += decoder.decode(value);
         this.processBuffer();
       }
 
@@ -155,6 +151,43 @@ export class SSEHandler {
     } finally {
       reader.releaseLock();
     }
+  }
+
+  /**
+   * A response without a readable body: React Native's built-in `fetch` (used
+   * for uploads of URI files, and whenever `expo/fetch` is not configured).
+   * Wait for the whole SSE payload and replay it, so the reply still arrives,
+   * just in one piece instead of token by token.
+   */
+  private async processWholeBody(response: Response): Promise<AgoMessage> {
+    let text = "";
+    try {
+      text = typeof response.text === "function" ? await response.text() : "";
+    } catch (error) {
+      if (this.options.signal?.aborted) {
+        this.message.status = "CANCELED";
+        return this.buildFinalMessage();
+      }
+      const streamError =
+        error instanceof Error
+          ? error
+          : new AgoStreamError("Reading the reply failed. Retry the message.");
+      this.callbacks.onError?.(streamError);
+      throw streamError;
+    }
+
+    if (!text.trim()) {
+      throw new AgoStreamError(
+        "Response has no body. The endpoint did not return a stream: check that " +
+          "`baseUrl` points at an AGO API and nothing (proxy, mock) strips the SSE body.",
+        "stream_no_body"
+      );
+    }
+
+    // A final event may lack its trailing blank line; terminate it.
+    this.buffer += text.endsWith("\n\n") ? text : `${text}\n\n`;
+    this.processBuffer();
+    return this.buildFinalMessage();
   }
 
   private processBuffer(): void {

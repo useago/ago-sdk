@@ -1,0 +1,8 @@
+{
+  "expo": {
+    "name": "Tut Tut demo (AGO)",
+    "slug": "ago-simple-expo",
+    "scheme": "agoexample",
+    "plugins": ["expo-router"]
+  }
+}

@@ -52,6 +52,7 @@ import type { PageStateBaseline } from "../state/pageStateDelta";
 import { computePageStateDelta } from "../state/pageStateDelta";
 import { SSEHandler } from "../streaming/SSEHandler";
 import { mapAttachment } from "../utils/attachments";
+import { appendFile, isNativeFile } from "../utils/uploadFile";
 import { EventEmitter } from "../utils/eventEmitter";
 import { byteLength } from "../utils/jsonBytes";
 import { logger } from "../utils/logger";
@@ -65,6 +66,7 @@ import type {
   AgoEventHandler,
   AgoEventName,
   AgoMessage,
+  AgoUploadFile,
   AudioTranscription,
   ClientFunctionInvocation,
   ClientFunctionsMode,
@@ -397,6 +399,7 @@ export class AgoClient {
     let response: Response | null;
 
     if (options?.files && options.files.length > 0) {
+      const files = options.files;
       // Use FormData for file uploads
       const formData = new FormData();
       formData.append("content", content);
@@ -427,13 +430,14 @@ export class AgoClient {
         formData.append("hidden", "true");
       }
 
-      for (const file of options.files) {
-        formData.append("files", file);
+      for (const file of files) {
+        appendFile(formData, "files", file);
       }
 
       response = await this.sendRequest(turn, () =>
         this.httpClient.postFormData("/api/sdk/v1/messages", formData, {
           signal: turn.controller.signal,
+          uriFiles: files.some(isNativeFile),
         }),
       );
     } else {
@@ -1242,19 +1246,20 @@ export class AgoClient {
    * Requires speech to text to be enabled for the tenant. Supports FLAC, MP3,
    * MP4, MPEG, MPGA, M4A, OGG, WAV and WebM files up to 25 MB.
    * The filename must include the matching extension. For a MediaRecorder blob,
-   * wrap it in a File with the recording's extension and MIME type.
+   * wrap it in a File with the recording's extension and MIME type. In React
+   * Native, pass the recording as `{ uri, name, type }`.
    * Show the returned text as a draft; call `sendMessage` when the user sends it.
    */
   async transcribeAudio(
-    file: File,
+    file: AgoUploadFile,
     options?: TranscribeAudioOptions
   ): Promise<AudioTranscription> {
     const formData = new FormData();
-    formData.append("file", file, file.name);
+    appendFile(formData, "file", file);
     const response = await this.httpClient.postFormData(
       "/api/sdk/v1/audio/transcriptions",
       formData,
-      options
+      { signal: options?.signal, uriFiles: isNativeFile(file) }
     );
     return response.json();
   }
@@ -1391,11 +1396,12 @@ export class AgoClient {
     if (input.customFields && input.customFields.length > 0) {
       fd.append("custom_fields", JSON.stringify(input.customFields));
     }
-    for (const file of input.files ?? []) fd.append("files", file, file.name);
+    for (const file of input.files ?? []) appendFile(fd, "files", file);
     if (input.ticketFormId) fd.append("ticket_form_id", input.ticketFormId);
     const response = await this.httpClient.postFormData(
       "/api/sdk/v1/tickets",
       fd,
+      { uriFiles: (input.files ?? []).some(isNativeFile) },
     );
     const json = (await response.json()) as { id?: unknown; url?: unknown };
     return {
@@ -1824,12 +1830,21 @@ export class AgoClient {
     // Report the current page (by route name) as dynamic context, re-evaluated
     // on every message. Without this the agent knows how to navigate but never
     // which page the user is actually on.
+    const getCurrentPath = opts?.getCurrentPath;
     this.addDynamicContext("current-page", () => {
-      if (typeof window === "undefined" || !window.location) return null;
-      const url = window.location.href;
-      const match = matchRoute(window.location.pathname, routes);
+      let data: Record<string, unknown>;
+      let pathname: string | null | undefined;
+      if (getCurrentPath) {
+        pathname = getCurrentPath();
+        if (!pathname) return null;
+        data = { path: pathname };
+      } else {
+        if (typeof window === "undefined" || !window.location) return null;
+        pathname = window.location.pathname;
+        data = { url: window.location.href };
+      }
 
-      const data: Record<string, unknown> = { url };
+      const match = matchRoute(pathname, routes);
       if (match) data.page = match.name;
 
       return {

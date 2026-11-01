@@ -149,6 +149,16 @@ export interface AgoRoute {
  *
  * For a large route table, `{ catalogue: "onDemand" }` keeps the descriptions
  * out of every message.
+ *
+ * Without a URL bar (React Native), say where the user is with `getCurrentPath`:
+ *
+ * ```tsx
+ * const router = useRouter(); // expo-router
+ * const pathname = usePathname();
+ * useAgoNavigation((path) => router.push(path), routes, {
+ *   getCurrentPath: () => pathname,
+ * });
+ * ```
  */
 export function useAgoNavigation(
   navigate: (path: string) => void,
@@ -158,21 +168,30 @@ export function useAgoNavigation(
   const client = useAgoClient();
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
+  // Latest render's reader, so a `() => pathname` closure stays current.
+  const getCurrentPathRef = useRef(opts?.getCurrentPath);
+  getCurrentPathRef.current = opts?.getCurrentPath;
 
   // By value: an inline `opts` is a new object every render.
   const catalogue = opts?.catalogue;
+  const hasGetCurrentPath = !!opts?.getCurrentPath;
 
   useEffect(() => {
     client.registerNavigationFunction(
       (path) => navigateRef.current(path),
       routes,
-      { catalogue: catalogue === "onDemand" ? "onDemand" : "inline" }
+      {
+        catalogue: catalogue === "onDemand" ? "onDemand" : "inline",
+        getCurrentPath: hasGetCurrentPath
+          ? () => getCurrentPathRef.current?.()
+          : undefined,
+      }
     );
 
     return () => {
       client.unregisterNavigationFunction();
     };
-  }, [client, routes, catalogue]);
+  }, [client, routes, catalogue, hasGetCurrentPath]);
 }
 
 /**
