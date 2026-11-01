@@ -13,10 +13,17 @@ export interface NavRoute {
 /**
  * Where the route catalogue lives: `"inline"` (default) in `navigateToPage`'s
  * description, or `"onDemand"` in a `listPages` companion's result.
+ *
+ * `getCurrentPath` returns the path the user is on, matched against the routes
+ * to report the current page. Defaults to `window.location.pathname`; pass it
+ * where there is no URL bar, e.g. expo-router's `usePathname()` in React Native.
  */
-export type AgoNavigationOptions =
+export type AgoNavigationOptions = (
   | { catalogue?: "inline" }
-  | { catalogue: "onDemand" };
+  | { catalogue: "onDemand" }
+) & {
+  getCurrentPath?: () => string | null | undefined;
+};
 
 export const NAVIGATE_FUNCTION = "navigateToPage";
 export const LIST_PAGES_FUNCTION = "listPages";

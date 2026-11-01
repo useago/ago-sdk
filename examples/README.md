@@ -6,6 +6,7 @@ Runnable example apps for `@useago/sdk`, one per stack.
 | --- | --- | --- |
 | `simple-react/` | React + Vite | `npm run dev` |
 | `glacier/` | React + Vite (ice-cream shop: functions + navigation) | `npm run dev` |
+| `simple-expo/` | React Native (Expo + expo-router): a Tut Tut-style delivery app where the assistant fills the order form, tracks parcels and quotes prices. Uses the local SDK build (`npm run sdk`, see its README) | `npm start` |
 | `simple-vue/` | Vue 3 + Vite | `npm run dev` |
 | `simple-angular/` | Angular | `npm run dev` |
 | `simple-ts/` | Vanilla TypeScript; `/bubble.html` is the floating bubble | `npm run dev` |

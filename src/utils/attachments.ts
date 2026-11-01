@@ -1,4 +1,5 @@
-import type { AgoAttachment } from "../client/types";
+import type { AgoAttachment, AgoUploadFile } from "../client/types";
+import { isNativeFile } from "./uploadFile";
 
 /**
  * Helpers for displaying uploaded file attachments securely, mirroring the main
@@ -100,22 +101,30 @@ export function mapAttachment(raw: {
 }
 
 /**
- * Build optimistic attachments from the `File` objects the user just picked, so
- * their upload shows on their own message immediately (before the server round
- * trip). Each gets a local `blob:` URL via `URL.createObjectURL`; image previews
- * are gated on {@link SAFE_IMAGE_TYPES} so the same "safe image only" rule holds
- * locally. The blob URLs live for the page session, matching the main frontend.
+ * Build optimistic attachments from the files the user just picked, so their
+ * upload shows on their own message immediately (before the server round
+ * trip). A browser `File` gets a local `blob:` URL via `URL.createObjectURL`; a
+ * React Native `{ uri }` file keeps its own URI. Image previews are gated on
+ * {@link SAFE_IMAGE_TYPES} so the same "safe image only" rule holds locally.
+ * The blob URLs live for the page session, matching the main frontend.
  */
-export function attachmentsFromFiles(files: File[]): AgoAttachment[] {
+export function attachmentsFromFiles(files: AgoUploadFile[]): AgoAttachment[] {
   return files.map((file, index) => ({
     id: `local-${index}-${file.name}`,
     name: file.name,
     contentType: file.type || undefined,
     fileSize: file.size,
-    url:
-      typeof URL !== "undefined" && URL.createObjectURL
-        ? URL.createObjectURL(file)
-        : undefined,
+    url: isNativeFile(file) ? file.uri : objectUrl(file),
     isSafeImage: SAFE_IMAGE_TYPES.has(file.type),
   }));
+}
+
+function objectUrl(file: File): string | undefined {
+  if (typeof URL === "undefined" || !URL.createObjectURL) return undefined;
+  try {
+    return URL.createObjectURL(file);
+  } catch {
+    // React Native defines createObjectURL but throws for most blobs.
+    return undefined;
+  }
 }

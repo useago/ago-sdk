@@ -1,6 +1,6 @@
 import { ref, onMounted, onUnmounted } from "vue";
 import type { AgoClient } from "../../client/AgoClient";
-import type { AgoMessage } from "../../client/types";
+import type { AgoMessage, AgoUploadFile } from "../../client/types";
 import { useAgo } from "./useAgo";
 
 export interface UseMessagesOptions {
@@ -96,7 +96,7 @@ export function useMessages(options: UseMessagesOptions = {}) {
     client.off("message:stopped", handleStopped);
   });
 
-  async function sendMessage(content: string, files?: File[]): Promise<AgoMessage | null> {
+  async function sendMessage(content: string, files?: AgoUploadFile[]): Promise<AgoMessage | null> {
     isLoading.value = true;
     error.value = null;
 

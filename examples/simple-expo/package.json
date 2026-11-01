@@ -1,0 +1,31 @@
+{
+  "name": "simple-expo-example",
+  "private": true,
+  "version": "0.0.0",
+  "main": "expo-router/entry",
+  "scripts": {
+    "sdk": "npm --prefix ../.. run build && npm pack ../.. --pack-destination . && mv -f useago-sdk-*.tgz useago-sdk.tgz && npm install ./useago-sdk.tgz",
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@useago/sdk": "file:useago-sdk.tgz",
+    "expo": "~58.0.21",
+    "expo-constants": "~58.0.14",
+    "expo-file-system": "~58.0.13",
+    "expo-linking": "~58.0.15",
+    "expo-router": "~58.0.28",
+    "expo-sqlite": "~58.0.14",
+    "expo-status-bar": "~58.0.4",
+    "react": "19.3.0",
+    "react-native": "0.88.1",
+    "react-native-safe-area-context": "~5.10.1",
+    "react-native-screens": "~4.30.0"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.0",
+    "typescript": "~5.9.0"
+  }
+}

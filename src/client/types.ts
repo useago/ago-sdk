@@ -9,6 +9,32 @@ import type {
   ProactiveOptions,
 } from "../proactive/types";
 import type { ContextSnapshot } from "../state/ClientContextRegistry";
+import type { StorageLike } from "../state/createStore";
+
+/**
+ * A file referenced by URI, the shape React Native pickers return
+ * (`expo-image-picker`, `expo-document-picker`, `expo-audio` recordings).
+ * React Native's `FormData` uploads it from the URI.
+ */
+export interface AgoNativeFile {
+  /** Local URI of the file (`file://`, `content://`). */
+  uri: string;
+  /** File name, including its extension. */
+  name: string;
+  /** MIME type, e.g. `"image/jpeg"`. */
+  type: string;
+  /** Size in bytes, when known. */
+  size?: number;
+}
+
+/**
+ * The slice of `fetch` the SDK calls: a URL string and a plain init. Narrower
+ * than `typeof fetch` so `expo/fetch` fits without a cast.
+ */
+export type AgoFetch = (url: string, init: RequestInit) => Promise<Response>;
+
+/** A file to upload: a browser `File`, or a URI-based {@link AgoNativeFile}. */
+export type AgoUploadFile = File | AgoNativeFile;
 
 /**
  * SDK Configuration
@@ -18,6 +44,22 @@ export interface AgoConfig {
   baseUrl: string;
   /** Per-visitor anonymous ID (X-User-Anon-Id header). Auto-generated if not provided. */
   widgetId?: string;
+  /**
+   * Where the auto-generated `widgetId` is persisted so a returning visitor keeps
+   * the same id. Defaults to `localStorage` when it exists, otherwise the id
+   * lives in memory only. Any synchronous `{ getItem, setItem }` works (e.g.
+   * MMKV or `expo-sqlite/kv-store` in React Native). Ignored when `widgetId`
+   * is set.
+   */
+  storage?: StorageLike;
+  /**
+   * The `fetch` implementation used for every request. Defaults to the global
+   * `fetch`. Replies stream, so it must expose `response.body` as a readable
+   * stream. In React Native, pass `fetch` from `expo/fetch`: React Native's own
+   * `fetch` has no streaming body (recent Expo SDKs already install
+   * `expo/fetch` globally).
+   */
+  fetch?: AgoFetch;
   /** Default agent (id or slug) for new conversations. Shorthand for `defaultAgentId`. */
   agent?: string;
   /** Default agent ID for new conversations. Prefer `agent`. */
@@ -139,7 +181,7 @@ export interface SendMessageOptions {
   /** Override default agent */
   agentId?: string;
   /** File attachments */
-  files?: File[];
+  files?: AgoUploadFile[];
   /**
    * Mark this message as hidden. The backend keeps it in the model's context but
    * flags it so the UI never displays it. Used by auto-continuation to nudge the
@@ -359,7 +401,7 @@ export interface CreateTicketInput {
   /** Reporter email, for a visitor the SDK does not otherwise identify. */
   email?: string;
   customFields?: Array<{ id: string; value: string }>;
-  files?: File[];
+  files?: AgoUploadFile[];
   ticketFormId?: string;
 }
 

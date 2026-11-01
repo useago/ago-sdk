@@ -14,6 +14,7 @@ export default defineConfig({
       entry: {
         index: resolve(__dirname, "src/index.ts"),
         react: resolve(__dirname, "src/react/index.ts"),
+        native: resolve(__dirname, "src/native/index.ts"),
         vue: resolve(__dirname, "src/vue/index.ts"),
         angular: resolve(__dirname, "src/angular/index.ts"),
         helpers: resolve(__dirname, "src/helpers/index.ts"),

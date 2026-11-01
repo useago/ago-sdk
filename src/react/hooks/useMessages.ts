@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { AgoClient } from "../../client/AgoClient";
-import type { AgoMessage } from "../../client/types";
+import type { AgoMessage, AgoUploadFile } from "../../client/types";
 import { attachmentsFromFiles } from "../../utils/attachments";
 import { useOptionalAgoClient } from "../context/AgoContext";
 
@@ -19,7 +19,7 @@ export interface UseMessagesResult {
   /** Current error, if any */
   error: Error | null;
   /** Send a new message */
-  sendMessage: (content: string, files?: File[]) => Promise<AgoMessage | null>;
+  sendMessage: (content: string, files?: AgoUploadFile[]) => Promise<AgoMessage | null>;
   /**
    * Stop the turn that is generating: closes the stream and tells the backend
    * to stop. The partial answer stays in the transcript as `CANCELED`. No-op
@@ -222,7 +222,7 @@ export function useMessages({
   }, [client, conversationId]);
 
   const sendMessage = useCallback(
-    async (content: string, files?: File[]): Promise<AgoMessage | null> => {
+    async (content: string, files?: AgoUploadFile[]): Promise<AgoMessage | null> => {
       setIsLoading(true);
       setError(null);
 
