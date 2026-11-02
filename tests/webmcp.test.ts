@@ -488,41 +488,78 @@ describe("WebMCP bridge", () => {
   });
 
   describe("approval", () => {
-    // The gate covers the agent loop only: a mirrored function runs at once,
-    // so an app that does not want that keeps it out of the bridge instead.
     const gated = {
       ...echo,
       name: "deleteThings",
       requiresApproval: true,
-      handler: () => "deleted",
+      handler: vi.fn(() => "deleted"),
     };
 
-    it("runs a requiresApproval function without waiting", async () => {
-      const awaiting = vi.fn();
-      client.on("function:awaiting-approval", awaiting);
+    it.each([true, false])("waits for a decision and executes only on approval (%s)", async (approve) => {
+      gated.handler.mockClear();
+      const submit = vi.spyOn(client, "submitToolCallForm");
       client.register(gated);
       await vi.waitFor(() => expect(mc.names()).toEqual(["deleteThings"]));
+      const args = { id: "original" };
+      const call = mc.call("deleteThings", args);
+      args.id = "changed";
+      const [pending] = client.getPendingApprovals();
+      expect(pending.source).toBe("web_mcp");
+      expect(pending.arguments).toEqual({ id: "original" });
+      expect(gated.handler).not.toHaveBeenCalled();
 
-      await expect(mc.call("deleteThings")).resolves.toBe("deleted");
-      expect(awaiting).not.toHaveBeenCalled();
+      if (approve) {
+        await client.approveFunction(pending.invocationId);
+        await client.approveFunction(pending.invocationId);
+        await expect(call).resolves.toBe("deleted");
+        expect(gated.handler).toHaveBeenCalledExactlyOnceWith({ id: "original" });
+      } else {
+        await client.rejectFunction(pending.invocationId);
+        await expect(call).resolves.toEqual({ approved: false, reason: "user_rejected" });
+        expect(gated.handler).not.toHaveBeenCalled();
+      }
+      expect(client.getPendingApprovals()).toEqual([]);
+      expect(submit).not.toHaveBeenCalled();
     });
 
-    it("ignores an approvalPolicy for external callers", async () => {
+    it("applies approvalPolicy to external calls too", async () => {
       const policyClient = new AgoClient({
         baseUrl: "https://example.test",
         webmcp: true,
-        approvalPolicy: () => true,
+        approvalPolicy: (invocation) => invocation.source === "web_mcp",
       });
-      const awaiting = vi.fn();
-      policyClient.on("function:awaiting-approval", awaiting);
       policyClient.register(echo);
       await vi.waitFor(() => expect(mc.names()).toEqual(["echo"]));
-
-      await expect(mc.call("echo")).resolves.toEqual({ echoed: {} });
-      expect(awaiting).not.toHaveBeenCalled();
-
+      const call = mc.call("echo");
+      const [pending] = policyClient.getPendingApprovals();
+      await policyClient.rejectFunction(pending.invocationId);
+      await expect(call).resolves.toEqual({ approved: false, reason: "user_rejected" });
       policyClient.destroy();
     });
+
+    it.each(["caller", "replacement", "destroy", "approve-then-replace"])(
+      "cancels a pending call on %s without running a handler",
+      async (cause) => {
+        gated.handler.mockClear();
+        const replacement = vi.fn();
+        const controller = new AbortController();
+        client.register(gated);
+        await vi.waitFor(() => expect(mc.names()).toEqual(["deleteThings"]));
+        const call = mc.call("deleteThings", {}, { signal: controller.signal });
+        const [pending] = client.getPendingApprovals();
+        if (cause === "caller") controller.abort();
+        else if (cause === "destroy") client.destroy();
+        else {
+          if (cause === "approve-then-replace") void client.approveFunction(pending.invocationId);
+          client.register({ ...gated, handler: replacement });
+        }
+        await expect(call).resolves.toEqual({ approved: false, reason: "cancelled" });
+        await client.approveFunction(pending.invocationId);
+        expect(gated.handler).not.toHaveBeenCalled();
+        expect(replacement).not.toHaveBeenCalled();
+        expect(client.getPendingApprovals()).toEqual([]);
+      },
+    );
 
     it("webmcp: false is how a gated function is kept out of the bridge", async () => {
       client.register({ ...gated, webmcp: false });

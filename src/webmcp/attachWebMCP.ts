@@ -123,8 +123,8 @@ export function attachWebMCP(client: WebMCPBridgeClient): () => void {
 
     // `navigateToPage` reports an unknown page or missing route params this
     // way, without having navigated.
-    const success = (result as { success?: unknown } | null)?.success;
-    return success !== false;
+    const outcome = result as { success?: unknown; approved?: unknown } | null;
+    return outcome?.success !== false && outcome?.approved !== false;
   }
 
   function plan(): Map<string, ToolPlan> {
@@ -146,6 +146,9 @@ export function attachWebMCP(client: WebMCPBridgeClient): () => void {
           const result = await client.runExternalFunction(
             functionName,
             input ?? {},
+            options?.signal
+              ? AbortSignal.any([options.signal, lifetime.signal])
+              : lifetime.signal,
           );
           // A navigating call resolves only once the destination page has
           // registered, so the caller reads its tools and not the old page's.

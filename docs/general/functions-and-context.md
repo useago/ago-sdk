@@ -466,7 +466,8 @@ client.on("function:result", ({ result, error }) =>
 
 ### Approval gate (ask before running)
 
-In pause mode you can hold a client function call until the user approves it.
+In pause mode you can hold an in-app agent's client function call until the user
+approves it. WebMCP calls use the same gate regardless of the client functions mode.
 Set `approvalPolicy` on the config to gate calls by name (or anything on the
 invocation), or mark a single function with `requiresApproval: true`. The two OR
 together.
@@ -479,18 +480,18 @@ const client = new AgoClient({
   approvalPolicy: (inv) => inv.functionName === "deleteAccount",
 });
 
-client.on("function:awaiting-approval", ({ invocationId, functionName }) => {
-  // Show your UI, then decide:
-  if (userSaidYes) client.approveFunction(invocationId); // runs it, resumes the turn
-  else client.rejectFunction(invocationId); // submits a rejection, agent sees the decline
+client.on("function:awaiting-approval", ({ invocationId, functionName, arguments: args }) => {
+  const approved = window.confirm(`Allow ${functionName}?\n${JSON.stringify(args, null, 2)}`);
+  if (approved) void client.approveFunction(invocationId);
+  else void client.rejectFunction(invocationId);
 });
 ```
 
-A gated call stays at `WAITING_CLIENT`: the handler does not run and nothing is
+A gated in-app call stays at `WAITING_CLIENT`: the handler does not run and nothing is
 submitted until `approveFunction(invocationId)`. `rejectFunction(invocationId)`
 submits `{ approved: false, reason: "user_rejected" }` so the agent knows the
-user declined, then lets the turn resume. This is a no-op in placeholder mode
-(there is no paused turn to hold onto), so the call runs normally.
+user declined, then lets the turn resume. For in-app calls this is a no-op in
+placeholder mode (there is no paused turn to hold onto), so the call runs normally.
 
 In React, `useAgoActivity` surfaces awaiting items with ready-made `approve` /
 `reject` controls (see the [React guide](../frameworks/react.md)).
@@ -572,8 +573,8 @@ Check what is exposed from the console:
 ```
 
 Off by default, and a no-op in browsers without WebMCP. Calls arrive as
-`function:invoke` and `function:result` like any other, so your logging and the
-dev panel already cover them.
+`function:invoke` and `function:result` with `source: "web_mcp"`, so your logging
+and the dev panel already cover them. Invocations have an empty `conversationId`.
 
 While the bridge is on, each external call is also reported to AGO, so it shows
 up in the AGO dashboard next to the calls your AGO agent makes. The report carries
@@ -583,10 +584,49 @@ result is the same value an agent call already stores, under the same
 `maxResultBytes` cap. Delivery is best-effort and never blocks the call. There is
 no separate switch: `webmcp: true` turns reporting on too.
 
-**There is no approval gate on a WebMCP call**, and cancelling one does not stop
-your handler. `requiresApproval` and `approvalPolicy` hold a call in the agent
-loop, which a WebMCP call never enters. Set `webmcp: false` on a definition to
-keep that function private to your own agent.
+#### Approve external calls
+
+`requiresApproval` and `approvalPolicy` also gate WebMCP calls. The handler waits
+until your UI approves the invocation. This works without a conversation and in
+either client functions mode. Calls that do not match the policy run immediately.
+Set `webmcp: false` on a definition to keep it private to your in-app agent.
+
+Mount the approval listener with your app, so it works while the chat is closed.
+If your existing approval UI handles every `function:awaiting-approval` event,
+it already receives external calls. Otherwise, add a listener for them:
+
+```ts
+import type { ClientFunctionInvocation } from "@useago/sdk";
+
+// Use your existing AgoClient instance. Replace confirm with your app's dialog.
+function approveExternal(request: ClientFunctionInvocation) {
+  if (request.source !== "web_mcp") return;
+  const approved = window.confirm(
+    `Allow ${request.functionName}?\n${JSON.stringify(request.arguments, null, 2)}`,
+  );
+  if (approved) void client.approveFunction(request.invocationId);
+  else void client.rejectFunction(request.invocationId);
+}
+
+client.on("function:awaiting-approval", approveExternal);
+// Include requests that arrived before the UI mounted.
+client.getPendingApprovals().forEach(approveExternal);
+
+// On unmount: client.off("function:awaiting-approval", approveExternal);
+```
+
+For a custom dialog, refresh its pending list on `function:result` too, so a
+cancelled request disappears. `getPendingApprovals()` returns both in-app and
+external requests; filter by `source` when using separate UIs.
+
+Rejecting returns `{ approved: false, reason: "user_rejected" }` to the external
+caller without running the handler. Caller abort, bridge disposal, client
+destruction, or replacing/unregistering the function cancels a pending request
+with reason `"cancelled"`. On navigation, your app can cancel remaining external
+requests with `rejectFunction(invocationId, "cancelled")`. Approval uses the
+arguments captured when the call arrived. Cancellation does not undo or stop a
+handler that has already started. Pending external requests do not survive a
+page reload.
 
 ---
 

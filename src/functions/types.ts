@@ -166,7 +166,7 @@ export interface AgoPageStateOptions {
   functionName?: string;
   /**
    * Require explicit user approval before this state change runs. See
-   * {@link AgoConfig.approvalPolicy} — pause mode only. Defaults to `false`.
+   * {@link AgoConfig.approvalPolicy} — conversation pause mode and WebMCP. Defaults to `false`.
    */
   requiresApproval?: boolean;
   /**
@@ -223,7 +223,7 @@ interface ClientFunctionSettings {
   maxResultBytes?: number;
   /**
    * Require explicit user approval before this function runs. See
-   * {@link AgoConfig.approvalPolicy} — pause mode only. ORs with the policy.
+   * {@link AgoConfig.approvalPolicy} — conversation pause mode and WebMCP. ORs with the policy.
    */
   requiresApproval?: boolean;
   /**

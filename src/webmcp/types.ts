@@ -41,6 +41,7 @@ export interface WebMCPBridgeClient {
   onFunctionsChanged(listener: () => void): () => void;
   runExternalFunction(
     name: string,
-    args: Record<string, unknown>
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<unknown>;
 }

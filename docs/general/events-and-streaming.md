@@ -35,9 +35,9 @@ const final = await client.waitFor("message:complete", { timeout: 10_000 });
 | `context:changed` | `ContextSnapshot \| null`: the client-side context changed (entry added/removed, or a stateful helper updated its store) |
 | `toolCall:received` | `ToolCallData` |
 | `toolCall:form` | `ToolCallData` (only when the tool call is a form) |
-| `function:invoke` | `{ invocationId, functionName, arguments, conversationId }` |
-| `function:awaiting-approval` | `{ invocationId, functionName, arguments, conversationId }`: a client function call is held pending user approval (pause mode + an `approvalPolicy`/`requiresApproval` match). The turn stays at `WAITING_CLIENT`; call `approveFunction(invocationId)` to run it and resume, or `rejectFunction(invocationId)` to decline. See [Approval gate](functions-and-context.md#approval-gate-ask-before-running) |
-| `function:result` | `{ invocationId, result, error? }` |
+| `function:invoke` | `{ invocationId, functionName, arguments, conversationId, source? }`: WebMCP calls have `source: "web_mcp"` and an empty `conversationId`. |
+| `function:awaiting-approval` | `{ invocationId, functionName, arguments, conversationId, source? }`: a call matches `approvalPolicy` or `requiresApproval`. In-app calls require pause mode and hold the turn at `WAITING_CLIENT`; WebMCP calls wait independently of conversations and mode. Call `approveFunction(invocationId)` to run it or `rejectFunction(invocationId)` to decline. See [Approval gate](functions-and-context.md#approval-gate-ask-before-running) and [external approvals](functions-and-context.md#approve-external-calls). |
+| `function:result` | `{ invocationId, result, error?, source? }`: WebMCP results, including rejection and cancellation, have `source: "web_mcp"`. |
 | `activity:recorded` | `ActivityEntry`: a user- or agent-action was recorded into the activity ledger (via `recordActivity`, or auto-recorded when the agent calls a client function). See [Activity ledger](functions-and-context.md#activity-ledger) |
 | `error:captured` | `CapturedError`: the error watcher captured a JavaScript error (uncaught exception, unhandled rejection, `console.error`, or `reportError`). Fires on repeats too, with the updated `count`. Needs `errorWatcher` in the config. See [JavaScript errors](functions-and-context.md#javascript-errors) |
 | `form:submitting` | `{ name, values }`: validated submission is about to start |
