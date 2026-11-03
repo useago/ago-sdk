@@ -1,6 +1,6 @@
 {
   "name": "@useago/sdk",
-  "version": "1.14.2",
+  "version": "1.15.0",
   "description": "Create In-APP AI agents that answers question and performs actions. Works with React, Vue, Angular and vanilla JS/TS.",
   "type": "module",
   "sideEffects": false,
@@ -56,6 +56,16 @@
       "require": {
         "types": "./dist/helpers.d.cts",
         "default": "./dist/helpers.cjs"
+      }
+    },
+    "./support": {
+      "import": {
+        "types": "./dist/support.d.ts",
+        "default": "./dist/support.js"
+      },
+      "require": {
+        "types": "./dist/support.d.cts",
+        "default": "./dist/support.cjs"
       }
     },
     "./native": {
@@ -134,6 +144,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "html2canvas-pro": "2.5.0",
     "react-markdown": "^9.0.0",
     "remark-gfm": "^4.0.1"
   },

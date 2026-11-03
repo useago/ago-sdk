@@ -245,9 +245,12 @@ whatever agent the user brings, such as an agentic browser or an extension. Set
 </AgoProvider>
 ```
 
-Off by default, and a no-op where the browser has no WebMCP. A mirrored function
-runs as soon as the external agent calls it, with no approval gate, so set
-`webmcp: false` on anything that must not run unattended. Navigation is handled:
+Off by default, and a no-op where the browser has no WebMCP. Calls matching
+`requiresApproval` or `approvalPolicy` wait for your approval UI, even without
+an open conversation. Handle `function:awaiting-approval` and call
+`approveFunction` or `rejectFunction`; see the linked guide for an example.
+Other calls run immediately. Set `webmcp: false` to keep a function private to
+your in-app agent. Navigation is handled:
 a call that changes page resolves only once the destination has registered its
 own tools. See
 [functions and context](docs/general/functions-and-context.md#webmcp-bridge-share-your-functions-with-browser-agents).

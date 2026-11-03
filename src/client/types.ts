@@ -98,13 +98,14 @@ export interface AgoConfig {
    * an invocation the user must approve/reject before it runs; return `false`
    * (or omit the policy) to let it run immediately as before.
    *
-   * Only effective in pause mode (`clientFunctionsMode: "pause"`) — a gated call
+   * Conversation calls require pause mode (`clientFunctionsMode: "pause"`): a gated call
    * holds at `WAITING_CLIENT`, the SDK emits `function:awaiting-approval`, and it
    * runs (and the turn resumes) only after `approveFunction(invocationId)`; a
    * `rejectFunction(invocationId)` submits a rejection so the agent sees the
    * decline. In placeholder mode there is no pause to hold, so the policy is a
    * no-op and the call runs normally. A per-function `requiresApproval: true`
-   * also gates a call; the policy and the flag OR together.
+   * also gates a call; the policy and the flag OR together. WebMCP calls use
+   * the same gate regardless of conversation mode and resolve locally.
    */
   approvalPolicy?: (invocation: ClientFunctionInvocation) => boolean;
   /**
@@ -149,8 +150,8 @@ export interface AgoConfig {
    * (`document.modelContext`), so an external agent can call the same functions
    * the in-app agent calls. Off by default; no-ops without WebMCP.
    *
-   * A mirrored function runs immediately: the approval gate
-   * ({@link approvalPolicy}, `requiresApproval`) covers the agent loop only.
+   * Mirrored functions respect `requiresApproval` and {@link approvalPolicy}.
+   * Handle `function:awaiting-approval` even when no conversation is open.
    * Use `webmcp: false` on a definition to keep it out.
    */
   webmcp?: boolean;
@@ -610,6 +611,8 @@ export interface FunctionDefinition {
 }
 
 export interface ClientFunctionInvocation {
+  /** Omitted for conversation calls; WebMCP calls have no conversation. */
+  source?: "agent" | "web_mcp";
   invocationId: string;
   functionName: string;
   arguments: Record<string, unknown>;
@@ -765,12 +768,14 @@ export interface AgoClientEvents {
    * at `WAITING_CLIENT`; call `approveFunction(invocationId)` to run it and
    * resume, or `rejectFunction(invocationId)` to decline. Fires after
    * `function:invoke` (which still fires for every call) and instead of the
-   * call running immediately.
+   * call running immediately. For WebMCP, the external call waits instead of
+   * a conversation turn; the same approve/reject methods resolve it locally.
    */
   "function:awaiting-approval": ClientFunctionInvocation;
   /** A function was registered or unregistered, or the registry cleared. */
   "functions:changed": ClientFunctionSchema[];
   "function:result": {
+    source?: "agent" | "web_mcp";
     invocationId: string;
     result: unknown;
     error?: string;

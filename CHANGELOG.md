@@ -7,8 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-11-03
+
 ### Added
 
+- `@useago/sdk/support` exports `collectSupportEvidence` and `capturePage` to prepare error logs and optional screenshots as regular ticket attachments. The screenshot renderer loads on demand; collection does not upload files or submit a ticket.
+- Approval gates for WebMCP function calls, using the existing approval policy and approve/reject APIs.
 - **React Native (Expo) support.** New `@useago/sdk/native` entry with the provider and hooks, without DOM components. See the [React Native guide](docs/frameworks/react-native.md) and `examples/simple-expo`.
 - `fetch` config option to pass the `fetch` implementation (e.g. `expo/fetch`, which streams).
 - `storage` config option to persist the generated `widgetId` where there is no `localStorage`.

@@ -18,6 +18,7 @@ export default defineConfig({
         vue: resolve(__dirname, "src/vue/index.ts"),
         angular: resolve(__dirname, "src/angular/index.ts"),
         helpers: resolve(__dirname, "src/helpers/index.ts"),
+        support: resolve(__dirname, "src/support/index.ts"),
         widget: resolve(__dirname, "src/widget/index.ts"),
         devtools: resolve(__dirname, "src/devtools/index.ts"),
         testing: resolve(__dirname, "src/testing/index.ts"),
@@ -41,6 +42,7 @@ export default defineConfig({
         "vue",
         "react-markdown",
         "remark-gfm",
+        "html2canvas-pro",
       ],
       output: {
         globals: {

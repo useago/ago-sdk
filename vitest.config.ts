@@ -21,6 +21,7 @@ export default defineConfig({
       { find: "@useago/sdk/vue", replacement: fromRoot("./src/vue/index.ts") },
       { find: "@useago/sdk/angular", replacement: fromRoot("./src/angular/index.ts") },
       { find: "@useago/sdk/helpers", replacement: fromRoot("./src/helpers/index.ts") },
+      { find: "@useago/sdk/support", replacement: fromRoot("./src/support/index.ts") },
       { find: "@useago/sdk/widget", replacement: fromRoot("./src/widget/index.ts") },
       { find: "@useago/sdk/devtools", replacement: fromRoot("./src/devtools/index.ts") },
       { find: "@useago/sdk/testing", replacement: fromRoot("./src/testing/index.ts") },

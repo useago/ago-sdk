@@ -259,7 +259,13 @@ export class AgoClient {
    * invocationId (the tool-call id). Populated when {@link requiresApproval}
    * matches; drained by {@link approveFunction} / {@link rejectFunction}.
    */
-  private pendingApprovals = new Map<string, ClientFunctionInvocation>();
+  private pendingApprovals = new Map<
+    string,
+    {
+      invocation: ClientFunctionInvocation;
+      decide?: (decision: "approved" | "user_rejected" | "cancelled") => void;
+    }
+  >();
 
   /** App-provided gate deciding WHEN a paused turn resumes (see {@link registerResumeGate}). */
   private resumeGate: ResumeGate | null = null;
@@ -515,7 +521,7 @@ export class AgoClient {
           // Gate on approval only when there's a pause to hold onto (invocationId
           // present == pause mode). Otherwise run immediately, as before.
           if (data.invocationId && this.requiresApproval(data)) {
-            this.pendingApprovals.set(data.invocationId, data);
+            this.pendingApprovals.set(data.invocationId, { invocation: data });
             this.eventEmitter.emit("function:awaiting-approval", data);
             return;
           }
@@ -988,10 +994,11 @@ export class AgoClient {
    * (already handled, or never gated).
    */
   async approveFunction(invocationId: string): Promise<void> {
-    const data = this.pendingApprovals.get(invocationId);
-    if (!data) return;
+    const pending = this.pendingApprovals.get(invocationId);
+    if (!pending) return;
+    if (pending.decide) return pending.decide("approved");
     this.pendingApprovals.delete(invocationId);
-    await this.handleClientFunctionInvocation(data);
+    await this.handleClientFunctionInvocation(pending.invocation);
   }
 
   /**
@@ -999,12 +1006,17 @@ export class AgoClient {
    * result so the agent sees the user declined, and let the paused turn resume
    * (the agent decides what to do next). No-op if the invocation is unknown.
    */
-  async rejectFunction(invocationId: string): Promise<void> {
-    const data = this.pendingApprovals.get(invocationId);
-    if (!data) return;
+  async rejectFunction(
+    invocationId: string,
+    reason: "user_rejected" | "cancelled" = "user_rejected",
+  ): Promise<void> {
+    const pending = this.pendingApprovals.get(invocationId);
+    if (!pending) return;
+    if (pending.decide) return pending.decide(reason);
+    const data = pending.invocation;
     this.pendingApprovals.delete(invocationId);
 
-    const rejection = { approved: false, reason: "user_rejected" };
+    const rejection = { approved: false, reason };
     try {
       const submitResult = await this.submitToolCallForm(invocationId, {
         result: rejection,
@@ -1027,32 +1039,77 @@ export class AgoClient {
     });
   }
 
-  /**
-   * @internal Run a function for a caller outside the agent loop (the WebMCP
-   * bridge). Runs immediately, since the approval gate covers the agent loop
-   * only. Emits `function:invoke` and `function:result` like an agent call, and
-   * reports the call for analytics.
-   */
+  /** Pending requests, including WebMCP calls with no conversation. */
+  getPendingApprovals(): ClientFunctionInvocation[] {
+    return [...this.pendingApprovals.values()].map(({ invocation }) => invocation);
+  }
+
+  private waitForExternalApproval(
+    invocation: ClientFunctionInvocation,
+    signal?: AbortSignal,
+  ): Promise<"approved" | "user_rejected" | "cancelled"> {
+    const registration = this.functionRegistry.get(invocation.functionName);
+    return new Promise((resolve) => {
+      const finish = (decision: "approved" | "user_rejected" | "cancelled") => {
+        this.pendingApprovals.delete(invocation.invocationId);
+        unsubscribe();
+        signal?.removeEventListener("abort", cancel);
+        resolve(decision);
+      };
+      const cancel = () => finish("cancelled");
+      const unsubscribe = this.functionRegistry.onChange(() => {
+        if (this.functionRegistry.get(invocation.functionName) !== registration) {
+          cancel();
+        }
+      });
+      this.pendingApprovals.set(invocation.invocationId, {
+        invocation,
+        decide: finish,
+      });
+      signal?.addEventListener("abort", cancel, { once: true });
+      if (signal?.aborted) cancel();
+      else this.eventEmitter.emit("function:awaiting-approval", invocation);
+    });
+  }
+
+  /** @internal Execute a WebMCP call, waiting for approval when required. */
   async runExternalFunction(
     name: string,
     args: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<unknown> {
+    // The approved arguments must not change while the external caller waits.
+    const input = structuredClone(args);
     const invocation: ClientFunctionInvocation = {
-      // Not a backend tool-call id: nothing is submitted for these.
       invocationId: `webmcp-${generateUuid()}`,
       functionName: name,
-      arguments: args,
+      arguments: structuredClone(input),
       conversationId: "",
+      source: "web_mcp",
     };
     const { invocationId } = invocation;
-
+    const registration = this.functionRegistry.get(name);
+    const gated = this.requiresApproval(invocation);
     this.eventEmitter.emit("function:invoke", invocation);
 
     const startedAt = Date.now();
     try {
-      const result = await this.functionRegistry.execute(name, args);
-      this.eventEmitter.emit("function:result", { invocationId, result });
-      this.reportExternalCall(name, args, startedAt, { result });
+      const decision = signal?.aborted || this.functionRegistry.get(name) !== registration
+        ? "cancelled"
+        : gated
+          ? await this.waitForExternalApproval(invocation, signal)
+          : "approved";
+      // Recheck after awaiting: approval and navigation can happen in the same tick.
+      const cancelled = signal?.aborted || this.functionRegistry.get(name) !== registration;
+      const result = decision !== "approved" || cancelled
+        ? { approved: false, reason: cancelled ? "cancelled" : decision }
+        : await this.functionRegistry.execute(name, input);
+      this.eventEmitter.emit("function:result", {
+        invocationId,
+        result,
+        source: "web_mcp",
+      });
+      this.reportExternalCall(name, input, startedAt, { result });
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1060,8 +1117,9 @@ export class AgoClient {
         invocationId,
         result: null,
         error: message,
+        source: "web_mcp",
       });
-      this.reportExternalCall(name, args, startedAt, { error: message });
+      this.reportExternalCall(name, input, startedAt, { error: message });
       throw error;
     }
   }
@@ -1475,7 +1533,7 @@ export class AgoClient {
       // a gated call must not run unattended on reload. Hold it for
       // approveFunction / rejectFunction and keep the turn paused.
       if (this.requiresApproval(invocation)) {
-        this.pendingApprovals.set(call.id, invocation);
+        this.pendingApprovals.set(call.id, { invocation });
         // The backend already persisted this turn as WAITING_CLIENT (that's why
         // it restored paused), so record the "waiting confirmed" resume signal
         // now. Without it, a later approveFunction/rejectFunction would submit
@@ -2486,6 +2544,9 @@ export class AgoClient {
     this.activeTurn = null;
     this.pausedTurn = null;
     this.stoppedTurnIds.clear();
+    for (const pending of this.pendingApprovals.values()) {
+      pending.decide?.("cancelled");
+    }
     this.eventEmitter.removeAllListeners();
     this.functionRegistry.clear();
     this.listPagesRegistered = false;
