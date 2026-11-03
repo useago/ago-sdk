@@ -2373,7 +2373,7 @@ upload files. A screenshot failure preserves the error log and returns `screensh
 
 `html2canvas-pro` is installed with the SDK; the renderer loads only
 when a screenshot is requested. Other SDK entry points don't require it.
-CSS and cross-origin content may render differently. Password inputs and elements
+CSS and cross-origin content may render differently. Iframes, password inputs and elements
 marked `data-ago-private` are omitted. Pass `screenshot: { element, exclude: ".private" }`
 to limit capture further. Error logs retain the watcher's existing filters and caps.
 

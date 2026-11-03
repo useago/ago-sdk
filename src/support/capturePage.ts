@@ -3,7 +3,7 @@ import { AgoError } from "../client/errors";
 export interface CapturePageOptions {
   /** Defaults to the visible viewport. Supply an element to capture that element. */
   element?: HTMLElement;
-  /** CSS selector for content to omit, in addition to password inputs and data-ago-private. */
+  /** CSS selector to omit, in addition to iframes, password inputs and data-ago-private. */
   exclude?: string;
 }
 
@@ -13,7 +13,8 @@ export async function capturePage(options: CapturePageOptions = {}): Promise<Fil
     throw new AgoError("Page capture requires a browser.", "screenshot_unavailable");
   }
   const element = options.element ?? document.body;
-  const excluded = 'input[type="password"], [data-ago-private]';
+  // The renderer does not apply ignoreElements inside iframe documents.
+  const excluded = 'iframe, input[type="password"], [data-ago-private]';
   const selector = options.exclude ? `${excluded}, ${options.exclude}` : excluded;
   // Validate before cloning, including when the capture root itself is private.
   if (element.closest(selector)) {

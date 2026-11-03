@@ -1094,7 +1094,7 @@ export class AgoClient {
 
     const startedAt = Date.now();
     try {
-      const decision = signal?.aborted
+      const decision = signal?.aborted || this.functionRegistry.get(name) !== registration
         ? "cancelled"
         : gated
           ? await this.waitForExternalApproval(invocation, signal)

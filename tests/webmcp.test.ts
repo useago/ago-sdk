@@ -561,6 +561,22 @@ describe("WebMCP bridge", () => {
       },
     );
 
+    it.each(["unregister", "replace"])("cancels when function:invoke listeners %s the function", async (change) => {
+      gated.handler.mockClear();
+      const replacement = vi.fn();
+      client.register(gated);
+      await vi.waitFor(() => expect(mc.names()).toEqual(["deleteThings"]));
+      client.on("function:invoke", () => {
+        if (change === "unregister") client.unregisterFunction(gated.name);
+        else client.register({ ...gated, handler: replacement });
+      });
+      const call = mc.call(gated.name);
+      expect(client.getPendingApprovals()).toEqual([]);
+      await expect(call).resolves.toEqual({ approved: false, reason: "cancelled" });
+      expect(gated.handler).not.toHaveBeenCalled();
+      expect(replacement).not.toHaveBeenCalled();
+    });
+
     it("webmcp: false is how a gated function is kept out of the bridge", async () => {
       client.register({ ...gated, webmcp: false });
       client.register(echo);

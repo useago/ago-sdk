@@ -37,7 +37,7 @@ it("exports retained, filtered errors without capturing an unrequested screensho
 });
 
 it("collects a requested PNG alongside the logs, excluding private DOM content", async () => {
-  document.body.innerHTML = '<input type="password"><div data-ago-private>Secret</div><div class="private">Private</div><p>Visible</p>';
+  document.body.innerHTML = '<input type="password"><div data-ago-private>Secret</div><div class="private">Private</div><iframe></iframe><p>Visible</p>';
   const canvas = document.createElement("canvas");
   vi.spyOn(canvas, "toBlob").mockImplementation((callback) => callback(new Blob(["png"], { type: "image/png" })));
   vi.mocked(html2canvas).mockResolvedValue(canvas);
@@ -50,6 +50,7 @@ it("collects a requested PNG alongside the logs, excluding private DOM content",
     expect(config.ignoreElements!(element)).toBe(element.tagName !== "P");
   }
   await expect(capturePage({ element: document.querySelector("[data-ago-private]")! })).rejects.toMatchObject({ code: "screenshot_private_element" });
+  await expect(capturePage({ element: document.querySelector("iframe")! })).rejects.toMatchObject({ code: "screenshot_private_element" });
 });
 
 it("keeps the log when screenshot rendering fails and reports the missing screenshot", async () => {
