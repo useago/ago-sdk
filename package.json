@@ -58,6 +58,16 @@
         "default": "./dist/helpers.cjs"
       }
     },
+    "./support": {
+      "import": {
+        "types": "./dist/support.d.ts",
+        "default": "./dist/support.js"
+      },
+      "require": {
+        "types": "./dist/support.d.cts",
+        "default": "./dist/support.cjs"
+      }
+    },
     "./native": {
       "import": {
         "types": "./dist/native.d.ts",
@@ -134,6 +144,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "html2canvas-pro": "2.5.0",
     "react-markdown": "^9.0.0",
     "remark-gfm": "^4.0.1"
   },

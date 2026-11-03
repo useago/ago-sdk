@@ -866,6 +866,29 @@ with three planted bugs (a `TypeError`, an unhandled rejection, a swallowed
 error logged with `console.error`) and the bubble widget wired to the same
 client. Build the SDK, serve the repo, click a button, ask the agent what broke.
 
+### Support ticket evidence
+
+Enable `errorWatcher` when creating the client, then collect evidence when the
+agent requests it for a support ticket:
+
+```ts
+import { collectSupportEvidence } from "@useago/sdk/support";
+
+const { files, screenshotError } = await collectSupportEvidence(client, {
+  screenshot: true,
+});
+```
+
+Add these `File` objects to your ticket form's regular attachments so the user can
+review or remove them before submitting. Collection does not create a ticket or
+upload files. A screenshot failure preserves the error log and returns `screenshotError`.
+
+`html2canvas-pro` is installed with the SDK; the renderer loads only
+when a screenshot is requested. Other SDK entry points don't require it.
+CSS and cross-origin content may render differently. Password inputs and elements
+marked `data-ago-private` are omitted. Pass `screenshot: { element, exclude: ".private" }`
+to limit capture further. Error logs retain the watcher's existing filters and caps.
+
 ### Per framework
 
 | Framework | Idiomatic API |

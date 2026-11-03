@@ -24,6 +24,8 @@ export type {
   ClientFunctionInvocation,
   ClientFunctionsMode,
   Conversation,
+  CreateTicketResult,
+  TicketForm,
   FeedbackDetails,
   FeedbackRating,
   FeedbackReason,
