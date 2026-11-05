@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { AgoClient } from "../src/client/AgoClient";
+import type { BackgroundAgentRunState } from "../src/index";
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -101,6 +102,72 @@ describe("getConversations", () => {
 describe("getConversation", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it.each(["getConversation", "getMessages"] as const)(
+    "%s preserves background run state independently from message delivery status",
+    async (method) => {
+      const checklist = [
+        { name: "Refund order", status: "not_completed" as const, reason: "API unavailable" },
+      ];
+      stubFetchJson({
+        id: "c1",
+        title: "Refunds",
+        messages: [{
+          id: "m1", content: "Refund could not be processed", role: "assistant",
+          status: "DONE", created_at: "2026-07-20T10:00:00Z",
+          background_agent: {
+            run_id: "r1", execution_status: "done", outcome: "incomplete",
+            checklist, completion_notice: "Review the remaining work.",
+          },
+        }],
+      });
+      const client = new AgoClient({ baseUrl: "https://x.example.com" });
+      const messages = method === "getMessages"
+        ? await client.getMessages("c1")
+        : (await client.getConversation("c1")).messages!;
+      const expected: BackgroundAgentRunState = {
+        runId: "r1", executionStatus: "done", outcome: "incomplete", checklist,
+        completionNotice: "Review the remaining work.",
+      };
+      expect(messages[0].backgroundAgent).toEqual(expected);
+      expect(messages[0].status).toBe("DONE");
+    },
+  );
+
+  it("keeps absent or null run state undefined and preserves unknown historical outcomes", async () => {
+    const message = {
+      content: "Report", role: "assistant", status: "DONE", created_at: "2026-07-20T10:00:00Z",
+    };
+    stubFetchJson({
+      id: "c1", title: "History",
+      messages: [
+        { ...message, id: "m1" },
+        { ...message, id: "m2", background_agent: null },
+        { ...message, id: "m3", background_agent: {
+          run_id: "r1", execution_status: "done", outcome: null,
+          checklist: null, completion_notice: null,
+        } },
+        { ...message, id: "m4", status: "IN_PROGRESS", background_agent: {
+          run_id: "r2", execution_status: "running", outcome: null,
+          checklist: [{ name: "Review", status: "in_progress", reason: null }],
+          completion_notice: null,
+        } },
+      ],
+    });
+    const client = new AgoClient({ baseUrl: "https://x.example.com" });
+    const { messages } = await client.getConversation("c1");
+    expect(messages?.[0].backgroundAgent).toBeUndefined();
+    expect(messages?.[1].backgroundAgent).toBeUndefined();
+    expect(messages?.[2].backgroundAgent).toEqual({
+      runId: "r1", executionStatus: "done", outcome: null,
+      checklist: null, completionNotice: null,
+    });
+    expect(messages?.[3].backgroundAgent).toEqual({
+      runId: "r2", executionStatus: "running", outcome: null,
+      checklist: [{ name: "Review", status: "in_progress", reason: null }],
+      completionNotice: null,
+    });
   });
 
   it("maps persisted follow_up_replies onto followUpReplies so a reloaded thread re-renders the pills", async () => {

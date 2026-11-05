@@ -20,6 +20,7 @@ export type {
   AgoSource,
   AgoUploadFile,
   AudioTranscription,
+  BackgroundAgentRunState,
   ClientFunction,
   ClientFunctionInvocation,
   ClientFunctionsMode,

@@ -247,6 +247,27 @@ const thread = await ago.getConversation(conversations[0].id);
 const messages = await ago.getMessages(conversations[0].id);
 ```
 
+On backends that return background-agent run state, `getConversation()` and
+`getMessages()` expose it as `message.backgroundAgent`:
+
+```ts
+const thread = await ago.getConversation(conversationId);
+for (const message of thread.messages ?? []) {
+  const run = message.backgroundAgent;
+  if (run) console.log(run.runId, run.outcome, run.checklist);
+}
+```
+
+`outcome` is `completed`, `incomplete`, or `failed`. It is `null` while unfinished
+or for historical runs without a recorded outcome. The checklist may also be
+`null`. `executionStatus` is `pending`, `running`, `done`, `failed`, or
+`waiting_approval`, separate from the objective outcome; message `DONE` alone
+does not mean the objective succeeded.
+`completionNotice` contains an optional explanation (`null` when absent).
+`backgroundAgent` is `undefined` when the server omits it or returns `null`.
+This state is refreshed when history is loaded; it does not subscribe to live
+background-agent updates.
+
 ---
 
 ## 4. Let the agent run code in the browser
@@ -609,6 +630,7 @@ interface AgoMessage {
   sources?: AgoSource[]; // knowledge-base citations
   toolCalls?: ToolCallData[];
   followUpReplies?: string[]; // suggested next questions
+  backgroundAgent?: BackgroundAgentRunState;
   createdAt: Date;
 }
 
