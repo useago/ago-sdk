@@ -565,10 +565,11 @@ Prefer callbacks over raw events? See the
   → `Promise<{ id, url? }>`: file a support ticket (`POST /tickets`, multipart)
 - `getUserIdentity()` → `{ email?, hasJwt }`: how the client identifies the
   visitor (the ticket form asks for an email when it has neither)
-- `submitFormCollector(name, values)` → `Promise<unknown>`: relay form
-  values through the backend, which resolves the destination from the named
-  form's stored definition (used by `createFormCollector` in
-  `{ via: "backend" }` mode)
+- `submitFormCollector(name, values, conversationId?)` → `Promise<unknown>`:
+  relay form values through the backend, which resolves the destination from
+  the named form's stored definition (used by `createFormCollector` in
+  `{ via: "backend" }` mode). AGO links the submission to `conversationId`
+  when it is one of the visitor's conversations
 - `submitFeedback(messageId, "positive" | "negative", details?)`
   - `details.reasons?: FeedbackReason[]` · `details.comment?: string`
 - `submitConversationFeedback(conversationId, rating, details?)` →
