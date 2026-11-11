@@ -1,5 +1,6 @@
 import { ref, onMounted, onUnmounted } from "vue";
 import type { AgoClient } from "../../client/AgoClient";
+import type { AgoConversation } from "../../client/AgoConversation";
 import type { AgoMessage, AgoUploadFile } from "../../client/types";
 import { useAgo } from "./useAgo";
 
@@ -23,13 +24,24 @@ export function useMessages(options: UseMessagesOptions = {}) {
   const isLoading = ref(false);
   const error = ref<Error | null>(null);
 
+  // The conversation this composable sends to, so Stop can name it before it has a server id.
+  let sentTo: AgoConversation | null = null;
+
+  // Another conversation's answer (the client may run several at once) is
+  // none of this composable's business. Without an id yet, it adopts the first
+  // answer that starts.
+  const isOther = (id: string | undefined) =>
+    !!id && !!conversationId.value && id !== conversationId.value;
+
   const handleStart = (data: { conversationId: string; messageId: string }) => {
+    if (isOther(data.conversationId)) return;
     if (!conversationId.value) {
       conversationId.value = data.conversationId;
     }
   };
 
-  const handleChunk = (data: { content: string; messageId: string }) => {
+  const handleChunk = (data: { content: string; conversationId: string; messageId: string }) => {
+    if (isOther(data.conversationId)) return;
     const idx = messages.value.findIndex((m: AgoMessage) => m.id === data.messageId);
     if (idx >= 0) {
       messages.value[idx] = {
@@ -40,6 +52,7 @@ export function useMessages(options: UseMessagesOptions = {}) {
   };
 
   const handleComplete = (message: AgoMessage) => {
+    if (isOther(message.conversationId)) return;
     const idx = messages.value.findIndex((m: AgoMessage) => m.id === message.id);
     if (idx >= 0) {
       messages.value[idx] = message;
@@ -49,7 +62,8 @@ export function useMessages(options: UseMessagesOptions = {}) {
     isLoading.value = false;
   };
 
-  const handleError = (data: { error: string }) => {
+  const handleError = (data: { error: string; conversationId?: string }) => {
+    if (isOther(data.conversationId)) return;
     error.value = new Error(data.error);
     isLoading.value = false;
   };
@@ -58,9 +72,12 @@ export function useMessages(options: UseMessagesOptions = {}) {
   // the bubble as CANCELED; this covers what it can't — a stop that landed
   // before the backend named the message, and a turn stopped while it was paused
   // on a client function (no stream is open then, so no completion follows).
-  const handleStopped = () => {
-    let idx = -1;
-    for (let i = messages.value.length - 1; i >= 0; i--) {
+  const handleStopped = (data: { conversationId: string; messageId: string }) => {
+    if (isOther(data.conversationId)) return;
+    let idx = data.messageId
+      ? messages.value.findIndex((m: AgoMessage) => m.id === data.messageId)
+      : -1;
+    for (let i = messages.value.length - 1; idx < 0 && i >= 0; i--) {
       const m: AgoMessage = messages.value[i];
       if (
         m.role === "assistant" &&
@@ -120,8 +137,11 @@ export function useMessages(options: UseMessagesOptions = {}) {
     messages.value.push(userMsg, assistantMsg);
 
     try {
+      // A new conversation is created here, not inside `sendMessage`, so Stop can
+      // name it before the server does. Optional: test doubles may not have it.
+      if (!conversationId.value) sentTo ??= client.conversation?.() ?? null;
       const response = await client.sendMessage(content, {
-        conversationId: conversationId.value,
+        conversationId: conversationId.value ?? sentTo?.id,
         files,
       });
       if (response.conversationId && !conversationId.value) {
@@ -147,15 +167,17 @@ export function useMessages(options: UseMessagesOptions = {}) {
   /**
    * Stop the turn that is generating: closes the stream and tells the backend to
    * stop. The partial answer stays in the transcript as `CANCELED`. No-op when
-   * nothing is generating.
+   * nothing is generating. Stops this composable's conversation only.
    */
   async function stop(): Promise<void> {
-    await client.stop();
+    // Named from the first send on: `client.stop()` without an id stops every conversation.
+    await client.stop(conversationId.value ?? sentTo?.id);
   }
 
   function clearMessages() {
     messages.value = [];
     conversationId.value = undefined;
+    sentTo = null;
     error.value = null;
   }
 

@@ -236,7 +236,36 @@ export interface AgoMessage {
    * UI helpers like `useMessages`/`ChatWidget` filter these out.
    */
   hidden?: boolean;
+  /**
+   * Client functions the agent called during this turn, with their live status.
+   * Only filled on messages held by a conversation object
+   * (`client.conversation(id)`); `toolCalls` keeps server tools only.
+   */
+  functionCalls?: FunctionCallState[];
   createdAt: Date;
+}
+
+/** Where a client-function call of a turn stands. */
+export type FunctionCallStatus =
+  | "running"
+  | "awaiting_approval"
+  | "done"
+  | "error"
+  | "rejected";
+
+/** A client function the agent called during a turn (see {@link AgoMessage.functionCalls}). */
+export interface FunctionCallState {
+  invocationId: string;
+  functionName: string;
+  arguments: Record<string, unknown>;
+  status: FunctionCallStatus;
+  /** The handler's error message, when `status` is `"error"`. */
+  error?: string;
+  /**
+   * Length of the message's text when the call started, so a UI can place the
+   * call between the text that came before and after it.
+   */
+  contentOffset: number;
 }
 
 export type MessageStatus =
@@ -552,6 +581,11 @@ export interface ToolCallData {
   ticketFormId?: string;
   embedHtml?: string;
   embedDescription?: string;
+  /**
+   * Length of the message's text when the call first streamed, set on calls
+   * held by a conversation object. Absent on calls loaded from the server.
+   */
+  contentOffset?: number;
 }
 
 export type ToolCallType =
@@ -617,6 +651,8 @@ export interface ClientFunctionInvocation {
   functionName: string;
   arguments: Record<string, unknown>;
   conversationId: string;
+  /** Assistant message of the turn that made the call. Absent for WebMCP calls. */
+  messageId?: string;
 }
 
 /**
@@ -779,6 +815,9 @@ export interface AgoClientEvents {
     invocationId: string;
     result: unknown;
     error?: string;
+    /** Set for calls made by a conversation turn; absent for WebMCP calls. */
+    conversationId?: string;
+    messageId?: string;
   };
   /** A validated form collector submission is about to call its submit target. */
   "form:submitting": {

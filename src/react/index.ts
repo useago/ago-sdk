@@ -47,6 +47,12 @@ export type { UseMessagesOptions, UseMessagesResult } from "./hooks/useMessages"
 export { useConversation } from "./hooks/useConversation";
 export type { UseConversationOptions, UseConversationResult } from "./hooks/useConversation";
 
+export { useConversationChat } from "./hooks/useConversationChat";
+export type {
+  UseConversationChatOptions,
+  UseConversationChatResult,
+} from "./hooks/useConversationChat";
+
 export { useChat } from "./hooks/useChat";
 export type { UseChatOptions, UseChatResult } from "./hooks/useChat";
 
@@ -116,8 +122,18 @@ export { createMockClient } from "./testing";
 
 // Re-export core types for convenience
 export type {
+  AgoConversation,
+  AgoConversationEvents,
+  AgoConversationSnapshot,
+  ConversationSendOptions,
+} from "../client/AgoConversation";
+export type {
   AgoConfig,
   AgoMessage,
+  ClientFunctionInvocation,
+  FunctionCallState,
+  FunctionCallStatus,
+  StopMessageResult,
   Conversation,
   FeedbackDetails,
   FeedbackRating,

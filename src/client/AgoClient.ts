@@ -59,6 +59,12 @@ import { logger } from "../utils/logger";
 import { generateUuid } from "../utils/uuid";
 import { attachWebMCP } from "../webmcp/attachWebMCP";
 import { reportExternalCall } from "../webmcp/reportExternalCall";
+import { AgoConversation, assertMessageContent } from "./AgoConversation";
+import type {
+  AgoConversationEvents,
+  ConversationHost,
+  ConversationSendOptions,
+} from "./AgoConversation";
 import { AgoError } from "./errors";
 import type {
   AgoClientEvents,
@@ -193,20 +199,36 @@ type PendingResume = {
   started: boolean;
 };
 
-/**
- * The turn currently streaming, so {@link AgoClient.stop} can close its stream
- * and name the message to stop server-side.
- */
-type ActiveTurn = {
+/** One open stream of a turn (a resume opens a new one for the same turn). */
+type TurnStream = {
   controller: AbortController;
-  /** Assistant message id, captured from the first frame that carries one. */
-  messageId: string | null;
-  conversationId: string | null;
   /** The user asked to stop: an abort here is deliberate, not a network drop. */
   stopRequested: boolean;
-  /** The stop endpoint was already called for this turn (call it once). */
+  /** The stop endpoint was already called for this stream (call it once). */
   stopPosted: boolean;
 };
+
+/**
+ * One answer, from its send until it ends, across pauses on client functions.
+ * Several run at once, at most one per conversation.
+ */
+type Turn = {
+  id: string;
+  /** Where its frames land. */
+  conversation: AgoConversation;
+  /** Server conversation id, `null` until a draft's first frame names it. */
+  conversationId: string | null;
+  /** Assistant message id, captured from the first frame that carries one. */
+  messageId: string | null;
+  /** `null` while paused on client functions (`WAITING_CLIENT`). */
+  stream: TurnStream | null;
+};
+
+/** Code of the result a background conversation's client-function call gets. */
+const CONVERSATION_NOT_ACTIVE = "conversation_not_active";
+const CONVERSATION_NOT_ACTIVE_MESSAGE =
+  "Not performed: the user switched to another conversation. Tell them what " +
+  "you were about to do and offer to do it when they're back.";
 
 /** Context key under which the recent-activity window rides along with messages. */
 const ACTIVITY_CONTEXT_KEY = "activity:recent";
@@ -270,16 +292,16 @@ export class AgoClient {
   /** App-provided gate deciding WHEN a paused turn resumes (see {@link registerResumeGate}). */
   private resumeGate: ResumeGate | null = null;
 
-  /** The turn currently streaming, or `null` when the client is idle. */
-  private activeTurn: ActiveTurn | null = null;
+  /** Answers running or paused right now, by turn id. */
+  private turns = new Map<string, Turn>();
 
-  /**
-   * A turn that closed as `WAITING_CLIENT` and has not resumed yet. There is no
-   * open stream in that window, but the turn is still live for the user, so it
-   * stays stoppable (see {@link stop}).
-   */
-  private pausedTurn: { messageId: string; conversationId: string } | null =
-    null;
+  /** Live conversation objects, by id (a re-keyed draft also keeps its local id). */
+  private conversationObjects = new Map<string, AgoConversation>();
+
+  /** The conversation on screen; other conversations' client functions are refused. */
+  private activeConversationId: string | null = null;
+
+  private generatingListeners = new Set<() => void>();
 
   /**
    * Turns stopped while they were paused on client functions. A resume may
@@ -349,37 +371,44 @@ export class AgoClient {
   // ─────────────────────────────────────────────────────────────────
 
   /**
-   * Send a message and receive a streaming response
+   * Send a message and receive a streaming response. Goes through the
+   * conversation object of `options.conversationId` (a new conversation when
+   * omitted), so while that conversation is answering the message waits for
+   * the answer to end.
    */
   async sendMessage(
     content: string,
     options?: SendMessageOptions,
   ): Promise<AgoMessage> {
-    if (typeof content !== "string" || !content.trim()) {
-      throw new AgoError(
-        "Add message text before sending, including when attaching files. " +
-          "See docs/general/core.md#file-attachments.",
-        "message_empty_content",
-      );
-    }
+    assertMessageContent(content);
+    const { conversationId, ...rest } = options ?? {};
+    return this.conversation(conversationId).sendMessage(content, rest);
+  }
 
+  /** Open the streaming request of one send, its frames feeding `conversation`. */
+  private async runSend(
+    conversation: AgoConversation,
+    content: string,
+    options: ConversationSendOptions,
+  ): Promise<AgoMessage> {
     const clientFunctions = this.functionRegistry.getSchemas();
 
     const clientContext = this.buildSendContext();
 
     const configAgent = this.config.agent || this.config.defaultAgentId;
+    const conversationId = conversation.isDraft ? undefined : conversation.id;
 
     const mode = this.resolveClientFunctionsMode(options);
     const metadata =
-      options?.metadata !== undefined ? options.metadata : this.config.metadata;
+      options.metadata !== undefined ? options.metadata : this.config.metadata;
     // Validate serializability before opening a turn (also used by FormData).
     const serializedMetadata =
       metadata != null ? JSON.stringify(metadata) : undefined;
 
     const body: Record<string, unknown> = {
       content,
-      conversation_id: options?.conversationId,
-      agent_id: options?.agentId || configAgent,
+      conversation_id: conversationId,
+      agent_id: options.agentId || configAgent,
     };
     if (metadata != null) body.metadata = metadata;
 
@@ -397,14 +426,15 @@ export class AgoClient {
     }
 
     // Hidden messages stay in the model's context but are not displayed.
-    if (options?.hidden) {
+    if (options.hidden) {
       body.hidden = true;
     }
 
-    const turn = this.beginTurn();
+    const turn = this.beginTurn(conversation);
+    const stream = turn.stream!;
     let response: Response | null;
 
-    if (options?.files && options.files.length > 0) {
+    if (options.files && options.files.length > 0) {
       const files = options.files;
       // Use FormData for file uploads
       const formData = new FormData();
@@ -413,8 +443,8 @@ export class AgoClient {
         formData.append("metadata", serializedMetadata);
       }
 
-      if (options.conversationId) {
-        formData.append("conversation_id", options.conversationId);
+      if (conversationId) {
+        formData.append("conversation_id", conversationId);
       }
 
       if (options.agentId || configAgent) {
@@ -440,22 +470,22 @@ export class AgoClient {
         appendFile(formData, "files", file);
       }
 
-      response = await this.sendRequest(turn, () =>
+      response = await this.sendRequest(turn, stream, () =>
         this.httpClient.postFormData("/api/sdk/v1/messages", formData, {
-          signal: turn.controller.signal,
+          signal: stream.controller.signal,
           uriFiles: files.some(isNativeFile),
         }),
       );
     } else {
-      response = await this.sendRequest(turn, () =>
+      response = await this.sendRequest(turn, stream, () =>
         this.httpClient.postStream("/api/sdk/v1/messages", body, {
-          signal: turn.controller.signal,
+          signal: stream.controller.signal,
         }),
       );
     }
 
     // Stopped before the response arrived (see sendRequest): nothing streamed.
-    if (!response) return this.buildStoppedMessage(turn);
+    if (!response) return this.buildStoppedMessage(turn, stream);
 
     return this.processSSEResponse(response, turn);
   }
@@ -466,81 +496,118 @@ export class AgoClient {
    * a real error still reaches the caller.
    */
   private async sendRequest(
-    turn: ActiveTurn,
+    turn: Turn,
+    stream: TurnStream,
     request: () => Promise<Response>,
   ): Promise<Response | null> {
     try {
       return await request();
     } catch (error) {
-      this.endTurn(turn);
+      this.endStream(turn, stream, false);
       if (isAbortError(error)) return null;
       throw error;
     }
   }
 
+  /** Emit globally, and to the conversation the event belongs to. */
+  private emitFor<K extends keyof AgoConversationEvents & AgoEventName>(
+    conversation: AgoConversation | undefined,
+    event: K,
+    data: AgoClientEvents[K],
+  ): void {
+    this.eventEmitter.emit(event, data);
+    conversation?._dispatch(event, data as AgoConversationEvents[K]);
+  }
+
+  /**
+   * Read one stream. One stream == one turn == one assistant message: every
+   * frame is attributed to `turn` and its conversation by the stream it came
+   * on, never by the ids a frame may or may not carry.
+   */
   private async processSSEResponse(
     response: Response,
-    turn?: ActiveTurn,
+    turn: Turn,
   ): Promise<AgoMessage> {
-    // One stream == one assistant message. Client-function invocations are
-    // deliberately NOT in the final message's `toolCalls` (SSEHandler filters
-    // `type === "client_function"`), and their payloads carry no messageId, so
-    // an action-only turn (agent runs a function, replies with no text) is
-    // tracked with this closure-local flag instead.
-    let sawClientFunction = false;
+    const stream = turn.stream!;
+    const conversation = turn.conversation;
+    const ids = () => ({
+      conversationId: turn.conversationId ?? "",
+      messageId: turn.messageId ?? "",
+    });
 
     const handler = new SSEHandler(
       {
         onRawChunk: (data) => {
           // Capture the ids the moment they appear: `stop()` addresses the turn by
           // message id, and a stop can land before the first content chunk.
-          if (turn) {
-            if (data.message_id && !turn.messageId)
-              turn.messageId = data.message_id;
-            if (data.thread?.id) turn.conversationId = data.thread.id;
+          if (data.thread?.id && !turn.conversationId) {
+            turn.conversationId = data.thread.id;
+            conversation._rekey(data.thread.id);
+          }
+          if (data.message_id && !turn.messageId) {
+            turn.messageId = data.message_id;
+            conversation._messageStarted(turn);
+          }
+          if (data.full_content !== undefined && turn.messageId) {
+            conversation._setText(turn, data.full_content);
           }
           this.eventEmitter.emit("stream:message", data);
         },
         onStart: (data) => {
-          this.eventEmitter.emit("message:start", data);
+          conversation._messageStarted(turn);
+          this.emitFor(conversation, "message:start", data);
         },
         onChunk: (data) => {
-          this.eventEmitter.emit("message:chunk", data);
+          conversation._appendText(turn, data.content);
+          this.emitFor(conversation, "message:chunk", data);
         },
-        onToolCall: (toolCall) => {
-          this.eventEmitter.emit("toolCall:received", toolCall);
+        onToolCall: (received) => {
+          const toolCall: ToolCallData = {
+            ...received,
+            conversationId: received.conversationId ?? (turn.conversationId || undefined),
+            messageId: received.messageId ?? (turn.messageId || undefined),
+          };
+          conversation._toolCall(turn, toolCall);
+          this.emitFor(conversation, "toolCall:received", toolCall);
 
           if (toolCall.type === "form") {
             this.eventEmitter.emit("toolCall:form", toolCall);
           }
         },
         onClientFunction: async (data) => {
-          sawClientFunction = true;
-          this.eventEmitter.emit("function:invoke", data);
-          this.recordAgentAction(data);
-          // Gate on approval only when there's a pause to hold onto (invocationId
-          // present == pause mode). Otherwise run immediately, as before.
-          if (data.invocationId && this.requiresApproval(data)) {
-            this.pendingApprovals.set(data.invocationId, { invocation: data });
-            this.eventEmitter.emit("function:awaiting-approval", data);
+          const invocation: ClientFunctionInvocation = {
+            ...data,
+            conversationId: data.conversationId || ids().conversationId,
+            ...(turn.messageId ? { messageId: turn.messageId } : {}),
+          };
+          if (!this.mayRunFunctionsFor(conversation)) {
+            await this.refuseClientFunction(invocation, conversation);
             return;
           }
-          await this.handleClientFunctionInvocation(data);
+          conversation._functionInvoked(turn, invocation);
+          this.emitFor(conversation, "function:invoke", invocation);
+          this.recordAgentAction(invocation);
+          // Gate on approval only when there's a pause to hold onto (invocationId
+          // present == pause mode). Otherwise run immediately, as before.
+          if (invocation.invocationId && this.requiresApproval(invocation)) {
+            this.pendingApprovals.set(invocation.invocationId, { invocation });
+            conversation._functionStatus(invocation, "awaiting_approval");
+            this.emitFor(conversation, "function:awaiting-approval", invocation);
+            return;
+          }
+          await this.handleClientFunctionInvocation(invocation, conversation);
         },
         onTitle: (data) => {
-          this.eventEmitter.emit("conversation:title", data);
+          conversation._title(data.title);
+          this.emitFor(conversation, "conversation:title", data);
         },
         onAnswerComplete: (message) => {
-          this.eventEmitter.emit("message:answer-complete", message);
+          conversation._answerComplete(turn, message);
+          this.emitFor(conversation, "message:answer-complete", message);
         },
         onWaitingClient: (data) => {
-          // The stream ends here but the turn does not: keep it stoppable while
-          // the client functions run and the resume is being prepared.
-          this.pausedTurn = {
-            messageId: data.messageId,
-            conversationId: data.conversationId,
-          };
-          this.eventEmitter.emit("message:waiting-client", data);
+          conversation._waiting(turn);
+          this.emitFor(conversation, "message:waiting-client", data);
           this.markResumeSignal(
             data.messageId,
             data.conversationId,
@@ -551,40 +618,44 @@ export class AgoClient {
           // A turn stopped before the backend named its message has nothing to
           // complete: emitting it would land a blank bubble in the transcript.
           // `message:stopped` still fires, and that is what UIs finalize on.
-          if (turn?.stopRequested && !message.id) return;
-          this.eventEmitter.emit("message:complete", message);
+          if (stream.stopRequested && !message.id) return;
+          conversation._complete(turn, message);
+          this.emitFor(conversation, "message:complete", message);
         },
         onError: (error) => {
-          this.eventEmitter.emit("message:error", {
+          conversation._error(turn, error);
+          this.emitFor(conversation, "message:error", {
             error: error.message,
             code: error instanceof AgoError ? error.code : undefined,
+            ...ids(),
           });
         },
       },
-      { signal: turn?.controller.signal },
+      { signal: stream.controller.signal },
     );
 
+    let paused = false;
     try {
       const message = await handler.processStream(response);
 
-      if (turn?.stopRequested) {
+      if (stream.stopRequested) {
         // A stop pressed before any frame carried a message id had nothing to
         // address. The id may have arrived in the frames parsed before the abort
         // landed — use it now, or the turn runs to completion server-side with
         // the user believing it stopped.
-        void this.postStopForTurn(turn, turn.messageId ?? message.id);
-        this.eventEmitter.emit("message:stopped", {
+        void this.postStopForStream(stream, turn.messageId ?? message.id);
+        conversation._stopped(turn);
+        this.emitFor(conversation, "message:stopped", {
           conversationId: turn.conversationId ?? message.conversationId ?? "",
           messageId: turn.messageId ?? message.id ?? "",
         });
       }
 
-      if (message.status !== "WAITING_CLIENT") {
-        this.maybeFlagEmptyReply(message, sawClientFunction);
-      }
+      paused = message.status === "WAITING_CLIENT" && !stream.stopRequested;
+      if (!paused) this.maybeFlagEmptyReply(message, conversation);
       return message;
     } finally {
-      if (turn) this.endTurn(turn);
+      this.endStream(turn, stream, paused);
     }
   }
 
@@ -593,8 +664,9 @@ export class AgoClient {
   // ─────────────────────────────────────────────────────────────────
 
   /**
-   * Stop the turn that is generating right now: closes the stream so the UI
-   * stops immediately, and tells the backend to stop generating.
+   * Stop generating: closes the stream so the UI stops immediately, and tells
+   * the backend to stop generating. With a `conversationId`, stops that
+   * conversation's answer only; without, stops every running answer.
    *
    * Both halves matter. Closing the stream alone does NOT stop the agent — it
    * keeps running and the full answer reappears the next time the conversation
@@ -607,46 +679,66 @@ export class AgoClient {
    * with status `CANCELED`, then `message:stopped`.
    *
    * ```ts
-   * // "Stop" button
-   * stopButton.onclick = () => void client.stop();
+   * // "Stop" button of the conversation on screen
+   * stopButton.onclick = () => void client.stop(conversationId);
    * ```
    *
-   * Returns the backend's verdict, or `null` when nothing was generating or the
-   * stop landed before the message had an id (the stream is still closed).
+   * Returns the backend's verdict (the first one when several answers
+   * stopped), or `null` when nothing was generating or the stop landed before
+   * the message had an id (the stream is still closed).
    */
-  async stop(): Promise<StopMessageResult | null> {
-    const turn = this.activeTurn;
-    if (turn) {
-      turn.stopRequested = true;
+  async stop(conversationId?: string): Promise<StopMessageResult | null> {
+    const turns = [...this.turns.values()].filter(
+      (turn) => conversationId === undefined || this.turnIn(turn, conversationId),
+    );
+    const polled =
+      conversationId === undefined
+        ? [...this.conversationObjects.values()]
+        : [this.conversationObjects.get(conversationId)].filter(
+            (c): c is AgoConversation => c !== undefined,
+          );
+    const results = await Promise.all([
+      ...turns.map((turn) => this.stopTurn(turn)),
+      ...polled.map((conversation) => conversation._stopPolled()),
+    ]);
+    return results.find((result) => result !== null) ?? null;
+  }
+
+  private async stopTurn(turn: Turn): Promise<StopMessageResult | null> {
+    const stream = turn.stream;
+    if (stream) {
+      stream.stopRequested = true;
       const messageId = turn.messageId;
       // Abort first so the UI stops on the spot; the POST below is what actually
       // stops the agent. The id is posted from processSSEResponse when it only
       // shows up in the frames parsed before the abort landed.
-      turn.controller.abort();
+      stream.controller.abort();
       if (!messageId) return null;
-      return this.postStopForTurn(turn, messageId);
+      return this.postStopForStream(stream, messageId);
     }
 
     // No open stream, but a turn paused on client functions is still live.
-    const paused = this.pausedTurn;
-    if (!paused) return null;
-    this.pausedTurn = null;
+    const messageId = turn.messageId!;
+    this.turns.delete(turn.id);
     // Drop the queued auto-resume: a stopped turn must not be restarted. The
     // flag covers a resume already waiting on the gate, which the map no longer
     // holds.
-    this.pendingResumes.delete(paused.messageId);
-    this.stoppedTurnIds.add(paused.messageId);
+    this.pendingResumes.delete(messageId);
+    this.stoppedTurnIds.add(messageId);
 
     let result: StopMessageResult | null = null;
     try {
-      result = await this.stopMessage(paused.messageId);
+      result = await this.stopMessage(messageId);
     } catch (error) {
       logger.warn("Failed to stop the paused turn:", error);
     }
-    this.eventEmitter.emit("message:stopped", {
-      conversationId: paused.conversationId,
-      messageId: paused.messageId,
+    turn.conversation._stopped(turn);
+    this.emitFor(turn.conversation, "message:stopped", {
+      conversationId: turn.conversationId ?? turn.conversation.id,
+      messageId,
     });
+    turn.conversation._turnEnded();
+    this.releaseIfUnused(turn.conversation);
     return result;
   }
 
@@ -668,36 +760,77 @@ export class AgoClient {
     };
   }
 
-  /** Whether a turn is generating right now (i.e. {@link stop} has something to stop). */
-  isGenerating(): boolean {
-    return this.activeTurn !== null || this.pausedTurn !== null;
+  /**
+   * Whether {@link stop} has something to stop: in the given conversation, or
+   * in any conversation when called without one.
+   */
+  isGenerating(conversationId?: string): boolean {
+    if (conversationId === undefined) {
+      return (
+        this.turns.size > 0 ||
+        [...this.conversationObjects.values()].some((c) => c.isGenerating())
+      );
+    }
+    return (
+      [...this.turns.values()].some((turn) => this.turnIn(turn, conversationId)) ||
+      (this.conversationObjects.get(conversationId)?.isGenerating() ?? false)
+    );
   }
 
-  /** Open a new turn, replacing any bookkeeping left by the previous one. */
-  private beginTurn(): ActiveTurn {
-    this.pausedTurn = null;
-    const turn: ActiveTurn = {
+  /**
+   * Open a stream for `conversation`. A resume (`messageId` given) reopens the
+   * paused turn of that message rather than starting another one.
+   */
+  private beginTurn(conversation: AgoConversation, messageId?: string): Turn {
+    const stream: TurnStream = {
       controller: new AbortController(),
-      messageId: null,
-      conversationId: null,
       stopRequested: false,
       stopPosted: false,
     };
-    this.activeTurn = turn;
+    let turn = messageId
+      ? [...this.turns.values()].find((t) => t.messageId === messageId)
+      : undefined;
+    if (turn) {
+      turn.stream = stream;
+    } else {
+      turn = {
+        id: generateUuid(),
+        conversation,
+        conversationId: conversation.isDraft ? null : conversation.id,
+        messageId: messageId ?? null,
+        stream,
+      };
+      this.turns.set(turn.id, turn);
+    }
+    conversation._turnStarted();
+    if (messageId) conversation._messageStarted(turn);
     return turn;
   }
 
-  private endTurn(turn: ActiveTurn): void {
-    if (this.activeTurn === turn) this.activeTurn = null;
+  /**
+   * The stream closed. A paused turn stays live (stoppable, resumable) with no
+   * stream; anything else ends the turn. A resume that already reopened the
+   * turn owns it now, so a stale stream leaves it alone.
+   */
+  private endStream(turn: Turn, stream: TurnStream, paused: boolean): void {
+    if (turn.stream !== stream) return;
+    turn.stream = null;
+    if (paused && this.turns.has(turn.id)) {
+      this.generatingChanged();
+      return;
+    }
+    this.turns.delete(turn.id);
+    turn.conversation._turnEnded();
+    this.releaseIfUnused(turn.conversation);
   }
 
-  /** POST the stop for a turn, once, never letting the failure escape. */
-  private async postStopForTurn(
-    turn: ActiveTurn,
+  /** POST the stop for a stream, once, never letting the failure escape. */
+  private async postStopForStream(
+    stream: TurnStream,
     messageId: string,
   ): Promise<StopMessageResult | null> {
-    if (!messageId || turn.stopPosted) return null;
-    turn.stopPosted = true;
+    if (!messageId || stream.stopPosted) return null;
+    stream.stopPosted = true;
     try {
       return await this.stopMessage(messageId);
     } catch (error) {
@@ -710,7 +843,7 @@ export class AgoClient {
   }
 
   /** The message a caller gets back when the stop beat the response. */
-  private buildStoppedMessage(turn: ActiveTurn): AgoMessage {
+  private buildStoppedMessage(turn: Turn, stream: TurnStream): AgoMessage {
     const message: AgoMessage = {
       id: turn.messageId ?? "",
       conversationId: turn.conversationId ?? "",
@@ -722,13 +855,160 @@ export class AgoClient {
     // Only a named message is worth completing: an unnamed one would land in a
     // transcript as a blank bubble. `message:stopped` always fires, and that is
     // what UIs finalize on.
-    if (message.id) this.eventEmitter.emit("message:complete", message);
-    this.eventEmitter.emit("message:stopped", {
+    if (message.id) this.emitFor(turn.conversation, "message:complete", message);
+    turn.conversation._stopped(turn);
+    this.emitFor(turn.conversation, "message:stopped", {
       conversationId: message.conversationId,
       messageId: message.id,
     });
+    this.endStream(turn, stream, false);
     return message;
   }
+
+  // ─────────────────────────────────────────────────────────────────
+  // Conversations as objects
+  // ─────────────────────────────────────────────────────────────────
+
+  /**
+   * The object of one conversation: its messages with their live activity, its
+   * answer and its Stop. The same id returns the same object while it is alive
+   * (active, answering, or subscribed to); otherwise it is dropped and a later
+   * call fetches the conversation again. Without an id, returns a new
+   * conversation, which takes its server id from its first answer (`"id"`
+   * event); its local `draft-…` id keeps finding it after that.
+   *
+   * ```ts
+   * const a = client.conversation("c-a");
+   * const b = client.conversation();
+   * client.setActiveConversation(b.id);
+   * void a.sendMessage("Summarize last week"); // keeps answering in the background
+   * ```
+   */
+  conversation(conversationId?: string): AgoConversation {
+    if (conversationId) {
+      const known = this.conversationObjects.get(conversationId);
+      if (known) return known;
+    }
+    const conversation = conversationId
+      ? new AgoConversation(this.conversationHost, conversationId, false)
+      : new AgoConversation(this.conversationHost, `draft-${generateUuid()}`, true);
+    this.conversationObjects.set(conversation.id, conversation);
+    return conversation;
+  }
+
+  /**
+   * Name the conversation on screen. A turn of any other conversation that
+   * calls a client function gets it refused (the agent is told the user moved
+   * on, and why), so a background answer never navigates or acts on the page.
+   * `null` (the default) refuses nothing.
+   */
+  setActiveConversation(conversationId: string | null): void {
+    const previous = this.activeConversationId;
+    // A re-keyed draft is still known by its local id: store its server id.
+    const next = conversationId
+      ? this.conversationObjects.get(conversationId)?.id ?? conversationId
+      : null;
+    if (previous === next) return;
+    this.activeConversationId = next;
+    const left = previous ? this.conversationObjects.get(previous) : undefined;
+    if (left) {
+      left._activeChanged();
+      this.releaseIfUnused(left);
+    }
+    if (next) this.conversationObjects.get(next)?._activeChanged();
+  }
+
+  /** The conversation set with {@link setActiveConversation}, or `null`. */
+  getActiveConversation(): string | null {
+    return this.activeConversationId;
+  }
+
+  /**
+   * Listen to conversations starting or ending an answer, e.g. to show a
+   * spinner per conversation with {@link isGenerating}. Returns the unsubscribe
+   * function.
+   */
+  onGeneratingChanged(listener: () => void): () => void {
+    this.generatingListeners.add(listener);
+    return () => {
+      this.generatingListeners.delete(listener);
+    };
+  }
+
+  private generatingChanged(): void {
+    for (const listener of [...this.generatingListeners]) {
+      try {
+        listener();
+      } catch (error) {
+        logger.error("onGeneratingChanged listener threw:", error);
+      }
+    }
+  }
+
+  private mayRunFunctionsFor(conversation: AgoConversation): boolean {
+    return (
+      this.activeConversationId === null ||
+      this.activeConversationId === conversation.id
+    );
+  }
+
+  /** Drop a conversation object nothing keeps alive any more (under every id it had). */
+  private releaseIfUnused(conversation: AgoConversation): void {
+    if (this.activeConversationId === conversation.id) return;
+    if (conversation._isRetained()) return;
+    for (const [id, known] of this.conversationObjects) {
+      if (known === conversation) this.conversationObjects.delete(id);
+    }
+  }
+
+  /** Whether `turn` belongs to the conversation known as `conversationId`. */
+  private turnIn(turn: Turn, conversationId: string): boolean {
+    return (
+      turn.conversationId === conversationId ||
+      turn.conversation === this.conversationObjects.get(conversationId)
+    );
+  }
+
+  private readonly conversationHost: ConversationHost = {
+    runSend: (conversation, content, options) =>
+      this.runSend(conversation, content, options),
+    stopConversation: async (conversation) => {
+      const results = await Promise.all([
+        ...[...this.turns.values()]
+          .filter((turn) => turn.conversation === conversation)
+          .map((turn) => this.stopTurn(turn)),
+        conversation._stopPolled(),
+      ]);
+      return results.find((result) => result !== null) ?? null;
+    },
+    hasTurn: (conversation) =>
+      [...this.turns.values()].some((turn) => turn.conversation === conversation),
+    isActive: (conversation) => this.activeConversationId === conversation.id,
+    getConversation: (id) => this.getConversation(id),
+    fetchConversation: (id) => this.fetchConversation(id),
+    stopMessage: (id) => this.stopMessage(id),
+    emitStopped: (conversation, messageId) =>
+      this.emitFor(conversation, "message:stopped", {
+        conversationId: conversation.id,
+        messageId,
+      }),
+    rekeyed: (conversation, previousId) => {
+      // Never displace the object already known by that id: it may be on screen.
+      if (!this.conversationObjects.has(conversation.id)) {
+        this.conversationObjects.set(conversation.id, conversation);
+      }
+      if (this.activeConversationId === previousId) {
+        this.activeConversationId = conversation.id;
+      }
+    },
+    retain: (conversation) => {
+      if (!this.conversationObjects.has(conversation.id)) {
+        this.conversationObjects.set(conversation.id, conversation);
+      }
+    },
+    release: (conversation) => this.releaseIfUnused(conversation),
+    generatingChanged: () => this.generatingChanged(),
+  };
 
   // ─────────────────────────────────────────────────────────────────
   // Pause / resume (client_functions_mode: "pause")
@@ -767,9 +1047,19 @@ export class AgoClient {
    *
    * The SDK calls this automatically after submitting the waiting results; call
    * it manually only for custom flows (e.g. after restoring a reloaded page via
-   * {@link resumePendingClientFunctions}).
+   * {@link resumePendingClientFunctions}). Pass the `conversationId` when the
+   * paused turn did not start on this page (after a reload), so the answer
+   * streams into that conversation.
    */
-  async continueMessage(messageId: string): Promise<AgoMessage> {
+  async continueMessage(messageId: string, conversationId?: string): Promise<AgoMessage> {
+    return this.continueTurn(messageId, conversationId);
+  }
+
+  /** Resume `messageId` in the conversation its paused turn (or the caller) names. */
+  private async continueTurn(
+    messageId: string,
+    conversationId?: string,
+  ): Promise<AgoMessage> {
     const clientFunctions = this.functionRegistry.getSchemas();
     const clientContext = this.buildSendContext();
 
@@ -781,18 +1071,21 @@ export class AgoClient {
       body.client_context = clientContext;
     }
 
-    const turn = this.beginTurn();
+    const paused = [...this.turns.values()].find((t) => t.messageId === messageId);
+    const conversation = paused?.conversation ?? this.conversation(conversationId);
     // The resumed turn keeps the same assistant message, so it is stoppable from
     // the first millisecond — no need to wait for a frame to name it.
-    turn.messageId = messageId;
-    const response = await this.sendRequest(turn, () =>
+    const turn = this.beginTurn(conversation, messageId);
+    if (!turn.conversationId && conversationId) turn.conversationId = conversationId;
+    const stream = turn.stream!;
+    const response = await this.sendRequest(turn, stream, () =>
       this.httpClient.postStream(
         `/api/sdk/v1/messages/${messageId}/continue`,
         body,
-        { signal: turn.controller.signal },
+        { signal: stream.controller.signal },
       ),
     );
-    if (!response) return this.buildStoppedMessage(turn);
+    if (!response) return this.buildStoppedMessage(turn, stream);
     return this.processSSEResponse(response, turn);
   }
 
@@ -844,7 +1137,7 @@ export class AgoClient {
     if (this.stoppedTurnIds.delete(messageId)) return;
 
     try {
-      await this.continueMessage(messageId);
+      await this.continueTurn(messageId, conversationId || undefined);
     } catch (error) {
       // A 409 means the turn moved on (new user message abandoned it, or a
       // concurrent continue won). That is a normal outcome, not an app error.
@@ -865,12 +1158,15 @@ export class AgoClient {
    */
   private maybeFlagEmptyReply(
     message: AgoMessage,
-    sawClientFunction: boolean,
+    conversation: AgoConversation,
   ): void {
+    const ranFunctions = conversation
+      .getMessages()
+      .some((m) => m.id === message.id && (m.functionCalls?.length ?? 0) > 0);
     const isEmpty =
       message.status === "DONE" &&
       (message.content ?? "").trim() === "" &&
-      !sawClientFunction &&
+      !ranFunctions &&
       !(message.toolCalls && message.toolCalls.length > 0) &&
       !(message.followUpReplies && message.followUpReplies.length > 0);
 
@@ -916,12 +1212,12 @@ export class AgoClient {
     }, 0);
   }
 
-  private async handleClientFunctionInvocation(data: {
-    invocationId: string;
-    functionName: string;
-    arguments: Record<string, unknown>;
-    conversationId: string;
-  }): Promise<void> {
+  private async handleClientFunctionInvocation(
+    data: ClientFunctionInvocation,
+    conversation?: AgoConversation,
+  ): Promise<void> {
+    const owner = conversation ?? this.conversationObjects.get(data.conversationId);
+    owner?._functionStatus(data, "running");
     let result: unknown;
     let error: string | undefined;
 
@@ -960,11 +1256,64 @@ export class AgoClient {
       }
     }
 
-    this.eventEmitter.emit("function:result", {
+    owner?._functionStatus(data, error ? "error" : "done", error);
+    this.emitFor(owner, "function:result", {
       invocationId: data.invocationId,
       result,
       error,
+      ...AgoClient.callIds(data),
     });
+  }
+
+  /** The ids a `function:result` carries for a conversation call. */
+  private static callIds(
+    invocation: ClientFunctionInvocation,
+  ): { conversationId?: string; messageId?: string } {
+    return {
+      ...(invocation.conversationId ? { conversationId: invocation.conversationId } : {}),
+      ...(invocation.messageId ? { messageId: invocation.messageId } : {}),
+    };
+  }
+
+  /**
+   * Answer a call made by a conversation that is not the active one, without
+   * running it: the agent gets the reason so it can tell the user, and the
+   * paused turn resumes as usual. Returns whether the turn is ready to resume.
+   */
+  private async refuseClientFunction(
+    invocation: ClientFunctionInvocation,
+    conversation: AgoConversation | undefined,
+    markResume = true,
+  ): Promise<boolean> {
+    const result = { performed: false, code: CONVERSATION_NOT_ACTIVE };
+    const error = CONVERSATION_NOT_ACTIVE_MESSAGE;
+    let ready = false;
+    if (invocation.invocationId) {
+      try {
+        const submitResult = await this.submitToolCallForm(invocation.invocationId, {
+          result,
+          error,
+          _type: "client_function_result",
+        });
+        ready = submitResult?.resume?.ready ?? false;
+        if (ready && markResume) {
+          this.markResumeSignal(
+            submitResult.resume!.message_id,
+            invocation.conversationId,
+            "resultsReady",
+          );
+        }
+      } catch (submitError) {
+        logger.error("Failed to submit the refused function call:", submitError);
+      }
+    }
+    this.emitFor(conversation, "function:result", {
+      invocationId: invocation.invocationId,
+      result,
+      error,
+      ...AgoClient.callIds(invocation),
+    });
+    return ready;
   }
 
   /**
@@ -1033,9 +1382,12 @@ export class AgoClient {
       logger.error("Failed to submit function rejection:", submitError);
     }
 
-    this.eventEmitter.emit("function:result", {
+    const owner = this.conversationObjects.get(data.conversationId);
+    owner?._functionStatus(data, "rejected");
+    this.emitFor(owner, "function:result", {
       invocationId,
       result: rejection,
+      ...AgoClient.callIds(data),
     });
   }
 
@@ -1202,6 +1554,18 @@ export class AgoClient {
    * Get a specific conversation with messages
    */
   async getConversation(conversationId: string): Promise<Conversation> {
+    const conversation = await this.fetchConversation(conversationId);
+
+    // Let stateful helpers (e.g. createFormCollector) replay the conversation's
+    // tool calls to restore their state. Fires only on an explicit server load —
+    // never during live streaming — so it can't clobber freshly built state.
+    this.eventEmitter.emit("conversation:loaded", conversation);
+
+    return conversation;
+  }
+
+  /** `getConversation` without the `conversation:loaded` event (used to poll). */
+  private async fetchConversation(conversationId: string): Promise<Conversation> {
     const response = await this.httpClient.get<{
       id: string;
       title: string;
@@ -1252,12 +1616,6 @@ export class AgoClient {
             : undefined,
       })),
     };
-
-    // Let stateful helpers (e.g. createFormCollector) replay the conversation's
-    // tool calls to restore their state. Fires only on an explicit server load —
-    // never during live streaming — so it can't clobber freshly built state.
-    this.eventEmitter.emit("conversation:loaded", conversation);
-
     return conversation;
   }
 
@@ -1521,6 +1879,8 @@ export class AgoClient {
       return null;
     }
 
+    const owner = this.conversation(conversation.id);
+    const turnRef = { id: `resume-${paused.id}`, messageId: paused.id };
     let ready = waitingCalls.length === 0;
     for (const call of waitingCalls) {
       const invocation: ClientFunctionInvocation = {
@@ -1528,7 +1888,15 @@ export class AgoClient {
         functionName: call.functionName!,
         arguments: call.arguments ?? {},
         conversationId: conversation.id,
+        messageId: paused.id,
       };
+      // Same rule as the live stream: a conversation that is not on screen
+      // must not act on the page.
+      if (!this.mayRunFunctionsFor(owner)) {
+        ready = (await this.refuseClientFunction(invocation, owner, false)) || ready;
+        continue;
+      }
+      owner._functionInvoked(turnRef, invocation);
       // Apply the same approval gate as the live stream (see onClientFunction):
       // a gated call must not run unattended on reload. Hold it for
       // approveFunction / rejectFunction and keep the turn paused.
@@ -1540,14 +1908,15 @@ export class AgoClient {
         // the result (resultsReady) but never fire the auto-resume, stranding the
         // turn forever — the live path gets this signal from the stream close.
         this.markResumeSignal(paused.id, conversation.id, "waitingConfirmed");
-        this.eventEmitter.emit("function:awaiting-approval", invocation);
+        owner._functionStatus(invocation, "awaiting_approval");
+        this.emitFor(owner, "function:awaiting-approval", invocation);
         ready = false;
         continue;
       }
       // Same events as the live stream, so a UI showing what the agent is
       // doing keeps working for calls that run after a reload instead of
       // silently sitting on a spinner.
-      this.eventEmitter.emit("function:invoke", invocation);
+      this.emitFor(owner, "function:invoke", invocation);
       let result: unknown;
       let error: string | undefined;
       try {
@@ -1559,10 +1928,12 @@ export class AgoClient {
         error = err instanceof Error ? err.message : "Unknown error";
         logger.error("Client function execution failed:", err);
       }
-      this.eventEmitter.emit("function:result", {
+      owner._functionStatus(invocation, error ? "error" : "done", error);
+      this.emitFor(owner, "function:result", {
         invocationId: call.id,
         result,
         error,
+        ...AgoClient.callIds(invocation),
       });
       const submitResult = await this.submitToolCallForm(call.id, {
         result,
@@ -1573,7 +1944,7 @@ export class AgoClient {
     }
 
     if (!ready) return null;
-    return this.continueMessage(paused.id);
+    return this.continueTurn(paused.id, conversation.id);
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -2540,9 +2911,14 @@ export class AgoClient {
     this.detachWebMCP = null;
     // Close any stream still open, so a destroyed client stops reading (and its
     // in-flight sendMessage resolves) instead of streaming into nothing.
-    this.activeTurn?.controller.abort();
-    this.activeTurn = null;
-    this.pausedTurn = null;
+    for (const turn of this.turns.values()) turn.stream?.controller.abort();
+    this.turns.clear();
+    for (const conversation of this.conversationObjects.values()) {
+      conversation._dispose();
+    }
+    this.conversationObjects.clear();
+    this.activeConversationId = null;
+    this.generatingListeners.clear();
     this.stoppedTurnIds.clear();
     for (const pending of this.pendingApprovals.values()) {
       pending.decide?.("cancelled");
