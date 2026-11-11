@@ -1,0 +1,9 @@
+{
+  "error": {
+    "type": "authentication_error",
+    "code": "invalid_api_key",
+    "message": "Unauthorized",
+    "param": null,
+    "doc_url": "https://ago.mintlify.app/api/errors#invalid_api_key"
+  }
+}

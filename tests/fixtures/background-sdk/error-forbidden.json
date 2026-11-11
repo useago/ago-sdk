@@ -1,0 +1,9 @@
+{
+  "error": {
+    "type": "permission_error",
+    "code": "insufficient_scope",
+    "message": "You do not have access to this conversation.",
+    "param": null,
+    "doc_url": "https://ago.mintlify.app/api/errors#insufficient_scope"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "error": {
+    "type": "invalid_request_error",
+    "code": "conversation_busy",
+    "message": "This conversation already has unfinished background work.",
+    "param": null,
+    "doc_url": "https://docs.useago.com/api/errors#conversation_busy"
+  }
+}
