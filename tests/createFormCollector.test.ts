@@ -8,6 +8,12 @@ import {
 } from "../src/forms/createFormCollector";
 import { logger } from "../src/utils/logger";
 
+function emit(client: AgoClient, event: string, payload: unknown) {
+  (
+    client as unknown as { eventEmitter: { emit: (e: string, p: unknown) => void } }
+  ).eventEmitter.emit(event, payload);
+}
+
 const schema: FormCollectorSchema = {
   type: "object",
   properties: {
@@ -175,11 +181,67 @@ describe("createFormCollector", () => {
     await c.functions[0].handler({ product: "Widget", quantity: 5 });
     const result = await c.functions[1].handler({}); // submit_order
 
-    expect(spy).toHaveBeenCalledWith("order", {
-      product: "Widget",
-      quantity: 5,
-    });
+    expect(spy).toHaveBeenCalledWith(
+      "order",
+      { product: "Widget", quantity: 5 },
+      undefined,
+    );
     expect(result).toEqual({ ok: true, result: { status: "completed" } });
+
+    uninstall();
+    client.destroy();
+  });
+
+  it("backend submit sends the conversation the agent filled the form in", async () => {
+    const c = makeCollector({ via: "backend", destination: "order_webhook" });
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const spy = vi
+      .spyOn(client, "submitFormCollector")
+      .mockResolvedValue({ status: "completed" });
+    const uninstall = c.install(client);
+
+    emit(client, "function:invoke", {
+      functionName: "update_order",
+      arguments: {},
+      conversationId: "conv-1",
+      invocationId: "inv1",
+    });
+    // Another form's call in another conversation must not move this one.
+    emit(client, "function:invoke", {
+      functionName: "update_contact",
+      arguments: {},
+      conversationId: "conv-2",
+      invocationId: "inv2",
+    });
+    await c.functions[0].handler({ product: "Widget", quantity: 5 });
+    await c.functions[1].handler({});
+
+    expect(spy).toHaveBeenCalledWith(
+      "order",
+      { product: "Widget", quantity: 5 },
+      "conv-1",
+    );
+
+    uninstall();
+    client.destroy();
+  });
+
+  it("backend submit uses a loaded conversation until the form is reset", async () => {
+    const c = makeCollector({ via: "backend", destination: "order_webhook" });
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const spy = vi
+      .spyOn(client, "submitFormCollector")
+      .mockResolvedValue({ status: "completed" });
+    const uninstall = c.install(client);
+
+    emit(client, "conversation:loaded", { id: "conv-3", messages: [] });
+    await c.functions[0].handler({ product: "Widget", quantity: 5 });
+    await c.functions[1].handler({});
+    c.reset();
+    await c.functions[0].handler({ product: "Gadget", quantity: 1 });
+    await c.functions[1].handler({});
+
+    expect(spy.mock.calls.map((call) => call[2])).toEqual(["conv-3", undefined]);
 
     uninstall();
     client.destroy();
@@ -1058,6 +1120,31 @@ describe("createFormCollector submit events", () => {
     expect(onError).not.toHaveBeenCalled();
 
     uninstall();
+    client.destroy();
+  });
+});
+
+describe("AgoClient.submitFormCollector", () => {
+  it("posts the conversation id with the values", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ status: "completed" }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+
+    await client.submitFormCollector("order", { product: "Widget" }, "conv-1");
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://example.test/api/sdk/v1/forms/submit");
+    expect(JSON.parse(init.body as string)).toEqual({
+      name: "order",
+      values: { product: "Widget" },
+      conversation_id: "conv-1",
+    });
+
+    vi.unstubAllGlobals();
     client.destroy();
   });
 });

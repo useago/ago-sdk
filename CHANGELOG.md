@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.15.1] - 2026-11-11
+
+### Added
+
+- Backend form submissions (`{ via: "backend" }`) send the conversation the form was filled in, so AGO links each submission to its conversation. `submitFormCollector` takes an optional `conversationId` for submissions made outside a collector.
+
 ## [1.15.0] - 2026-11-03
 
 ### Added
