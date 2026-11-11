@@ -51,9 +51,11 @@ import { ClientContextRegistry } from "../state/ClientContextRegistry";
 import type { PageStateBaseline } from "../state/pageStateDelta";
 import { computePageStateDelta } from "../state/pageStateDelta";
 import { SSEHandler } from "../streaming/SSEHandler";
-import { normalizeMessage, normalizeInteraction } from "./messageNormalizer";
+import { ConversationObserver } from "./ConversationObserver";
+import { currentBindingOperation, invalidateBindingOwner } from "./bindingOwnership";
+import { mapConversation, type RawConversation } from "./conversationMapping";
 import { appendFile, isNativeFile } from "../utils/uploadFile";
-import { EventEmitter } from "../utils/eventEmitter";
+import { EventEmitter, emitScoped } from "../utils/eventEmitter";
 import { byteLength } from "../utils/jsonBytes";
 import { logger } from "../utils/logger";
 import { generateUuid } from "../utils/uuid";
@@ -205,6 +207,10 @@ type ActiveTurn = {
   stopRequested: boolean;
   /** The stop endpoint was already called for this turn (call it once). */
   stopPosted: boolean;
+  owner: number;
+  observation: number;
+  detached: boolean;
+  bindingOwner?: symbol;
 };
 
 /** Context key under which the recent-activity window rides along with messages. */
@@ -230,9 +236,53 @@ function readDataFunctionName(fnName: string): string {
  */
 export class AgoClient {
   private httpClient: HttpClient;
+  private observer: ConversationObserver;
+  private activationNotifiedOwner: number | null = null;
   private functionRegistry: FunctionRegistry;
   private contextRegistry: ClientContextRegistry;
   private eventEmitter: EventEmitter<AgoClientEvents>;
+
+  private notificationOwner = -1;
+  private notificationSequence = new Map<string, number>();
+
+  private emitOwned<K extends keyof AgoClientEvents>(event: K, data: AgoClientEvents[K]): void {
+    const owner = this.observer.owner;
+    if (owner !== this.notificationOwner) {
+      this.notificationOwner = owner;
+      this.notificationSequence.clear();
+    }
+    let key: string | undefined;
+    if (event === "message:update") key = `message:${(data as AgoMessage).id}`;
+    else if (event === "conversation:update") key = `interaction:${(data as { conversationId: string }).conversationId}`;
+    else if (event === "connection:status") key = "connection";
+    const sequence = key ? (this.notificationSequence.get(key) ?? 0) + 1 : 0;
+    if (key) this.notificationSequence.set(key, sequence);
+    const completed = event === "message:complete" ? data as AgoMessage : undefined;
+    let refreshed = false;
+    const current = (): boolean | Promise<boolean> => {
+      if (this.observer.owner !== owner || (key && this.notificationSequence.get(key) !== sequence)) return false;
+      if (this.observer.needsVerification) {
+        if (event === "connection:status" && this.observer.verificationUnavailable) return true;
+        refreshed = true;
+        return this.observer.assertOwner(owner).then(current, () => false);
+      }
+      if (refreshed && completed && !this.observer.latestMessage(completed.id)) return false;
+      return true;
+    };
+    const latest = completed ? () => (refreshed ? this.observer.latestMessage(completed.id)! : completed) as AgoClientEvents[K] : undefined;
+    emitScoped(this.eventEmitter, event, data, current, latest);
+  }
+
+  private emitPrincipal<K extends keyof AgoClientEvents>(event: K, data: AgoClientEvents[K]): void {
+    const principal = this.observer.principal;
+    const current = (): boolean | Promise<boolean> => {
+      if (this.observer.principal !== principal) return false;
+      if (this.observer.needsVerification) return this.observer.assertPrincipal(principal).then(current, () => false);
+      return true;
+    };
+    emitScoped(this.eventEmitter, event, data, current);
+  }
+
   private activityLedger: ActivityLedger;
   private errorWatcher: ErrorWatcher | null = null;
   private lastSentPageState: PageStateBaseline | null = null;
@@ -262,6 +312,7 @@ export class AgoClient {
     string,
     {
       invocation: ClientFunctionInvocation;
+      owner?: number;
       decide?: (decision: "approved" | "user_rejected" | "cancelled") => void;
     }
   >();
@@ -310,6 +361,33 @@ export class AgoClient {
     });
     this.contextRegistry = new ClientContextRegistry();
     this.eventEmitter = new EventEmitter();
+    this.observer = new ConversationObserver(
+      this.httpClient,
+      {
+        update: (message) => this.emitOwned("message:update", message),
+        interaction: (interaction) =>
+          interaction.conversationId === null
+            ? this.eventEmitter.emit("conversation:update", interaction)
+            : this.emitOwned("conversation:update", interaction),
+        complete: (message) =>
+          this.emitOwned("message:complete", message),
+        connection: (connected, error) =>
+          this.emitOwned("connection:status", {
+            connected,
+            conversationId: this.observer.active ?? undefined,
+            error: error instanceof AgoError ? error : error ? new AgoError(error.message, "connection_error") : undefined,
+          }),
+      },
+      (preserveCurrent) => {
+        invalidateBindingOwner(this);
+        if (!preserveCurrent) this.activeTurn?.controller.abort();
+        this.pendingResumes.clear();
+        for (const pending of this.pendingApprovals.values())
+          pending.decide?.("cancelled");
+        this.pendingApprovals.clear();
+        this.pausedTurn = null;
+      },
+    );
     this.registerActivityContext();
 
     this.functionRegistry.onChange(() => {
@@ -400,6 +478,9 @@ export class AgoClient {
       body.hidden = true;
     }
 
+    if ((options?.conversationId ?? null) !== this.observer.active) invalidateBindingOwner(this, currentBindingOperation(this));
+    if ((options?.conversationId ?? null) !== this.observer.active) this.clearChatApprovals();
+    this.observer.beginSend(options?.conversationId);
     const turn = this.beginTurn();
     let response: Response | null;
 
@@ -454,7 +535,7 @@ export class AgoClient {
     }
 
     // Stopped before the response arrived (see sendRequest): nothing streamed.
-    if (!response) return this.buildStoppedMessage(turn);
+    if (!response) { this.observer.assertOwnerNow(turn.owner); return this.buildStoppedMessage(turn); }
 
     return this.processSSEResponse(response, turn);
   }
@@ -469,10 +550,20 @@ export class AgoClient {
     request: () => Promise<Response>,
   ): Promise<Response | null> {
     try {
-      return await request();
+      const response = await request();
+      this.observer.assertOwnerNow(turn.owner);
+      return response;
     } catch (error) {
       this.endTurn(turn);
+      this.observer.assertOwnerNow(turn.owner);
+      if (!turn.stopRequested) await this.observer.assertOwner(turn.owner);
+      if (turn.detached)
+        throw new AgoError(
+          "The request was detached from the conversation.",
+          "request_detached",
+        );
       if (isAbortError(error)) return null;
+      this.observer.authorizationError(error);
       throw error;
     }
   }
@@ -490,56 +581,149 @@ export class AgoClient {
 
     const handler = new SSEHandler(
       {
+        onState: (data) => {
+          if (turn && !this.observer.owns(turn.observation)) return;
+          if (turn && this.observer.retargetFromSend(data.message.conversationId, turn.observation)) {
+            invalidateBindingOwner(this, turn.bindingOwner);
+            this.clearChatApprovals();
+          }
+          this.observer.acceptInitial(
+            data,
+            turn?.observation ?? this.observer.token,
+          );
+          if (turn && this.observer.owns(turn.observation)) turn.owner = this.observer.owner;
+        },
         onRawChunk: (data) => {
+          if (this.observer.needsVerification) return;
+          if (
+            turn &&
+            !this.observer.owns(turn.observation)
+          )
+            return;
           // Capture the ids the moment they appear: `stop()` addresses the turn by
           // message id, and a stop can land before the first content chunk.
           if (turn) {
             if (data.message_id && !turn.messageId)
               turn.messageId = data.message_id;
-            if (data.thread?.id) turn.conversationId = data.thread.id;
+            if (data.thread?.id) {
+              turn.conversationId = data.thread.id;
+              if (this.observer.retargetFromSend(data.thread.id, turn.observation)) {
+                invalidateBindingOwner(this, turn.bindingOwner);
+                this.clearChatApprovals();
+              }
+            }
           }
-          this.eventEmitter.emit("stream:message", data);
+          this.emitOwned("stream:message", data);
         },
         onStart: (data) => {
-          this.eventEmitter.emit("message:start", data);
+          if (this.observer.needsVerification) return;
+          if (
+            turn &&
+            !this.observer.owns(turn.observation)
+          )
+            return;
+          this.emitOwned("message:start", data);
         },
         onChunk: (data) => {
-          this.eventEmitter.emit("message:chunk", data);
+          if (this.observer.needsVerification) return;
+          if (
+            turn &&
+            !this.observer.owns(turn.observation)
+          )
+            return;
+          this.emitOwned("message:chunk", data);
         },
         onToolCall: (toolCall) => {
-          this.eventEmitter.emit("toolCall:received", toolCall);
+          if (this.observer.needsVerification) return;
+          if (
+            turn &&
+            !this.observer.owns(turn.observation)
+          )
+            return;
+          this.emitOwned("toolCall:received", toolCall);
+          if (turn && !this.observer.owns(turn.observation)) return;
 
           if (toolCall.type === "form") {
-            this.eventEmitter.emit("toolCall:form", toolCall);
+            this.emitOwned("toolCall:form", toolCall);
           }
         },
         onClientFunction: async (data) => {
+          if (
+            turn &&
+            !this.observer.owns(turn.observation)
+          )
+            return;
+          try {
+            while (this.observer.needsVerification) await this.observer.assertOwner(turn?.owner ?? this.observer.owner);
+            this.observer.assertOwnerNow(turn?.owner ?? this.observer.owner);
+          } catch {
+            return;
+          }
+          const owner = turn?.owner ?? this.observer.owner;
           sawClientFunction = true;
-          this.eventEmitter.emit("function:invoke", data);
+          this.emitOwned("function:invoke", data);
+          try {
+            while (this.observer.needsVerification) await this.observer.assertOwner(owner);
+            this.observer.assertOwnerNow(owner);
+          } catch { return; }
           this.recordAgentAction(data);
           // Gate on approval only when there's a pause to hold onto (invocationId
           // present == pause mode). Otherwise run immediately, as before.
-          if (data.invocationId && this.requiresApproval(data)) {
-            this.pendingApprovals.set(data.invocationId, { invocation: data });
-            this.eventEmitter.emit("function:awaiting-approval", data);
+          const requiresApproval = data.invocationId && this.requiresApproval(data);
+          try {
+            while (this.observer.needsVerification) await this.observer.assertOwner(owner);
+            this.observer.assertOwnerNow(owner);
+          } catch { return; }
+          if (requiresApproval) {
+            this.pendingApprovals.set(data.invocationId, { invocation: data, owner });
+            this.emitOwned("function:awaiting-approval", data);
             return;
           }
-          await this.handleClientFunctionInvocation(data);
+          try {
+            await this.handleClientFunctionInvocation(
+              data,
+              owner,
+            );
+          } catch (error) {
+            if (!(
+              error instanceof AgoError && error.code === "request_detached"
+            ))
+              throw error;
+          }
         },
         onTitle: (data) => {
-          this.eventEmitter.emit("conversation:title", data);
+          if (this.observer.needsVerification) return;
+          if (
+            turn &&
+            !this.observer.owns(turn.observation)
+          )
+            return;
+          this.emitOwned("conversation:title", data);
         },
         onAnswerComplete: (message) => {
-          this.eventEmitter.emit("message:answer-complete", message);
+          if (this.observer.needsVerification) return;
+          if (
+            turn &&
+            !this.observer.owns(turn.observation)
+          )
+            return;
+          this.emitOwned("message:answer-complete", message);
         },
         onWaitingClient: (data) => {
+          if (this.observer.needsVerification) return;
+          if (
+            turn &&
+            !this.observer.owns(turn.observation)
+          )
+            return;
           // The stream ends here but the turn does not: keep it stoppable while
           // the client functions run and the resume is being prepared.
           this.pausedTurn = {
             messageId: data.messageId,
             conversationId: data.conversationId,
           };
-          this.eventEmitter.emit("message:waiting-client", data);
+          this.emitOwned("message:waiting-client", data);
+          if (turn && !this.observer.owns(turn.observation)) return;
           this.markResumeSignal(
             data.messageId,
             data.conversationId,
@@ -547,14 +731,26 @@ export class AgoClient {
           );
         },
         onComplete: (message) => {
+          if (this.observer.needsVerification) return;
+          if (
+            turn &&
+            !this.observer.owns(turn.observation)
+          )
+            return;
           // A turn stopped before the backend named its message has nothing to
           // complete: emitting it would land a blank bubble in the transcript.
           // `message:stopped` still fires, and that is what UIs finalize on.
           if (turn?.stopRequested && !message.id) return;
-          this.eventEmitter.emit("message:complete", message);
+          this.observer.complete(message);
         },
         onError: (error) => {
-          this.eventEmitter.emit("message:error", {
+          if (
+            turn &&
+            !this.observer.owns(turn.observation)
+          )
+            return;
+          this.observer.authorizationError(error);
+          this.emitOwned("message:error", {
             error: error.message,
             code: error instanceof AgoError ? error.code : undefined,
           });
@@ -565,6 +761,17 @@ export class AgoClient {
 
     try {
       const message = await handler.processStream(response);
+      if (turn && !turn.stopRequested && this.observer.owns(turn.observation)) this.observer.requireVerified();
+      if (turn) this.observer.assertOwnerNow(turn.owner);
+      if (turn?.detached)
+        throw new AgoError(
+          "The request was detached from the conversation.",
+          "request_detached",
+        );
+      if (turn && !turn.stopRequested) {
+        await this.observer.withOwner(turn.owner, () => this.observer.handoff(message, turn.observation));
+        this.observer.assertOwnerNow(turn.owner);
+      }
 
       if (turn?.stopRequested) {
         // A stop pressed before any frame carried a message id had nothing to
@@ -572,7 +779,7 @@ export class AgoClient {
         // landed — use it now, or the turn runs to completion server-side with
         // the user believing it stopped.
         void this.postStopForTurn(turn, turn.messageId ?? message.id);
-        this.eventEmitter.emit("message:stopped", {
+        this.emitOwned("message:stopped", {
           conversationId: turn.conversationId ?? message.conversationId ?? "",
           messageId: turn.messageId ?? message.id ?? "",
         });
@@ -629,6 +836,7 @@ export class AgoClient {
     // No open stream, but a turn paused on client functions is still live.
     const paused = this.pausedTurn;
     if (!paused) return null;
+    const owner = this.observer.owner;
     this.pausedTurn = null;
     // Drop the queued auto-resume: a stopped turn must not be restarted. The
     // flag covers a resume already waiting on the gate, which the map no longer
@@ -642,7 +850,8 @@ export class AgoClient {
     } catch (error) {
       logger.warn("Failed to stop the paused turn:", error);
     }
-    this.eventEmitter.emit("message:stopped", {
+    this.observer.assertOwnerNow(owner);
+    this.emitOwned("message:stopped", {
       conversationId: paused.conversationId,
       messageId: paused.messageId,
     });
@@ -681,6 +890,10 @@ export class AgoClient {
       conversationId: null,
       stopRequested: false,
       stopPosted: false,
+      owner: this.observer.owner,
+      observation: this.observer.token,
+      detached: false,
+      bindingOwner: currentBindingOperation(this),
     };
     this.activeTurn = turn;
     return turn;
@@ -721,8 +934,9 @@ export class AgoClient {
     // Only a named message is worth completing: an unnamed one would land in a
     // transcript as a blank bubble. `message:stopped` always fires, and that is
     // what UIs finalize on.
-    if (message.id) this.eventEmitter.emit("message:complete", message);
-    this.eventEmitter.emit("message:stopped", {
+    if (message.id) this.observer.complete(message);
+    this.observer.assertOwnerNow(turn.owner);
+    this.emitOwned("message:stopped", {
       conversationId: message.conversationId,
       messageId: message.id,
     });
@@ -791,7 +1005,7 @@ export class AgoClient {
         { signal: turn.controller.signal },
       ),
     );
-    if (!response) return this.buildStoppedMessage(turn);
+    if (!response) { this.observer.assertOwnerNow(turn.owner); return this.buildStoppedMessage(turn); }
     return this.processSSEResponse(response, turn);
   }
 
@@ -826,6 +1040,7 @@ export class AgoClient {
     messageId: string,
     conversationId: string,
   ): Promise<void> {
+    const owner = this.observer.owner;
     try {
       if (this.resumeGate) {
         await this.resumeGate({ conversationId, messageId });
@@ -836,6 +1051,11 @@ export class AgoClient {
       logger.warn("Resume gate threw; resuming anyway:", gateError);
     }
 
+    try {
+      await this.observer.assertOwner(owner);
+    } catch {
+      return;
+    }
     this.pendingResumes.delete(messageId);
 
     // The user stopped the turn while it was paused (possibly while the gate
@@ -843,7 +1063,7 @@ export class AgoClient {
     if (this.stoppedTurnIds.delete(messageId)) return;
 
     try {
-      await this.continueMessage(messageId);
+      await this.observer.withOwner(owner, () => this.continueMessage(messageId));
     } catch (error) {
       // A 409 means the turn moved on (new user message abandoned it, or a
       // concurrent continue won). That is a normal outcome, not an app error.
@@ -876,7 +1096,7 @@ export class AgoClient {
     if (!isEmpty) return;
 
     setTimeout(() => {
-      this.eventEmitter.emit("message:empty", {
+      this.emitOwned("message:empty", {
         conversationId: message.conversationId ?? "",
         messageId: message.id ?? "",
       });
@@ -915,55 +1135,57 @@ export class AgoClient {
     }, 0);
   }
 
-  private async handleClientFunctionInvocation(data: {
-    invocationId: string;
-    functionName: string;
-    arguments: Record<string, unknown>;
-    conversationId: string;
-  }): Promise<void> {
+  private async handleClientFunctionInvocation(
+    data: {
+      invocationId: string;
+      functionName: string;
+      arguments: Record<string, unknown>;
+      conversationId: string;
+    },
+    owner: number,
+  ): Promise<void> {
+    await this.observer.assertOwner(owner);
     let result: unknown;
     let error: string | undefined;
 
     try {
-      result = await this.functionRegistry.execute(
+      result = await this.observer.withOwner(owner, () => this.functionRegistry.execute(
         data.functionName,
         data.arguments,
-      );
+      ));
     } catch (err) {
       error = err instanceof Error ? err.message : "Unknown error";
       logger.error("Client function execution failed:", err);
     }
 
+    await this.observer.assertOwner(owner);
     // Submit result back to backend using existing tool-call submit endpoint.
     // The raw state SSE event carries no invocationId — in that flow the backend
     // already continued with a placeholder, so we just emit the local event.
     if (data.invocationId) {
       try {
-        const submitResult = await this.submitToolCallForm(data.invocationId, {
+        const submitResult = await this.observer.withOwner(owner, () => this.submitToolCallForm(data.invocationId, {
           result,
           error,
           _type: "client_function_result",
-        });
+        }));
         // Pause mode: the backend flags when EVERY waiting call of the paused
         // turn has its result. Combined with the stream's WAITING_CLIENT close,
         // this triggers the auto-resume (see markResumeSignal).
-        if (submitResult?.resume?.ready) {
-          this.markResumeSignal(
-            submitResult.resume.message_id,
-            data.conversationId,
-            "resultsReady",
-          );
-        }
+        await this.observer.withOwner(owner, () => {
+          if (submitResult?.resume?.ready) this.markResumeSignal(submitResult.resume.message_id, data.conversationId, "resultsReady");
+        });
       } catch (submitError) {
+        await this.observer.assertOwner(owner);
         logger.error("Failed to submit function result:", submitError);
       }
     }
 
-    this.eventEmitter.emit("function:result", {
+    await this.observer.withOwner(owner, () => this.emitOwned("function:result", {
       invocationId: data.invocationId,
       result,
       error,
-    });
+    }));
   }
 
   /**
@@ -997,7 +1219,10 @@ export class AgoClient {
     if (!pending) return;
     if (pending.decide) return pending.decide("approved");
     this.pendingApprovals.delete(invocationId);
-    await this.handleClientFunctionInvocation(pending.invocation);
+    await this.handleClientFunctionInvocation(
+      pending.invocation,
+      pending.owner ?? this.observer.owner,
+    );
   }
 
   /**
@@ -1013,29 +1238,28 @@ export class AgoClient {
     if (!pending) return;
     if (pending.decide) return pending.decide(reason);
     const data = pending.invocation;
+    const owner = pending.owner ?? this.observer.owner;
     this.pendingApprovals.delete(invocationId);
 
     const rejection = { approved: false, reason };
+    await this.observer.assertOwner(owner);
     try {
-      const submitResult = await this.submitToolCallForm(invocationId, {
+      const submitResult = await this.observer.withOwner(owner, () => this.submitToolCallForm(invocationId, {
         result: rejection,
         _type: "client_function_result",
+      }));
+      await this.observer.withOwner(owner, () => {
+        if (submitResult?.resume?.ready) this.markResumeSignal(submitResult.resume.message_id, data.conversationId, "resultsReady");
       });
-      if (submitResult?.resume?.ready) {
-        this.markResumeSignal(
-          submitResult.resume.message_id,
-          data.conversationId,
-          "resultsReady",
-        );
-      }
     } catch (submitError) {
+      await this.observer.assertOwner(owner);
       logger.error("Failed to submit function rejection:", submitError);
     }
 
-    this.eventEmitter.emit("function:result", {
+    await this.observer.withOwner(owner, () => this.emitOwned("function:result", {
       invocationId,
       result: rejection,
-    });
+    }));
   }
 
   /** Pending requests, including WebMCP calls with no conversation. */
@@ -1067,7 +1291,7 @@ export class AgoClient {
       });
       signal?.addEventListener("abort", cancel, { once: true });
       if (signal?.aborted) cancel();
-      else this.eventEmitter.emit("function:awaiting-approval", invocation);
+      else this.emitPrincipal("function:awaiting-approval", invocation);
     });
   }
 
@@ -1077,6 +1301,8 @@ export class AgoClient {
     args: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<unknown> {
+    this.observer.retryVerification();
+    const principal = this.observer.principal;
     // The approved arguments must not change while the external caller waits.
     const input = structuredClone(args);
     const invocation: ClientFunctionInvocation = {
@@ -1089,36 +1315,49 @@ export class AgoClient {
     const { invocationId } = invocation;
     const registration = this.functionRegistry.get(name);
     const gated = this.requiresApproval(invocation);
-    this.eventEmitter.emit("function:invoke", invocation);
+    this.observer.assertPrincipalNow(principal);
+    this.emitPrincipal("function:invoke", invocation);
 
     const startedAt = Date.now();
     try {
-      const decision = signal?.aborted || this.functionRegistry.get(name) !== registration
-        ? "cancelled"
-        : gated
-          ? await this.waitForExternalApproval(invocation, signal)
-          : "approved";
+      this.observer.assertPrincipalNow(principal);
+      while (this.observer.needsVerification) await this.observer.assertPrincipal(principal);
+      this.observer.assertPrincipalNow(principal);
+      const decision =
+        signal?.aborted || this.functionRegistry.get(name) !== registration
+          ? "cancelled"
+          : gated
+            ? await this.waitForExternalApproval(invocation, signal)
+            : "approved";
+      await this.observer.assertPrincipal(principal);
       // Recheck after awaiting: approval and navigation can happen in the same tick.
-      const cancelled = signal?.aborted || this.functionRegistry.get(name) !== registration;
-      const result = decision !== "approved" || cancelled
-        ? { approved: false, reason: cancelled ? "cancelled" : decision }
-        : await this.functionRegistry.execute(name, input);
-      this.eventEmitter.emit("function:result", {
+      const cancelled =
+        signal?.aborted || this.functionRegistry.get(name) !== registration;
+      const result =
+        decision !== "approved" || cancelled
+          ? { approved: false, reason: cancelled ? "cancelled" : decision }
+          : await this.observer.withPrincipal(principal, () => this.functionRegistry.execute(name, input));
+      await this.observer.withPrincipal(principal, () => this.emitPrincipal("function:result", {
         invocationId,
         result,
         source: "web_mcp",
-      });
-      this.reportExternalCall(name, input, startedAt, { result });
+      }));
+      await this.observer.assertPrincipal(principal);
+      await this.observer.withPrincipal(principal, () => this.reportExternalCall(name, input, startedAt, { result }));
       return result;
     } catch (error) {
+      if (signal?.aborted && error instanceof AgoError && error.code === "request_detached")
+        return { approved: false, reason: "cancelled" };
+      await this.observer.assertPrincipal(principal);
       const message = error instanceof Error ? error.message : String(error);
-      this.eventEmitter.emit("function:result", {
+      await this.observer.withPrincipal(principal, () => this.emitPrincipal("function:result", {
         invocationId,
         result: null,
         error: message,
         source: "web_mcp",
-      });
-      this.reportExternalCall(name, input, startedAt, { error: message });
+      }));
+      await this.observer.assertPrincipal(principal);
+      await this.observer.withPrincipal(principal, () => this.reportExternalCall(name, input, startedAt, { error: message }));
       throw error;
     }
   }
@@ -1166,6 +1405,8 @@ export class AgoClient {
     page?: number;
     pageSize?: number;
   }): Promise<PaginatedResult<Conversation>> {
+    this.observer.retryVerification();
+    const principal = this.observer.principal;
     const query = new URLSearchParams();
     if (options?.page !== undefined) query.set("page", String(options.page));
     if (options?.pageSize !== undefined)
@@ -1190,55 +1431,60 @@ export class AgoClient {
       lastMessageDate: new Date(row.last_message_at ?? row.created_at ?? 0),
     }));
 
-    return {
+    return this.observer.withPrincipal(principal, () => ({
       data,
       hasMore: response.has_more ?? false,
       total: response.total ?? data.length,
-    };
+    }));
+  }
+
+  private clearChatApprovals(): void {
+    for (const [id, pending] of this.pendingApprovals) if (!pending.decide) this.pendingApprovals.delete(id);
+  }
+
+  async setActiveConversation(conversationId: string | null): Promise<Conversation | null> {
+    invalidateBindingOwner(this, currentBindingOperation(this));
+    const changed = conversationId === null || this.observer.active !== conversationId;
+    if (changed) {
+      if (this.activeTurn) { this.activeTurn.detached = true; this.activeTurn.controller.abort(); }
+      this.pendingResumes.clear(); this.pausedTurn = null;
+      for (const [id, pending] of this.pendingApprovals) if (!pending.decide) this.pendingApprovals.delete(id);
+    }
+    const activation = this.observer.activate(conversationId);
+    const owner = this.observer.owner;
+    const conversation = await activation;
+    this.observer.assertOwnerNow(owner);
+    if (conversation && this.activationNotifiedOwner !== owner) {
+      this.activationNotifiedOwner = owner;
+      const observation = this.observer.token;
+      this.emitOwned("conversation:loaded", conversation);
+      this.observer.assertOwnerNow(owner);
+      if (this.observer.owns(observation)) this.observer.startObservation();
+    }
+    return conversation;
+  }
+
+  async submitApprovalDecision(
+    approvalId: string,
+    decision: "approve" | "reject",
+  ): Promise<void> {
+    return this.observer.decide(approvalId, decision);
   }
 
   /**
    * Get a specific conversation with messages
    */
   async getConversation(conversationId: string): Promise<Conversation> {
-    const response = await this.httpClient.get<{
-      id: string;
-      title: string;
-      created_at?: string | null;
-      last_message_at?: string | null;
-      interaction?: { can_send_message: boolean; blocking_message_id: string | null };
-      messages: Array<{
-        id: string;
-        content: string;
-        role: "user" | "assistant";
-        status: string;
-        created_at: string;
-        hidden?: boolean;
-        tool_call_data?: Array<Record<string, unknown>>;
-        attachments?: Array<Record<string, unknown>>;
-        sources?: Array<{ id: string; title: string; url?: string | null }>;
-        follow_up_replies?: string[];
-      }>;
-    }>(`/api/sdk/v1/conversations/${conversationId}`);
-
-    const conversation: Conversation = {
-      id: response.id,
-      title: response.title,
-      lastMessageDate: new Date(
-        response.last_message_at ?? response.created_at ?? 0,
-      ),
-      messages: response.messages.map((m) => normalizeMessage(m, response.id, !!response.interaction)),
-      interaction: response.interaction ? normalizeInteraction(response.interaction) : undefined,
-    };
-
-    // Let stateful helpers (e.g. createFormCollector) replay the conversation's
-    // tool calls to restore their state. Fires only on an explicit server load —
-    // never during live streaming — so it can't clobber freshly built state.
-    this.eventEmitter.emit("conversation:loaded", conversation);
-
-    return conversation;
+    this.observer.retryVerification();
+    const principal = this.observer.principal;
+    const response = await this.httpClient.get<RawConversation>(`/api/sdk/v1/conversations/${conversationId}`);
+    const conversation = await this.observer.withPrincipal(principal, () => {
+      const mapped = mapConversation(response);
+      this.emitPrincipal("conversation:loaded", mapped);
+      return mapped;
+    });
+    return this.observer.withPrincipal(principal, () => conversation);
   }
-
 
   // ─────────────────────────────────────────────────────────────────
   // Audio, config and tickets
@@ -1417,8 +1663,9 @@ export class AgoClient {
    * Get messages for a conversation
    */
   async getMessages(conversationId: string): Promise<AgoMessage[]> {
+    const principal = this.observer.principal;
     const conversation = await this.getConversation(conversationId);
-    return conversation.messages || [];
+    return this.observer.withPrincipal(principal, () => conversation.messages || []);
   }
 
   /**
@@ -1440,6 +1687,7 @@ export class AgoClient {
   async resumePendingClientFunctions(
     conversation: Conversation,
   ): Promise<AgoMessage | null> {
+    const owner = this.observer.owner;
     const paused = [...(conversation.messages ?? [])]
       .reverse()
       .find((m) => m.role === "assistant" && m.status === "WAITING_CLIENT");
@@ -1468,6 +1716,7 @@ export class AgoClient {
 
     let ready = waitingCalls.length === 0;
     for (const call of waitingCalls) {
+      await this.observer.assertOwner(owner);
       const invocation: ClientFunctionInvocation = {
         invocationId: call.id,
         functionName: call.functionName!,
@@ -1477,48 +1726,54 @@ export class AgoClient {
       // Apply the same approval gate as the live stream (see onClientFunction):
       // a gated call must not run unattended on reload. Hold it for
       // approveFunction / rejectFunction and keep the turn paused.
-      if (this.requiresApproval(invocation)) {
-        this.pendingApprovals.set(call.id, { invocation });
+      const requiresApproval = await this.observer.withOwner(owner, () => this.requiresApproval(invocation));
+      if (requiresApproval) {
+        await this.observer.withOwner(owner, () => {
+        this.pendingApprovals.set(call.id, { invocation, owner });
         // The backend already persisted this turn as WAITING_CLIENT (that's why
         // it restored paused), so record the "waiting confirmed" resume signal
         // now. Without it, a later approveFunction/rejectFunction would submit
         // the result (resultsReady) but never fire the auto-resume, stranding the
         // turn forever — the live path gets this signal from the stream close.
         this.markResumeSignal(paused.id, conversation.id, "waitingConfirmed");
-        this.eventEmitter.emit("function:awaiting-approval", invocation);
+        this.emitOwned("function:awaiting-approval", invocation);
+        });
         ready = false;
         continue;
       }
       // Same events as the live stream, so a UI showing what the agent is
       // doing keeps working for calls that run after a reload instead of
       // silently sitting on a spinner.
-      this.eventEmitter.emit("function:invoke", invocation);
+      await this.observer.withOwner(owner, () => this.emitOwned("function:invoke", invocation));
       let result: unknown;
       let error: string | undefined;
       try {
-        result = await this.functionRegistry.execute(
+        result = await this.observer.withOwner(owner, () => this.functionRegistry.execute(
           call.functionName!,
           call.arguments ?? {},
-        );
+        ));
       } catch (err) {
         error = err instanceof Error ? err.message : "Unknown error";
         logger.error("Client function execution failed:", err);
       }
-      this.eventEmitter.emit("function:result", {
+      await this.observer.withOwner(owner, () => this.emitOwned("function:result", {
         invocationId: call.id,
         result,
         error,
-      });
-      const submitResult = await this.submitToolCallForm(call.id, {
+      }));
+      await this.observer.assertOwner(owner);
+      const submitResult = await this.observer.withOwner(owner, () => this.submitToolCallForm(call.id, {
         result,
         error,
         _type: "client_function_result",
-      });
+      }));
+      await this.observer.assertOwner(owner);
       ready = submitResult?.resume?.ready ?? ready;
     }
 
+    await this.observer.assertOwner(owner);
     if (!ready) return null;
-    return this.continueMessage(paused.id);
+    return this.observer.withOwner(owner, () => this.continueMessage(paused.id));
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -2142,10 +2397,7 @@ export class AgoClient {
    */
   emitProactiveEvent<
     K extends
-      | "nudge:ready"
-      | "nudge:shown"
-      | "nudge:dismissed"
-      | "nudge:accepted",
+      "nudge:ready" | "nudge:shown" | "nudge:dismissed" | "nudge:accepted",
   >(event: K, data: AgoClientEvents[K]): void {
     this.eventEmitter.emit(event, data);
   }
@@ -2251,7 +2503,8 @@ export class AgoClient {
 
   private addActivity(entry: ActivityInput): void {
     const recorded = this.activityLedger.add(entry);
-    this.eventEmitter.emit("activity:recorded", recorded);
+    if (entry.actor === "agent") this.emitOwned("activity:recorded", recorded);
+    else this.eventEmitter.emit("activity:recorded", recorded);
   }
 
   private recordAgentAction(data: ClientFunctionInvocation): void {
@@ -2437,6 +2690,7 @@ export class AgoClient {
       }
     }
 
+    const credentialChanged = cleaned.userJwt !== undefined && cleaned.userJwt !== this.config.userJwt;
     const merged = { ...this.config, ...cleaned };
     validateConfig(merged, "AgoClient.updateConfig");
 
@@ -2444,6 +2698,13 @@ export class AgoClient {
     const languageChanged = language !== normalizeLanguage(this.config.language);
     this.config = merged;
     this.httpClient.updateConfig(cleaned);
+    if (credentialChanged) {
+      if (this.activeTurn) {
+        this.activeTurn.detached = true;
+        this.activeTurn.controller.abort();
+      }
+      this.observer.refreshCredentials(cleaned.userJwt === null);
+    }
     if (languageChanged) {
       this.eventEmitter.emit("config:changed", { language });
     }
@@ -2477,6 +2738,8 @@ export class AgoClient {
    * Clean up resources
    */
   destroy(): void {
+    invalidateBindingOwner(this);
+    this.observer.destroy();
     this.proactive?.destroy();
     this.proactive = null;
     this.errorWatcher?.destroy();

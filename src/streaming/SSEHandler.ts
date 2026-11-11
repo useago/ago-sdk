@@ -33,9 +33,17 @@ export interface SSEHandlerCallbacks {
    * the higher-level callbacks below. The verbatim payload, for debugging/logging.
    */
   onRawChunk?: (data: SSEChunkData) => void;
-  onState?: (data: { viewerId: string; interaction: ConversationInteraction; message: AgoMessage }) => void;
+  onState?: (data: {
+    viewerId: string;
+    interaction: ConversationInteraction;
+    message: AgoMessage;
+  }) => void;
   onStart?: (data: { conversationId: string; messageId: string }) => void;
-  onChunk?: (data: { content: string; conversationId: string; messageId: string }) => void;
+  onChunk?: (data: {
+    content: string;
+    conversationId: string;
+    messageId: string;
+  }) => void;
   onToolCall?: (toolCall: ToolCallData) => void;
   onClientFunction?: (data: {
     invocationId: string;
@@ -116,6 +124,9 @@ export class SSEHandler {
 
     const reader = response.body.getReader();
     const decoder = createStreamDecoder();
+    const cancel = () => { void reader.cancel().catch(() => {}); };
+    this.options.signal?.addEventListener("abort", cancel, { once: true });
+    if (this.options.signal?.aborted) cancel();
 
     try {
       while (true) {
@@ -131,14 +142,14 @@ export class SSEHandler {
 
       this.buffer += decoder.flush();
       this.processBuffer(true);
-
+      if (this.options.signal?.aborted) this.message = { ...this.message, status: "CANCELED" };
       return this.buildFinalMessage();
     } catch (error) {
       // The caller closed the stream (see `AgoClient.stop`). Not a failure:
       // finish the message as CANCELED with whatever text already arrived, so
       // the partial answer stays on screen and `onComplete` still fires once.
       if (this.options.signal?.aborted) {
-        this.message.status = "CANCELED";
+        this.message = { ...this.message, status: "CANCELED" };
         return this.buildFinalMessage();
       }
       const streamError =
@@ -150,6 +161,7 @@ export class SSEHandler {
       this.callbacks.onError?.(streamError);
       throw streamError;
     } finally {
+      this.options.signal?.removeEventListener("abort", cancel);
       reader.releaseLock();
     }
   }
@@ -162,11 +174,21 @@ export class SSEHandler {
    */
   private async processWholeBody(response: Response): Promise<AgoMessage> {
     let text = "";
+    let onAbort: (() => void) | undefined;
     try {
-      text = typeof response.text === "function" ? await response.text() : "";
+      const body = typeof response.text === "function" ? response.text() : Promise.resolve("");
+      const signal = this.options.signal;
+      if (signal) {
+        const aborted = new Promise<never>((_, reject) => {
+          onAbort = () => { const error = new Error("The operation was aborted."); error.name = "AbortError"; reject(error); };
+          signal.addEventListener("abort", onAbort, { once: true });
+          if (signal.aborted) onAbort();
+        });
+        text = await Promise.race([body, aborted]);
+      } else text = await body;
     } catch (error) {
       if (this.options.signal?.aborted) {
-        this.message.status = "CANCELED";
+        this.message = { ...this.message, status: "CANCELED" };
         return this.buildFinalMessage();
       }
       const streamError =
@@ -175,6 +197,8 @@ export class SSEHandler {
           : new AgoStreamError("Reading the reply failed. Retry the message.");
       this.callbacks.onError?.(streamError);
       throw streamError;
+    } finally {
+      if (onAbort) this.options.signal?.removeEventListener("abort", onAbort);
     }
 
     if (!text.trim()) {
@@ -440,10 +464,7 @@ export class SSEHandler {
     const message = this.buildMessage();
     // A paused turn is not complete: onComplete stays silent for this stream and
     // fires at the end of the resumed one, so one logical turn completes once.
-    if (
-      message.status !== "WAITING_CLIENT" &&
-      (!this.hasSnapshot || ["DONE", "ERROR", "CANCELED"].includes(message.status))
-    ) {
+    if (["DONE", "ERROR", "CANCELED"].includes(message.status)) {
       this.callbacks.onComplete?.(message);
     }
     return message;

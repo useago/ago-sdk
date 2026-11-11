@@ -71,7 +71,7 @@ export interface AgoConfig {
   /** User email for identification */
   userEmail?: string;
   /** JWT token for authenticated users */
-  userJwt?: string;
+  userJwt?: string | null;
   /** User metadata sent with messages. Use null to stop sending defaults. Not an authentication credential. */
   metadata?: Record<string, unknown> | null;
   /** Enable debug logging */
@@ -699,6 +699,10 @@ export interface SSEChunkData {
  * SDK Events
  */
 export interface AgoClientEvents {
+  "message:update": AgoMessage;
+  "conversation:update":
+    | { conversationId: string; interaction: ConversationInteraction }
+    | { conversationId: null; interaction: null };
   "config:changed": { language: string | null };
   /**
    * The client-side context changed: a context entry or dynamic provider was
@@ -836,6 +840,8 @@ export interface AgoClientEvents {
   };
   "connection:status": {
     connected: boolean;
+    conversationId?: string;
+    error?: import("./errors").AgoError;
   };
   /**
    * A proactive nudge passed every governor gate and is ready to display.
