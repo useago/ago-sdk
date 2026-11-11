@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { beginBindingActivation, isBindingOwner, withBindingOwnership } from "../../client/bindingOwnership";
+import { AgoError } from "../../client/errors";
 import type { AgoClient } from "../../client/AgoClient";
 import type { AgoMessage, AgoUploadFile } from "../../client/types";
 import { attachmentsFromFiles } from "../../utils/attachments";
@@ -36,10 +38,10 @@ export interface UseMessagesResult {
 /**
  * Hook to manage messages in a conversation
  */
-export function useMessages({
+export function useMessagesInternal({
   client: clientProp,
   conversationId: initialConversationId,
-}: UseMessagesOptions = {}): UseMessagesResult {
+}: UseMessagesOptions = {}) {
   const contextClient = useOptionalAgoClient();
   const client = clientProp || contextClient;
 
@@ -55,27 +57,44 @@ export function useMessages({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
-  // Load messages when conversation ID changes
-  useEffect(() => {
-    if (initialConversationId && initialConversationId !== conversationId) {
-      setConversationId(initialConversationId);
-      loadMessages(initialConversationId);
-    }
-    // Intentionally keyed on the prop only: `conversationId` is compared inside
-    // the guard, and `loadMessages` is recreated every render (not memoized).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialConversationId]);
-
-  const loadMessages = async (convId: string) => {
+  const owner = useRef<symbol>();
+  const viewEpoch = useRef(0);
+  const pendingSend = useRef<{ token: symbol; epoch: number; retargeted: boolean }>();
+  const selected = useRef<string | undefined>(initialConversationId);
+  const [currentConversation, setCurrentConversation] = useState<import("../../client/types").Conversation | null>(null);
+  const activate = useCallback(async (id: string | null) => {
+    viewEpoch.current++;
+    selected.current = id ?? undefined;
+    setConversationId(id ?? undefined);
+    setMessages([]);
+    setCurrentConversation(null);
+    setError(null);
+    setIsLoading(false);
+    const { token, result } = beginBindingActivation(client, () => client.setActiveConversation(id));
+    owner.current = token;
     try {
-      const loadedMessages = await client.getMessages(convId);
-      // Hidden messages (e.g. auto-continuation nudges) stay in the model's
-      // context but must never surface in the visible transcript.
-      setMessages(loadedMessages.filter((m) => !m.hidden));
+      const conversation = await result;
+      if (!isBindingOwner(client, token)) return;
+      setCurrentConversation(conversation);
+      setMessages((conversation?.messages ?? []).filter((m) => !m.hidden));
     } catch (err) {
-      setError(err instanceof Error ? err : new Error("Failed to load messages"));
+      if (isBindingOwner(client, token) && !(err instanceof AgoError && err.code === "request_detached"))
+        setError(err instanceof Error ? err : new Error("Failed to load messages"));
     }
-  };
+  }, [client]);
+
+  useEffect(() => {
+    const epoch = viewEpoch;
+    if (initialConversationId) void activate(initialConversationId);
+    return () => {
+      const token = owner.current;
+      if (token && isBindingOwner(client, token)) {
+        void withBindingOwnership(client, token, () => client.setActiveConversation(null)).catch(() => {});
+      }
+      epoch.current++;
+      owner.current = undefined;
+    };
+  }, [activate, client, initialConversationId]);
 
   // Subscribe to message events
   useEffect(() => {
@@ -84,9 +103,24 @@ export function useMessages({
     const isStreamingStatus = (status: AgoMessage["status"]) =>
       status === "IN_PROGRESS" || status === "WAITING_CLIENT";
 
+    const accepts = (id?: string, allowRetarget = false) => {
+      if (owner.current && !isBindingOwner(client, owner.current)) return false;
+      if (!id || !selected.current || selected.current === id) return true;
+      const pending = pendingSend.current;
+      if (!allowRetarget || !pending || pending.retargeted || pending.epoch !== viewEpoch.current || !isBindingOwner(client, pending.token)) return false;
+      pending.retargeted = true;
+      selected.current = id;
+      setConversationId(id);
+      setCurrentConversation(null);
+      setMessages((prev) => prev.filter((message) => message.id.startsWith("temp-") || message.conversationId === id));
+      return true;
+    };
+
     const handleMessageStart = (data: { conversationId: string; messageId: string }) => {
+      if (!accepts(data.conversationId, true)) return;
       // Update conversation ID if this is a new conversation
       if (!conversationId) {
+        selected.current = data.conversationId;
         setConversationId(data.conversationId);
       }
       // A stream can begin without going through this hook's `sendMessage`. The
@@ -128,6 +162,7 @@ export function useMessages({
       conversationId: string;
       messageId: string;
     }) => {
+      if (!accepts(data.conversationId)) return;
       // Append by id, wherever the entry sits. Optimistic `temp-` placeholders
       // never match a real messageId, so hook-initiated sends keep revealing
       // their text at answer-complete, exactly as before.
@@ -141,6 +176,7 @@ export function useMessages({
     };
 
     const handleAnswerComplete = (message: AgoMessage) => {
+      if (!accepts(message.conversationId)) return;
       // Main answer text is done; follow-up replies may still be streaming. Reveal
       // the answer and flip the streaming assistant message to DONE (adopting the
       // real id from the event so message:complete updates the same entry), but
@@ -163,6 +199,7 @@ export function useMessages({
     };
 
     const handleMessageComplete = (message: AgoMessage) => {
+      if (!accepts(message.conversationId)) return;
       setMessages((prev) => {
         // Replace the streaming message with the complete one
         const existingIndex = prev.findIndex((m) => m.id === message.id);
@@ -174,7 +211,8 @@ export function useMessages({
       setIsLoading(false);
     };
 
-    const handleMessageError = (data: { error: string }) => {
+    const handleMessageError = (data: { error: string; conversationId?: string }) => {
+      if (!accepts(data.conversationId)) return;
       setError(new Error(data.error));
       setIsLoading(false);
     };
@@ -184,7 +222,8 @@ export function useMessages({
     // before the backend named the message, and a turn stopped while it was
     // paused on a client function (no stream is open then, so no completion
     // event follows). An empty bubble is dropped rather than left blank.
-    const handleMessageStopped = () => {
+    const handleMessageStopped = (data: { conversationId: string }) => {
+      if (!accepts(data.conversationId)) return;
       setMessages((prev) => {
         let streamingIndex = -1;
         for (let i = prev.length - 1; i >= 0; i--) {
@@ -204,6 +243,27 @@ export function useMessages({
       setIsLoading(false);
     };
 
+    const handleUpdate = (message: AgoMessage) => {
+      if (!accepts(message.conversationId, true)) return;
+      setMessages((prev) => {
+        const index = prev.findIndex((m) => m.id === message.id);
+        if (message.hidden) return prev.filter((m) => m.id !== message.id);
+        if (index < 0) return [...prev, message];
+        return prev.map((m, i) => i === index ? message : m);
+      });
+    };
+    const handleConversationUpdate = (data: import("../../client/types").AgoClientEvents["conversation:update"]) => {
+      if (data.conversationId === null) {
+        viewEpoch.current++;
+        selected.current = undefined;
+        owner.current = undefined;
+        setConversationId(undefined); setMessages([]); setCurrentConversation(null); setError(null); setIsLoading(false);
+      } else if (accepts(data.conversationId, true) && data.conversationId === selected.current) {
+        setCurrentConversation((prev) => prev && prev.id === data.conversationId ? { ...prev, interaction: data.interaction } : prev);
+      }
+    };
+    client.on("message:update", handleUpdate);
+    client.on("conversation:update", handleConversationUpdate);
     client.on("message:start", handleMessageStart);
     client.on("message:chunk", handleMessageChunk);
     client.on("message:answer-complete", handleAnswerComplete);
@@ -212,6 +272,8 @@ export function useMessages({
     client.on("message:stopped", handleMessageStopped);
 
     return () => {
+      client.off("message:update", handleUpdate);
+      client.off("conversation:update", handleConversationUpdate);
       client.off("message:start", handleMessageStart);
       client.off("message:chunk", handleMessageChunk);
       client.off("message:answer-complete", handleAnswerComplete);
@@ -223,6 +285,8 @@ export function useMessages({
 
   const sendMessage = useCallback(
     async (content: string, files?: AgoUploadFile[]): Promise<AgoMessage | null> => {
+      let token = owner.current;
+      const epoch = viewEpoch.current;
       setIsLoading(true);
       setError(null);
 
@@ -252,14 +316,26 @@ export function useMessages({
       setMessages((prev) => [...prev, userMessage, assistantMessage]);
 
       try {
-        const response = await client.sendMessage(content, {
-          conversationId,
-          files,
-        });
+        const send = () => client.sendMessage(content, { conversationId, files });
+        let pending: Promise<AgoMessage>;
+        if (token && isBindingOwner(client, token)) pending = withBindingOwnership(client, token, send);
+        else {
+          const activation = beginBindingActivation(client, send);
+          token = activation.token; owner.current = token; pending = activation.result;
+        }
+        pendingSend.current = { token, epoch, retargeted: false };
+        const response = await pending;
+        if ((token && !isBindingOwner(client, token)) || viewEpoch.current !== epoch) return null;
 
-        // Update conversation ID if new
-        if (response.conversationId && !conversationId) {
+        const retargeted = !!response.conversationId && response.conversationId !== selected.current;
+        if (retargeted) {
+          selected.current = response.conversationId;
           setConversationId(response.conversationId);
+          setCurrentConversation(null);
+        }
+
+        if (response.status === "DONE" || response.status === "ERROR" || response.status === "CANCELED") {
+          setIsLoading(false);
         }
 
         // Replace temp messages with real ones.
@@ -267,7 +343,7 @@ export function useMessages({
         // by message.id so it will simply update the same entry (no duplicate).
         setMessages((prev) => {
           const filtered = prev.filter(
-            (m) => !m.id.startsWith("temp-")
+            (m) => !m.id.startsWith("temp-") && (!retargeted || m.conversationId === response.conversationId)
           );
 
           const updatedUserMessage = {
@@ -290,6 +366,12 @@ export function useMessages({
 
         return response;
       } catch (err) {
+        if ((token && !isBindingOwner(client, token)) || viewEpoch.current !== epoch) return null;
+        if (err instanceof AgoError && err.code === "request_detached") {
+          setIsLoading(false);
+          setMessages((prev) => prev.filter((m) => !m.id.startsWith("temp-")));
+          return null;
+        }
         setError(err instanceof Error ? err : new Error("Failed to send message"));
         setIsLoading(false);
 
@@ -297,6 +379,8 @@ export function useMessages({
         setMessages((prev) => prev.filter((m) => !m.id.startsWith("temp-")));
 
         return null;
+      } finally {
+        if (pendingSend.current?.token === token && pendingSend.current?.epoch === epoch) pendingSend.current = undefined;
       }
     },
     [client, conversationId]
@@ -307,10 +391,8 @@ export function useMessages({
   }, [client]);
 
   const clearMessages = useCallback(() => {
-    setMessages([]);
-    setConversationId(undefined);
-    setError(null);
-  }, []);
+    void activate(null);
+  }, [activate]);
 
   return {
     messages,
@@ -320,5 +402,11 @@ export function useMessages({
     stop,
     clearMessages,
     conversationId,
+    currentConversation,
+    activate,
   };
+}
+
+export function useMessages(options: UseMessagesOptions = {}): UseMessagesResult {
+  return useMessagesInternal(options);
 }

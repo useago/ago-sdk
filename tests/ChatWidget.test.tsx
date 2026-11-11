@@ -101,6 +101,7 @@ function createDrivableClient() {
     () => new Promise<AgoMessage>((resolve) => (resolveSend = resolve)),
   );
   const stop = vi.fn(async () => null);
+  let activeConversationId: string | null = null;
   const client = {
     on: (e: string, h: (data: unknown) => void) => {
       (handlers[e] ??= []).push(h);
@@ -111,6 +112,16 @@ function createDrivableClient() {
     sendMessage,
     stop,
     getMessages: vi.fn(async () => []),
+    setActiveConversation: vi.fn(async (id: string | null) => {
+      if (id === null) {
+        activeConversationId = null;
+        return null;
+      }
+      const conversation = { id, title: "", lastMessageDate: new Date(), messages: [] };
+      if (id !== activeConversationId) emit("conversation:loaded", conversation);
+      activeConversationId = id;
+      return conversation;
+    }),
   } as unknown as AgoClient;
   return {
     client,

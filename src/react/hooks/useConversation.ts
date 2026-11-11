@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { beginBindingActivation, isBindingOwner, withBindingOwnership } from "../../client/bindingOwnership";
+import { AgoError } from "../../client/errors";
 import type { AgoClient } from "../../client/AgoClient";
 import type { Conversation } from "../../client/types";
 import { useOptionalAgoClient } from "../context/AgoContext";
@@ -30,10 +32,10 @@ export interface UseConversationResult {
 /**
  * Hook to manage conversations
  */
-export function useConversation({
+export function useConversationInternal({
   client: clientProp,
   autoLoad = true,
-}: UseConversationOptions = {}): UseConversationResult {
+}: UseConversationOptions = {}, manageActivation = true): UseConversationResult {
   const contextClient = useOptionalAgoClient();
   const client = clientProp || contextClient;
 
@@ -48,19 +50,42 @@ export function useConversation({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
+  const owner = useRef<symbol>();
+  const generation = useRef(0);
+  useEffect(() => {
+    const state = generation;
+    const reset = (data: import("../../client/types").AgoClientEvents["conversation:update"]) => {
+      if (data.conversationId === null) {
+        generation.current++; owner.current = undefined;
+        setConversations([]); setCurrentConversation(null); setError(null); setIsLoading(false);
+      } else {
+        setCurrentConversation((prev) => prev?.id === data.conversationId ? { ...prev, interaction: data.interaction } : prev);
+      }
+    };
+    client.on("conversation:update", reset);
+    return () => {
+      state.current++;
+      client.off("conversation:update", reset);
+      const token = owner.current;
+      if (token && isBindingOwner(client, token)) void withBindingOwnership(client, token, () => client.setActiveConversation(null)).catch(() => {});
+      owner.current = undefined;
+    };
+  }, [client]);
+
   const refreshConversations = useCallback(async () => {
+    const epoch = generation.current;
     setIsLoading(true);
     setError(null);
 
     try {
       const { data } = await client.getConversations();
-      setConversations(data);
+      if (epoch === generation.current) setConversations(data);
     } catch (err) {
-      setError(
+      if (epoch === generation.current) setError(
         err instanceof Error ? err : new Error("Failed to load conversations")
       );
     } finally {
-      setIsLoading(false);
+      if (epoch === generation.current) setIsLoading(false);
     }
   }, [client]);
 
@@ -69,15 +94,16 @@ export function useConversation({
       setIsLoading(true);
       setError(null);
 
+      const { token, result } = beginBindingActivation(client, () => client.setActiveConversation(conversationId));
+      owner.current = token;
       try {
-        const conversation = await client.getConversation(conversationId);
-        setCurrentConversation(conversation);
+        const conversation = await result;
+        if (isBindingOwner(client, token)) setCurrentConversation(conversation);
       } catch (err) {
-        setError(
-          err instanceof Error ? err : new Error("Failed to load conversation")
-        );
+        if (isBindingOwner(client, token) && !(err instanceof AgoError && err.code === "request_detached"))
+          setError(err instanceof Error ? err : new Error("Failed to load conversation"));
       } finally {
-        setIsLoading(false);
+        if (isBindingOwner(client, token)) setIsLoading(false);
       }
     },
     [client]
@@ -85,7 +111,11 @@ export function useConversation({
 
   const startNewConversation = useCallback(() => {
     setCurrentConversation(null);
-  }, []);
+    if (manageActivation) {
+      const { token, result } = beginBindingActivation(client, () => client.setActiveConversation(null));
+      owner.current = token; void result.catch(() => {});
+    }
+  }, [client, manageActivation]);
 
   // Auto-load conversations on mount
   useEffect(() => {
@@ -103,4 +133,8 @@ export function useConversation({
     startNewConversation,
     refreshConversations,
   };
+}
+
+export function useConversation(options: UseConversationOptions = {}): UseConversationResult {
+  return useConversationInternal(options);
 }

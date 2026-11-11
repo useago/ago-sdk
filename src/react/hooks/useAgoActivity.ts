@@ -213,6 +213,12 @@ export function useAgoActivity(
   }
 
   const [items, setItems] = useState<AgoActivityItem[]>([]);
+  const generation = useRef(0);
+  const currentClient = useRef(client);
+  if (currentClient.current !== client) {
+    currentClient.current = client;
+    generation.current++;
+  }
 
   // Ids already approved/rejected this session. Guards against a double-click or
   // a race (approve then reject) resolving inconsistently: the client drains the
@@ -220,6 +226,8 @@ export function useAgoActivity(
   // that still flipped the optimistic UI status. Checked synchronously, so it
   // holds even before React commits the optimistic state update.
   const actedRef = useRef<Set<string>>(new Set());
+  const liveFunctions = useRef<Set<string>>(new Set());
+  const pendingFunctions = useRef<Set<string>>(new Set());
 
   // The assistant message the current turn's events belong to. A ref (not an
   // effect-local `let`) so it survives across renders and any listener
@@ -265,6 +273,15 @@ export function useAgoActivity(
   );
 
   useEffect(() => {
+    actedRef.current.clear();
+    liveFunctions.current.clear();
+    pendingFunctions.current.clear();
+    currentMessageIdRef.current = undefined;
+    setItems([]);
+  }, [client]);
+
+  useEffect(() => {
+    const currentGeneration = generation;
     const onStart = (data: { messageId: string }) => {
       currentMessageIdRef.current = data.messageId;
     };
@@ -287,6 +304,7 @@ export function useAgoActivity(
 
     const onFunctionInvoke = (data: ClientFunctionInvocation) => {
       if (!data.invocationId) return; // placeholder mode carries no id to key on
+      liveFunctions.current.add(data.invocationId);
       upsert(data.invocationId, {
         kind: data.functionName === "navigateToPage" ? "navigation" : "action",
         status: "running",
@@ -298,6 +316,8 @@ export function useAgoActivity(
 
     const onAwaitingApproval = (data: ClientFunctionInvocation) => {
       if (!data.invocationId) return;
+      liveFunctions.current.add(data.invocationId);
+      pendingFunctions.current.add(data.invocationId);
       upsert(data.invocationId, {
         kind: data.functionName === "navigateToPage" ? "navigation" : "action",
         status: "awaiting-approval",
@@ -314,6 +334,7 @@ export function useAgoActivity(
       error?: string;
     }) => {
       if (!data.invocationId) return;
+      pendingFunctions.current.delete(data.invocationId);
       // Only the client's rejectFunction produces this exact shape. Keying on
       // `approved: false` alone would mislabel a handler that legitimately
       // returns `{ approved: false }` as business data (e.g. an eligibility
@@ -330,38 +351,31 @@ export function useAgoActivity(
       });
     };
 
-    // Rebuild the feed from a restored conversation's persisted tool calls, so
-    // activity survives a page refresh (the SDK emits this on getConversation).
-    // Persisted client-function calls DO appear in `toolCalls` here (unlike the
-    // live stream, which routes them through function:invoke).
-    const onConversationLoaded = (conversation: Conversation) => {
-      for (const message of conversation.messages ?? []) {
-        if (message.role !== "assistant") continue;
-        for (const tc of message.toolCalls ?? []) {
-          const kind = kindForToolCallData(tc);
-          if (kind === "reasoning" && !includeReasoning) continue;
-          // Skip calls still awaiting the user (WAITING_INPUT/WAITING_CONFIRMATION):
-          // a cold reload can't re-arm the approval gate (the pending invocation is
-          // gone and the page function may not be registered), so rendering them
-          // would be a dead card or a never-ending spinner. Restore resolved steps
-          // only; the turn is still paused server-side and continues on the next
-          // message (or via the opt-in resumePendingClientFunctions).
-          if (/waiting/i.test(tc.status ?? "")) continue;
-          upsert(tc.id, {
-            kind,
-            status: normalizeToolCallStatus(tc.status, kind),
-            messageId: message.id,
-            toolName: tc.toolName,
-            toolDisplayName: tc.toolDisplayName,
-            functionName: tc.functionName,
-            arguments: tc.arguments,
-            message: tc.message,
-            data: tc.data,
-            formSchema: tc.formSchema,
-            requiresApproval: kind === "confirmation" || kind === "form",
-          });
-        }
+    const projectMessage = (message: import("../../client/types").AgoMessage) => {
+      if (message.role !== "assistant") return;
+      for (const tc of message.toolCalls ?? []) {
+        const kind = kindForToolCallData(tc);
+        if (kind === "reasoning" && !includeReasoning) continue;
+        const waiting = /waiting/i.test(tc.status ?? "");
+        const liveGate = waiting && pendingFunctions.current.has(tc.id) && !actedRef.current.has(tc.id);
+        if (waiting && !liveGate) continue;
+        upsert(tc.id, {
+          kind,
+          status: liveGate ? "awaiting-approval" : normalizeToolCallStatus(tc.status, kind),
+          messageId: message.id,
+          toolName: tc.toolName,
+          toolDisplayName: tc.toolDisplayName,
+          ...(liveGate && !tc.functionName ? {} : { functionName: tc.functionName }),
+          arguments: tc.arguments,
+          message: tc.message,
+          data: tc.data,
+          formSchema: tc.formSchema,
+          requiresApproval: liveGate || kind === "confirmation" || kind === "form",
+        });
       }
+    };
+    const onConversationLoaded = (conversation: Conversation) => {
+      for (const message of conversation.messages ?? []) projectMessage(message);
     };
 
     // When the turn ends, settle anything still shown as running.
@@ -377,6 +391,24 @@ export function useAgoActivity(
     const onComplete = () => settleRunning("done");
     const onError = () => settleRunning("error");
 
+    const onSnapshot = (message: import("../../client/types").AgoMessage) => {
+      const calls = message.toolCalls ?? [];
+      const liveGates = new Set(calls.filter((call) => /waiting/i.test(call.status ?? "") && pendingFunctions.current.has(call.id) && !actedRef.current.has(call.id)).map((call) => call.id));
+      const persistedIds = new Set(calls.map((call) => call.id));
+      for (const id of persistedIds) {
+        if (!liveGates.has(id)) { liveFunctions.current.delete(id); pendingFunctions.current.delete(id); }
+      }
+      setItems((prev) => prev.filter((item) => item.messageId !== message.id || liveFunctions.current.has(item.id)));
+      projectMessage(message);
+    };
+    const onReset = (data: import("../../client/types").AgoClientEvents["conversation:update"]) => {
+      if (data.conversationId === null) {
+        generation.current++;
+        actedRef.current.clear(); liveFunctions.current.clear(); pendingFunctions.current.clear(); currentMessageIdRef.current = undefined; setItems([]);
+      }
+    };
+    client.on("message:update", onSnapshot);
+    client.on("conversation:update", onReset);
     client.on("message:start", onStart);
     client.on("toolCall:received", onToolCall);
     client.on("function:invoke", onFunctionInvoke);
@@ -387,6 +419,9 @@ export function useAgoActivity(
     client.on("message:error", onError);
 
     return () => {
+      currentGeneration.current++;
+      client.off("message:update", onSnapshot);
+      client.off("conversation:update", onReset);
       client.off("message:start", onStart);
       client.off("toolCall:received", onToolCall);
       client.off("function:invoke", onFunctionInvoke);
@@ -409,6 +444,7 @@ export function useAgoActivity(
       // submitForm, not here.
       if (item.kind === "form") return;
       actedRef.current.add(id);
+      pendingFunctions.current.delete(id);
       // Optimistically clear the wait so the UI responds instantly.
       upsert(id, { status: "running", requiresApproval: false });
       if (item.functionName) {
@@ -426,6 +462,7 @@ export function useAgoActivity(
       if (!item || item.status !== "awaiting-approval" || actedRef.current.has(id))
         return;
       actedRef.current.add(id);
+      pendingFunctions.current.delete(id);
       upsert(id, { status: "rejected", requiresApproval: false });
       if (item.functionName) {
         await client.rejectFunction(id);
@@ -438,15 +475,19 @@ export function useAgoActivity(
 
   const submitForm = useCallback(
     async (id: string, values: Record<string, unknown>) => {
+      const epoch = generation.current;
       upsert(id, { status: "running", requiresApproval: false });
       await client.submitToolCallForm(id, values);
-      upsert(id, { status: "done" });
+      if (generation.current === epoch && currentClient.current === client) upsert(id, { status: "done" });
     },
     [client, upsert]
   );
 
   const clear = useCallback(() => {
+    generation.current++;
     actedRef.current.clear();
+    liveFunctions.current.clear();
+    pendingFunctions.current.clear();
     setItems([]);
   }, []);
 

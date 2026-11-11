@@ -1,7 +1,7 @@
 import { computed } from "vue";
 import type { AgoClient } from "../../client/AgoClient";
-import { useMessages } from "./useMessages";
-import { useConversation } from "./useConversation";
+import { useMessagesInternal } from "./useMessages";
+import { useConversationInternal } from "./useConversation";
 
 export interface UseChatOptions {
   client?: AgoClient;
@@ -17,15 +17,15 @@ export interface UseChatOptions {
  * ```
  */
 export function useChat(options: UseChatOptions = {}) {
-  const msgResult = useMessages({
+  const msgResult = useMessagesInternal({
     client: options.client,
     conversationId: options.conversationId,
   });
 
-  const convResult = useConversation({
+  const convResult = useConversationInternal({
     client: options.client,
     autoLoad: options.autoLoad,
-  });
+  }, false);
 
   const error = computed(
     () => msgResult.error.value || convResult.error.value
@@ -42,10 +42,10 @@ export function useChat(options: UseChatOptions = {}) {
     conversationId: msgResult.conversationId,
     // Conversations
     conversations: convResult.conversations,
-    currentConversation: convResult.currentConversation,
+    currentConversation: msgResult.currentConversation,
     isConversationsLoading: convResult.isLoading,
-    selectConversation: convResult.selectConversation,
-    startNewConversation: convResult.startNewConversation,
+    selectConversation: async (id: string) => { await msgResult.activate(id); },
+    startNewConversation: msgResult.clearMessages,
     refreshConversations: convResult.refreshConversations,
   };
 }
