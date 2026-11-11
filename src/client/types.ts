@@ -215,9 +215,30 @@ export interface AgoAttachment {
   isSafeImage: boolean;
 }
 
-/**
- * Message from AGO
- */
+export type MessageOutcome = "completed" | "incomplete" | "failed";
+export interface MessageProgress {
+  steps: Array<{
+    name: string;
+    status:
+      "pending" | "in_progress" | "completed" | "failed" | "not_completed";
+    reason: string | null;
+  }> | null;
+  activity: Array<{ text: string; timestamp: string | null }>;
+  truncated: boolean;
+}
+export interface MessageApproval {
+  id: string;
+  status: "pending" | "approved" | "rejected" | "expired";
+  actions: Array<{ name: string; arguments: Record<string, unknown> }>;
+  allowedDecisions: Array<"approve" | "reject">;
+  expiresAt: string | null;
+}
+export interface ConversationInteraction {
+  canSendMessage: boolean;
+  blockingMessageId: string | null;
+}
+
+/** Message from AGO. */
 export interface AgoMessage {
   id: string;
   conversationId: string;
@@ -237,6 +258,10 @@ export interface AgoMessage {
    */
   hidden?: boolean;
   createdAt: Date;
+  progress?: MessageProgress | null;
+  approval?: MessageApproval | null;
+  outcome?: MessageOutcome | null;
+  canStop?: boolean;
 }
 
 export type MessageStatus =
@@ -250,7 +275,9 @@ export type MessageStatus =
    * every waiting call to be submitted, then the turn resumes via
    * `continueMessage`. Not a final state.
    */
-  | "WAITING_CLIENT";
+  | "WAITING_CLIENT"
+  | "WAITING_APPROVAL"
+  | "PAUSED";
 
 /**
  * Response of `POST /tool-calls/{id}/submit`. `resume` is only present when the
@@ -504,6 +531,7 @@ export interface Conversation {
   title: string;
   lastMessageDate: Date;
   messages?: AgoMessage[];
+  interaction?: ConversationInteraction;
 }
 
 /**

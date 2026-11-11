@@ -51,7 +51,7 @@ import { ClientContextRegistry } from "../state/ClientContextRegistry";
 import type { PageStateBaseline } from "../state/pageStateDelta";
 import { computePageStateDelta } from "../state/pageStateDelta";
 import { SSEHandler } from "../streaming/SSEHandler";
-import { mapAttachment } from "../utils/attachments";
+import { normalizeMessage, normalizeInteraction } from "./messageNormalizer";
 import { appendFile, isNativeFile } from "../utils/uploadFile";
 import { EventEmitter } from "../utils/eventEmitter";
 import { byteLength } from "../utils/jsonBytes";
@@ -82,7 +82,6 @@ import type {
   StopMessageResult,
   SubmitToolCallResult,
   TicketForm,
-  ToolCallData,
   TranscribeAudioOptions,
 } from "./types";
 import { normalizeLanguage, formConfigLanguage } from "./language";
@@ -1207,6 +1206,7 @@ export class AgoClient {
       title: string;
       created_at?: string | null;
       last_message_at?: string | null;
+      interaction?: { can_send_message: boolean; blocking_message_id: string | null };
       messages: Array<{
         id: string;
         content: string;
@@ -1227,30 +1227,8 @@ export class AgoClient {
       lastMessageDate: new Date(
         response.last_message_at ?? response.created_at ?? 0,
       ),
-      messages: response.messages.map((m) => ({
-        id: m.id,
-        conversationId: response.id,
-        content: m.content,
-        role: m.role,
-        status: m.status as AgoMessage["status"],
-        createdAt: new Date(m.created_at),
-        hidden: m.hidden,
-        sources:
-          m.sources && m.sources.length > 0
-            ? m.sources.map(({ id, title, url }) => ({ id, title, url: url ?? undefined }))
-            : undefined,
-        toolCalls: AgoClient.mapPersistedToolCalls(m.tool_call_data),
-        attachments:
-          m.attachments && m.attachments.length > 0
-            ? m.attachments.map(mapAttachment)
-            : undefined,
-        // Re-render the follow-up pills under the last answer on reload; the
-        // widget only shows them on the last message (see renderMessage isLast).
-        followUpReplies:
-          m.follow_up_replies && m.follow_up_replies.length > 0
-            ? m.follow_up_replies
-            : undefined,
-      })),
+      messages: response.messages.map((m) => normalizeMessage(m, response.id, !!response.interaction)),
+      interaction: response.interaction ? normalizeInteraction(response.interaction) : undefined,
     };
 
     // Let stateful helpers (e.g. createFormCollector) replay the conversation's
@@ -1261,39 +1239,6 @@ export class AgoClient {
     return conversation;
   }
 
-  /**
-   * Map the backend's snake_case `tool_call_data` entries onto the camelCase
-   * {@link ToolCallData} shape used everywhere else in the SDK. Mirrors
-   * `SSEHandler.parseToolCall` so persisted and streamed tool calls match.
-   */
-  private static mapPersistedToolCalls(
-    raw?: Array<Record<string, unknown>>,
-  ): ToolCallData[] | undefined {
-    if (!raw || raw.length === 0) return undefined;
-    return raw.map((tc) => ({
-      id: String(tc.id ?? ""),
-      type: (tc.type as ToolCallData["type"]) ?? "status_message",
-      status: String(tc.status ?? "unknown"),
-      toolName: (tc.tool_name as string) ?? "",
-      toolDisplayName: tc.tool_display_name as string | undefined,
-      toolType: (tc.tool_type as string | null | undefined) ?? undefined,
-      messageId: (tc.message_id as string | null | undefined) ?? undefined,
-      conversationId: (tc.thread as { id?: string } | undefined)?.id,
-      message: tc.message as string | undefined,
-      formSchema: tc.form_schema as ToolCallData["formSchema"],
-      data: tc.data as Record<string, unknown> | undefined,
-      functionName: tc.function_name as string | undefined,
-      arguments: tc.arguments as Record<string, unknown> | undefined,
-      displayMode: tc.display_mode as ToolCallData["displayMode"],
-      askToTalkToHuman: tc.ask_to_talk_to_human as boolean | undefined,
-      allowedToCreateTicket: tc.allowed_to_create_ticket as boolean | undefined,
-      ticket: tc.ticket as ToolCallData["ticket"],
-      mode: tc.mode as ToolCallData["mode"],
-      ticketFormId: tc.ticket_form_id as string | undefined,
-      embedHtml: tc.embed_html as string | undefined,
-      embedDescription: tc.embed_description as string | undefined,
-    }));
-  }
 
   // ─────────────────────────────────────────────────────────────────
   // Audio, config and tickets
