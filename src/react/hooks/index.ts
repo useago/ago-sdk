@@ -7,6 +7,12 @@ export type { UseMessagesOptions, UseMessagesResult } from "./useMessages";
 export { useConversation } from "./useConversation";
 export type { UseConversationOptions, UseConversationResult } from "./useConversation";
 
+export { useConversationChat } from "./useConversationChat";
+export type {
+  UseConversationChatOptions,
+  UseConversationChatResult,
+} from "./useConversationChat";
+
 export { useFeedback } from "./useFeedback";
 export type { UseFeedbackOptions, UseFeedbackResult } from "./useFeedback";
 

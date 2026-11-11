@@ -7,11 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.15.1] - 2026-11-11
+## [1.16.0] - 2026-11-12
 
 ### Added
 
+- **Several conversations at once.** `client.conversation(id?)` returns one object per conversation, with its own messages, answer and Stop. Answers keep streaming in the background and never show up in another conversation. See [Several conversations at once](docs/general/conversations.md).
+- React `useConversationChat(conversationId?)` hook built on it.
+- `client.setActiveConversation(id | null)`: a conversation that is not on screen gets its client-function calls refused (code `conversation_not_active`), and the agent is told why.
+- `client.onGeneratingChanged(listener)` and `client.getActiveConversation()`.
+- `AgoMessage.functionCalls` (client-function calls with their live status) on messages held by a conversation object, and `contentOffset` on their calls.
+- Optional `messageId` on `ClientFunctionInvocation`, and optional `conversationId` and `messageId` on `function:result`. `message:error` now fills its optional `conversationId` and `messageId`.
+- The active conversation polls the server while a reload left its last answer running.
 - Backend form submissions (`{ via: "backend" }`) send the conversation the form was filled in, so AGO links each submission to its conversation. `submitFormCollector` takes an optional `conversationId` for submissions made outside a collector.
+
+### Changed
+
+- `useMessages` and `useChat` (React and Vue) no longer receive other conversations' events.
+- `stop()` with no argument stops **all** running answers (before: the last one started). `stop(conversationId)` stops one.
+- `isGenerating()` with no argument is true if **any** answer is running. `isGenerating(conversationId)` answers for one.
+- A second `sendMessage` in the same conversation waits for the running answer to end (before: both streamed at once).
+- `@useago/sdk/angular`: `function:result` and `function:invoke` payloads carry the new optional ids.
 
 ## [1.15.0] - 2026-11-03
 

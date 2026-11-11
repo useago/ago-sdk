@@ -502,6 +502,7 @@ and no-build HTML.
 - [**Getting started**](docs/general/getting-started.md): send a message, wire the router, see the feature map
 - [**Feature matrix**](docs/general/feature-matrix.md): everything that ships, per stack
 - [**Functions & context**](docs/general/functions-and-context.md): let the agent run your code and see what the user sees
+- [**Several conversations at once**](docs/general/conversations.md): answers that keep running in the background, one Stop each
 - [**Events & streaming**](docs/general/events-and-streaming.md): low-level hooks into the message stream
 - [**Testing**](docs/general/testing.md): mock client for unit tests
 - [**Configuration & auth**](docs/general/configuration.md): every `AgoConfig` option, headers, errors

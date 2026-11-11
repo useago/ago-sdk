@@ -99,8 +99,10 @@ it was paused on client functions (no stream is open then).
 
 `stop()` resolves with the backend's verdict, or `null` when nothing was
 generating (or when the stop landed before the backend had named the message).
-`isGenerating()` tells you whether there is anything to stop, so a button can
-switch between Send and Stop. A turn paused on client functions
+`stop(conversationId)` stops that conversation only; `stop()` stops every
+answer running. `isGenerating()` (any conversation) or
+`isGenerating(conversationId)` tells you whether there is anything to stop, so
+a button can switch between Send and Stop. A turn paused on client functions
 (`WAITING_CLIENT`) counts as generating and is still stoppable; stopping it also
 cancels the automatic resume.
 
@@ -246,6 +248,9 @@ const thread = await ago.getConversation(conversations[0].id);
 
 const messages = await ago.getMessages(conversations[0].id);
 ```
+
+To keep several conversations answering at once (each with its own Stop), use
+conversation objects: see [Several conversations at once](conversations.md).
 
 ---
 
@@ -516,10 +521,16 @@ Prefer callbacks over raw events? See the
 
 - `sendMessage(content, options?)` → `Promise<AgoMessage>`
   - `options.conversationId?` · `options.agentId?` · `options.files?: File[]`
-- `stop()` → `Promise<StopMessageResult | null>`: stop the turn being generated
-  (`null` when nothing was generating)
+- `stop(conversationId?)` → `Promise<StopMessageResult | null>`: stop that
+  conversation's answer, or every answer without an id (`null` when nothing was
+  generating)
 - `stopMessage(messageId)` → `Promise<StopMessageResult>`: stop a turn by id
-- `isGenerating()` → `boolean`
+- `isGenerating(conversationId?)` → `boolean`: that conversation, or any
+- `conversation(id?)` → `AgoConversation`: one conversation's messages, answer
+  and Stop ([guide](conversations.md))
+- `setActiveConversation(id | null)`: the conversation on screen; others'
+  client functions are refused
+- `onGeneratingChanged(listener)` → unsubscribe function
 
 ### Audio
 
