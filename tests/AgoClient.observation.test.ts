@@ -1977,6 +1977,34 @@ describe("conversation observation", () => {
   });
 });
 
+it("retains visible staff replies through public history reads without replaying completion", async () => {
+  const raw = JSON.parse(fixture("history-final.json"));
+  raw.messages.push({
+    ...raw.messages[0],
+    id: "staff-message",
+    role: "Staff",
+    status: "DONE",
+    hidden: false,
+    content: "A staff member will help you.",
+  });
+  const client = new AgoClient({
+    baseUrl: "https://example.test",
+    fetch: (async () => new Response(JSON.stringify(raw), { headers: { "Content-Type": "application/json" } })) as typeof fetch,
+  });
+  const complete = vi.fn();
+  client.on("message:complete", complete);
+  const conversation = await client.getConversation(conversationId);
+  const messages = await client.getMessages(conversationId);
+  const active = await client.setActiveConversation(conversationId);
+  for (const list of [conversation.messages, messages, active?.messages]) {
+    expect(list?.map((message) => message.role)).toEqual(["user", "assistant", "Staff"]);
+    expect(list?.[2]).toMatchObject({ id: "staff-message", status: "DONE", hidden: false, content: "A staff member will help you." });
+  }
+  await settle();
+  expect(complete).not.toHaveBeenCalled();
+  client.destroy();
+});
+
 it("retains hidden system history in the public conversation getters and activation", async () => {
   const raw = JSON.parse(fixture("history-final.json"));
   const user = raw.messages[0];
@@ -2050,9 +2078,9 @@ it("keeps system roles invalid in live snapshots", async () => {
 });
 
 it.each([
-  { hidden: false, created_at: "2026-11-10T10:00:01Z" },
+  { role: "", hidden: false, created_at: "2026-11-10T10:00:01Z" },
   { hidden: true, created_at: null },
-])("validates hidden system history without weakening snapshot fields: %j", async (fields) => {
+])("validates history roles and snapshot fields: %j", async (fields) => {
   const raw = JSON.parse(fixture("history-final.json"));
   raw.messages[1] = { ...raw.messages[1], role: "system", ...fields };
   const client = new AgoClient({ baseUrl: "https://example.test", fetch: (async () => new Response(JSON.stringify(raw), { headers: { "Content-Type": "application/json" } })) as typeof fetch });
