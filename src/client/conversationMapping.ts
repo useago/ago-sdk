@@ -20,7 +20,7 @@ export function mapConversation(raw: RawConversation): Conversation {
     title: raw.title,
     lastMessageDate: new Date(raw.last_message_at ?? raw.created_at ?? 0),
     messages: raw.messages.map((message) =>
-      normalizeMessage(message, raw.id, !!raw.interaction),
+      normalizeMessage(message, raw.id, !!raw.interaction, true),
     ),
     interaction: raw.interaction
       ? normalizeInteraction(raw.interaction)

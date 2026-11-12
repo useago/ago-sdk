@@ -1976,3 +1976,196 @@ describe("conversation observation", () => {
     client.destroy();
   });
 });
+
+it("retains hidden system history in the public conversation getters and activation", async () => {
+  const raw = JSON.parse(fixture("history-final.json"));
+  const user = raw.messages[0];
+  const assistant = raw.messages[1];
+  raw.messages = [user, assistant, { ...assistant, id: "system-message", role: "system", status: "TODO", hidden: true, content: "client function continuation", attachments: [], approval: null }, { ...assistant, id: "after-system" }];
+  const client = new AgoClient({ baseUrl: "https://example.test", fetch: (async () => new Response(JSON.stringify(raw), { headers: { "Content-Type": "application/json" } })) as typeof fetch });
+  const conversation = await client.getConversation(conversationId);
+  const messages = await client.getMessages(conversationId);
+  const active = await client.setActiveConversation(conversationId);
+  for (const list of [conversation.messages, messages, active?.messages]) {
+    expect(list?.map((m) => m.role)).toEqual(["user", "assistant", "system", "assistant"]);
+    expect(list?.[2]).toMatchObject({ hidden: true, status: "TODO", content: "client function continuation", attachments: [], followUpReplies: [], approval: null });
+  }
+  client.destroy();
+});
+
+it("resets an active observation when its SSE reports not_found", async () => {
+  vi.useFakeTimers();
+  try {
+    const fetcher = vi.fn(async (url: string | URL | Request) => String(url).endsWith("/events")
+      ? textResponse('event: error\ndata: {"error":{"type":"invalid_request_error","code":"not_found","message":"Not found."}}\n\n')
+      : jsonResponse("history-running.json"));
+    const client = new AgoClient({ baseUrl: "https://example.test", fetch: fetcher as typeof fetch });
+    const updates = vi.fn(); const complete = vi.fn();
+    client.on("conversation:update", updates); client.on("message:complete", complete);
+    await client.setActiveConversation(conversationId);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(updates).toHaveBeenLastCalledWith({ conversationId: null, interaction: null });
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(fetcher.mock.calls.filter(([url]) => String(url).endsWith("/events"))).toHaveLength(1);
+    expect(fetcher.mock.calls.some(([url]) => String(url).endsWith("/status") || String(url).endsWith("/stop"))).toBe(false);
+    expect(complete).not.toHaveBeenCalled();
+    client.destroy();
+  } finally { vi.useRealTimers(); }
+});
+
+it("keeps the active view on unrelated getter and approval not-found errors", async () => {
+  const missing = () => new Response(JSON.stringify({ error: { type: "invalid_request_error", code: "not_found", message: "Not found." } }), { status: 404, headers: { "Content-Type": "application/json" } });
+  const fetcher = vi.fn(async (url: string | URL | Request) => String(url).endsWith(`/conversations/${conversationId}`) ? jsonResponse("history-final.json") : missing());
+  const client = new AgoClient({ baseUrl: "https://example.test", fetch: fetcher as typeof fetch });
+  const updates = vi.fn(); client.on("conversation:update", updates);
+  await client.setActiveConversation(conversationId);
+  updates.mockClear();
+  await expect(client.getConversation("another-conversation")).rejects.toMatchObject({ statusCode: 404 });
+  await expect(client.submitApprovalDecision("missing-approval", "approve")).rejects.toMatchObject({ statusCode: 404 });
+  expect(updates).not.toHaveBeenCalledWith({ conversationId: null, interaction: null });
+  expect((await client.setActiveConversation(conversationId))?.id).toBe(conversationId);
+  expect(fetcher.mock.calls.filter(([url]) => String(url).endsWith(`/conversations/${conversationId}`))).toHaveLength(1);
+  client.destroy();
+});
+
+it("resets when the currently activated history request returns HTTP 404", async () => {
+  const client = new AgoClient({ baseUrl: "https://example.test", fetch: (async () => new Response(JSON.stringify({ error: { type: "invalid_request_error", code: "not_found", message: "Not found." } }), { status: 404, headers: { "Content-Type": "application/json" } })) as typeof fetch });
+  const updates = vi.fn(); client.on("conversation:update", updates);
+  await expect(client.setActiveConversation(conversationId)).rejects.toMatchObject({ statusCode: 404 });
+  expect(updates).toHaveBeenLastCalledWith({ conversationId: null, interaction: null });
+  client.destroy();
+});
+
+it("keeps system roles invalid in live snapshots", async () => {
+  const raw = JSON.parse(fixture("history-running.json"));
+  const invalid = { viewer_id: raw.viewer_id, interaction: raw.interaction, message: { ...raw.messages.at(-1), role: "system", hidden: true } };
+  const fetcher = vi.fn(async (url: string | URL | Request) => String(url).endsWith("/events") ? textResponse(`event: message\ndata: ${JSON.stringify(invalid)}\n\n`) : jsonResponse("history-running.json"));
+  const client = new AgoClient({ baseUrl: "https://example.test", fetch: fetcher as typeof fetch });
+  const updates = vi.fn(); const complete = vi.fn();
+  client.on("message:update", updates); client.on("message:complete", complete);
+  await client.setActiveConversation(conversationId); await settle();
+  expect(updates.mock.calls.every(([message]) => message.role !== "system")).toBe(true);
+  expect(complete).not.toHaveBeenCalled();
+  client.destroy();
+});
+
+it.each([
+  { hidden: false, created_at: "2026-11-10T10:00:01Z" },
+  { hidden: true, created_at: null },
+])("validates hidden system history without weakening snapshot fields: %j", async (fields) => {
+  const raw = JSON.parse(fixture("history-final.json"));
+  raw.messages[1] = { ...raw.messages[1], role: "system", ...fields };
+  const client = new AgoClient({ baseUrl: "https://example.test", fetch: (async () => new Response(JSON.stringify(raw), { headers: { "Content-Type": "application/json" } })) as typeof fetch });
+  await expect(client.getConversation(conversationId)).rejects.toMatchObject({ code: "stream_error" });
+  client.destroy();
+});
+
+it.each([401, 403, 404])("resets when same-ID history after a send returns HTTP %i", async (status) => {
+  const final = JSON.parse(fixture("status-final.json"));
+  const frame = `event: message\ndata: ${JSON.stringify({ viewer_id: final.viewer_id, interaction: final.interaction, message: final })}\n\n`;
+  const fetcher = vi.fn(async (url: string | URL | Request) => String(url).endsWith("/api/sdk/v1/messages") ? textResponse(frame) : new Response(JSON.stringify({ error: { type: "invalid_request_error", code: "not_found", message: "Not found." } }), { status, headers: { "Content-Type": "application/json" } }));
+  const client = new AgoClient({ baseUrl: "https://example.test", fetch: fetcher as typeof fetch });
+  const updates = vi.fn(); client.on("conversation:update", updates);
+  await client.sendMessage("test"); updates.mockClear();
+  await expect(client.setActiveConversation(conversationId)).rejects.toMatchObject({ statusCode: status });
+  expect(updates).toHaveBeenLastCalledWith({ conversationId: null, interaction: null });
+  client.destroy();
+});
+
+it("rejects same-ID history for a different verified viewer after a send", async () => {
+  const final = JSON.parse(fixture("status-final.json"));
+  const frame = `event: message\ndata: ${JSON.stringify({ viewer_id: final.viewer_id, interaction: final.interaction, message: final })}\n\n`;
+  const history = JSON.parse(fixture("history-final.json")); history.viewer_id = "another-viewer";
+  const fetcher = vi.fn(async (url: string | URL | Request) => String(url).endsWith("/api/sdk/v1/messages") ? textResponse(frame) : new Response(JSON.stringify(history), { headers: { "Content-Type": "application/json" } }));
+  const client = new AgoClient({ baseUrl: "https://example.test", fetch: fetcher as typeof fetch });
+  const updates = vi.fn(); client.on("conversation:update", updates);
+  await client.sendMessage("test"); updates.mockClear();
+  await expect(client.setActiveConversation(conversationId)).rejects.toMatchObject({ code: "request_detached" });
+  expect(updates).toHaveBeenLastCalledWith({ conversationId: null, interaction: null });
+  client.destroy();
+});
+
+it("does not reset a newer view when same-ID history fails late", async () => {
+  const final = JSON.parse(fixture("status-final.json"));
+  const frame = `event: message\ndata: ${JSON.stringify({ viewer_id: final.viewer_id, interaction: final.interaction, message: final })}\n\n`;
+  let release!: (response: Response) => void;
+  let started!: () => void;
+  const requested = new Promise<void>((resolve) => { started = resolve; });
+  const delayed = new Promise<Response>((resolve) => { release = resolve; });
+  const nextId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const fetcher = vi.fn(async (url: string | URL | Request) => {
+    if (String(url).endsWith("/api/sdk/v1/messages")) return textResponse(frame);
+    if (String(url).endsWith(`/conversations/${conversationId}`)) { started(); return delayed; }
+    if (String(url).endsWith(`/conversations/${nextId}`)) return new Response(fixture("history-final.json").replaceAll(conversationId, nextId), { headers: { "Content-Type": "application/json" } });
+    throw new Error(String(url));
+  });
+  const client = new AgoClient({ baseUrl: "https://example.test", fetch: fetcher as typeof fetch });
+  const updates = vi.fn(); client.on("conversation:update", updates);
+  await client.sendMessage("test");
+  const old = client.setActiveConversation(conversationId);
+  await requested; await client.setActiveConversation(nextId); updates.mockClear();
+  release(new Response(JSON.stringify({ error: { type: "invalid_request_error", code: "not_found", message: "Not found." } }), { status: 404, headers: { "Content-Type": "application/json" } }));
+  await expect(old).rejects.toMatchObject({ code: "request_detached" });
+  expect(updates).not.toHaveBeenCalledWith({ conversationId: null, interaction: null });
+  expect((await client.setActiveConversation(nextId))?.id).toBe(nextId);
+  client.destroy();
+});
+
+it("does not restart a live follow when same-ID history verifies the viewer", async () => {
+  let release!: (response: Response) => void;
+  const follow = new Promise<Response>((resolve) => { release = resolve; });
+  const fetcher = vi.fn(async (url: string | URL | Request) => {
+    if (String(url).endsWith("/api/sdk/v1/messages")) return textResponse(fixture("initial-send.sse"));
+    if (String(url).endsWith("/events")) return follow;
+    if (String(url).endsWith(`/conversations/${conversationId}`)) return jsonResponse("history-running.json");
+    throw new Error(String(url));
+  });
+  const client = new AgoClient({ baseUrl: "https://example.test", fetch: fetcher as typeof fetch });
+  const complete = vi.fn(); client.on("message:complete", complete);
+  await client.sendMessage("test");
+  expect(fetcher.mock.calls.filter(([url]) => String(url).endsWith("/events"))).toHaveLength(1);
+  const history = await client.setActiveConversation(conversationId);
+  expect(history?.id).toBe(conversationId);
+  expect(fetcher.mock.calls.filter(([url]) => String(url).endsWith("/events"))).toHaveLength(1);
+  release(textResponse(fixture("follow-to-final.sse")));
+  await settle();
+  expect(complete).toHaveBeenCalledTimes(1);
+  expect(fetcher.mock.calls.filter(([url]) => String(url).endsWith("/events"))).toHaveLength(1);
+  client.destroy();
+});
+
+it.each(["after", "before"] as const)("joins one follow when it completes %s initial EOF", async (completionOrder) => {
+  const history = JSON.parse(fixture("history-running.json"));
+  const initialMessage = history.messages.find((message: { id: string }) => message.id === messageId);
+  const frame = `event: message\ndata: ${JSON.stringify({ viewer_id: history.viewer_id, interaction: history.interaction, message: initialMessage })}\n\n`;
+  let initialController!: ReadableStreamDefaultController<Uint8Array>;
+  let followController!: ReadableStreamDefaultController<Uint8Array>;
+  const initial = new ReadableStream<Uint8Array>({ start(controller) { initialController = controller; controller.enqueue(new TextEncoder().encode(frame)); } });
+  const follow = new ReadableStream<Uint8Array>({ start(controller) { followController = controller; } });
+  const fetcher = vi.fn(async (url: string | URL | Request) => {
+    if (String(url).endsWith("/api/sdk/v1/messages")) return new Response(initial, { headers: { "Content-Type": "text/event-stream" } });
+    if (String(url).endsWith(`/conversations/${conversationId}`)) return jsonResponse("history-running.json");
+    if (String(url).endsWith("/events")) return new Response(follow, { headers: { "Content-Type": "text/event-stream" } });
+    throw new Error(String(url));
+  });
+  const client = new AgoClient({ baseUrl: "https://example.test", fetch: fetcher as typeof fetch });
+  const updates = vi.fn(); const completed = vi.fn();
+  client.on("message:update", updates); client.on("message:complete", completed);
+  const initialUpdate = client.waitFor("message:update", { timeout: 2000 });
+  const send = client.sendMessage("test");
+  await initialUpdate; await client.setActiveConversation(conversationId);
+  expect(fetcher.mock.calls.filter(([url]) => String(url).endsWith("/events"))).toHaveLength(1);
+  const finishFollow = async () => {
+    followController.enqueue(new TextEncoder().encode(fixture("follow-to-final.sse")));
+    followController.close();
+    await settle();
+  };
+  if (completionOrder === "before") await finishFollow();
+  initialController.close(); await send;
+  if (completionOrder === "after") await finishFollow();
+  await settle();
+  expect(fetcher.mock.calls.filter(([url]) => String(url).endsWith("/events"))).toHaveLength(1);
+  expect(completed).toHaveBeenCalledTimes(1);
+  expect(updates.mock.calls.at(-1)?.[0]).toMatchObject({ id: messageId, status: "DONE", content: "The report is complete. Download the published result." });
+  client.destroy();
+});

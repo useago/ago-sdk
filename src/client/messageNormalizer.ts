@@ -40,7 +40,7 @@ type RawMessage = {
   message_id?: string;
   conversation_id?: string;
   content?: string;
-  role?: AgoMessage["role"];
+  role?: AgoMessage["role"] | "system";
   status?: string;
   created_at?: string;
   hidden?: boolean;
@@ -75,6 +75,7 @@ export function normalizeMessage(
   raw: RawMessage,
   conversationId = "",
   complete = false,
+  history = false,
 ): AgoMessage {
   if (
     complete &&
@@ -82,7 +83,9 @@ export function normalizeMessage(
       !raw.id ||
       typeof raw.conversation_id !== "string" ||
       !raw.conversation_id ||
-      (raw.role !== "user" && raw.role !== "assistant") ||
+      (raw.role !== "user" &&
+        raw.role !== "assistant" &&
+        !(history && raw.role === "system" && raw.hidden === true)) ||
       typeof raw.status !== "string" ||
       ![
         "IN_PROGRESS",
@@ -115,7 +118,7 @@ export function normalizeMessage(
     id: raw.id ?? raw.message_id ?? "",
     conversationId: raw.conversation_id ?? conversationId,
     content: raw.content ?? "",
-    role: raw.role ?? "assistant",
+    role: (raw.role ?? "assistant") as AgoMessage["role"],
     status: (raw.status ?? "DONE") as AgoMessage["status"],
     createdAt: new Date(raw.created_at ?? 0),
     hidden: raw.hidden,

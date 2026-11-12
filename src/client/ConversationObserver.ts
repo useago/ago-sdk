@@ -50,6 +50,7 @@ export class ConversationObserver {
   private controller: AbortController | null = null;
   private decisions = new Set<AbortController>();
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private monitoring: symbol | null = null;
   private observed = new Set<string>();
   private completed = new Set<string>();
   private current: AgoMessage | null = null;
@@ -169,6 +170,7 @@ export class ConversationObserver {
 
   private invalidate(): number {
     this.generation++;
+    this.monitoring = null;
     this.controller?.abort();
     this.controller = null;
     for (const controller of this.decisions) controller.abort();
@@ -344,7 +346,8 @@ export class ConversationObserver {
     this.events.complete(message);
   }
   handoff(message: AgoMessage, token: number): void {
-    if (!this.owns(token)) return;
+    if (!this.owns(token) || message.status === "WAITING_CLIENT") return;
+    if (this.current?.id === message.id) message = this.current;
     if (!this.conversationId && message.conversationId)
       this.conversationId = message.conversationId;
     if (
@@ -365,7 +368,7 @@ export class ConversationObserver {
       return;
     this.observed.add(message.id);
     this.current = message;
-    void this.observe(message, token);
+    this.startObservation();
   }
   async activate(id: string | null): Promise<Conversation | null> {
     if (id === null) {
@@ -377,13 +380,31 @@ export class ConversationObserver {
       if (this.loaded) return this.loaded;
       if (!this.activationFailed) {
         const token = this.generation;
-        const response = await this.http.getStream(
-          `/api/sdk/v1/conversations/${id}`,
-        );
-        this.assert(token);
-        const raw = (await response.json()) as RawConversation;
-        this.assert(token);
-        return mapConversation(raw);
+        try {
+          const response = await this.http.getStream(
+            `/api/sdk/v1/conversations/${id}`,
+          );
+          this.assert(token);
+          const raw = (await response.json()) as RawConversation;
+          this.assert(token);
+          if (this.verification && !raw.viewer_id) {
+            this.reset();
+            throw new AgoError(
+              "Unable to verify the current viewer.",
+              "request_detached",
+            );
+          }
+          if (!this.viewer(raw.viewer_id, id)) return null;
+          return mapConversation(raw);
+        } catch (error) {
+          if (!this.owns(token))
+            throw new AgoError(
+              "The request was detached from the conversation.",
+              "request_detached",
+            );
+          this.handleError(error);
+          throw error;
+        }
       }
     }
     if (id !== this.conversationId) this.ownerEpoch++;
@@ -486,7 +507,10 @@ export class ConversationObserver {
         error.type === "authentication_error" ||
         (error.type === "permission_error" &&
           error.code === "insufficient_scope") ||
-        (readScope && error.statusCode === 403))
+        (readScope &&
+          (error.statusCode === 403 ||
+            error.statusCode === 404 ||
+            error.code === "not_found")))
     );
   }
   authorizationError(error: unknown): void {
@@ -572,7 +596,7 @@ export class ConversationObserver {
     }
   }
   startObservation(): void {
-    if (this.current && unfinished(this.current))
+    if (this.current && unfinished(this.current) && !this.monitoring && this.timer === null)
       void this.observe(this.current, this.generation);
   }
   private schedule(fn: () => void, token: number): void {
@@ -584,6 +608,8 @@ export class ConversationObserver {
   }
   private async observe(message: AgoMessage, token: number): Promise<void> {
     if (!this.owns(token)) return;
+    const monitoring = Symbol();
+    this.monitoring = monitoring;
     try {
       if (["WAITING_APPROVAL", "PAUSED"].includes(message.status)) {
         this.schedule(() => void this.status(message.id, token), token);
@@ -622,9 +648,14 @@ export class ConversationObserver {
       this.handleError(error);
       if (this.owns(token))
         this.schedule(() => void this.status(message.id, token), token);
+    } finally {
+      if (this.monitoring === monitoring) this.monitoring = null;
     }
   }
   private async status(id: string, token: number): Promise<void> {
+    if (!this.owns(token)) return;
+    const monitoring = Symbol();
+    this.monitoring = monitoring;
     try {
       const controller = new AbortController();
       this.controller = controller;
@@ -655,6 +686,8 @@ export class ConversationObserver {
       this.handleError(error);
       if (this.owns(token))
         this.schedule(() => void this.status(id, token), token);
+    } finally {
+      if (this.monitoring === monitoring) this.monitoring = null;
     }
   }
   async decide(id: string, decision: "approve" | "reject"): Promise<void> {
