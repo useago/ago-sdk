@@ -365,3 +365,67 @@ describe("useAgoActivity: approvals", () => {
     expect(client.rejectFunction).not.toHaveBeenCalled();
   });
 });
+
+
+it("replaces server activity snapshots, retains live functions and clears on reset", async () => {
+  const client = makeFakeClient();
+  const { ref, emit, root } = await mountHook(client);
+  await emit("message:start", { conversationId: "c1", messageId: "m1" });
+  await emit("function:invoke", { invocationId: "live", functionName: "navigateToPage", arguments: { page: "home" } });
+  const snapshot = { id: "m1", conversationId: "c1", role: "assistant", status: "IN_PROGRESS", content: "", createdAt: new Date() };
+  await emit("message:update", { ...snapshot, toolCalls: [{ id: "server", type: "status_message", status: "completed", message: "private detail" }] });
+  expect(ref.current!.items.map((i) => i.id)).toEqual(["live", "server"]);
+  await emit("message:update", { ...snapshot, toolCalls: [] });
+  expect(ref.current!.items.map((i) => i.id)).toEqual(["live"]);
+  await emit("function:result", { invocationId: "live", result: {} });
+  expect(ref.current!.items[0].status).toBe("done");
+  await emit("message:update", { ...snapshot, toolCalls: [{ id: "live", type: "client_function", status: "completed", functionName: "navigateToPage" }] });
+  expect(ref.current!.items[0].arguments).toBeUndefined();
+  await emit("conversation:update", { conversationId: null, interaction: null });
+  expect(ref.current!.items).toEqual([]);
+  await act(async () => root.unmount());
+});
+
+it("keeps a live approval gate while applying redacted snapshot data", async () => {
+  const client = makeFakeClient();
+  const { ref, emit, root } = await mountHook(client);
+  await emit("message:start", { conversationId: "c1", messageId: "m1" });
+  await emit("function:awaiting-approval", { invocationId: "gate", functionName: "navigateToPage", arguments: { secret: "private" } });
+  const snapshot = { id: "m1", conversationId: "c1", role: "assistant", status: "WAITING_CLIENT", content: "", createdAt: new Date() };
+  await emit("message:update", { ...snapshot, toolCalls: [{ id: "gate", type: "client_function", status: "WAITING_CONFIRMATION" }] });
+  expect(ref.current!.items[0]).toMatchObject({ id: "gate", status: "awaiting-approval", requiresApproval: true });
+  expect(ref.current!.items[0].arguments).toBeUndefined();
+  await act(async () => { await ref.current!.approve("gate"); });
+  expect(client.approveFunction).toHaveBeenCalledWith("gate");
+  await emit("message:update", { ...snapshot, toolCalls: [{ id: "gate", type: "client_function", status: "completed", functionName: "navigateToPage" }] });
+  expect(ref.current!.items[0]).toMatchObject({ status: "done", requiresApproval: false });
+  expect(ref.current!.items[0].arguments).toBeUndefined();
+  await emit("conversation:update", { conversationId: null, interaction: null });
+  expect(ref.current!.items).toEqual([]);
+  await act(async () => root.unmount());
+});
+
+it.each(["reset", "unmount", "client replacement"] as const)("does not restore a submitted form after %s", async (transition) => {
+  const oldClient = makeFakeClient();
+  const newClient = makeFakeClient();
+  let finish!: (value: { status: string }) => void;
+  oldClient.submitToolCallForm.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+  let current = oldClient;
+  let result!: UseAgoActivityResult;
+  function Harness() { result = useAgoActivity({ client: current as unknown as AgoClient }); return null; }
+  const root = createRoot(document.createElement("div"));
+  await act(async () => root.render(<Harness />));
+  let pending!: Promise<void>;
+  await act(async () => { pending = result.submitForm("old-form", {}); });
+  if (transition === "reset") await act(async () => oldClient.emit("conversation:update", { conversationId: null, interaction: null }));
+  if (transition === "unmount") await act(async () => root.unmount());
+  if (transition === "client replacement") {
+    current = newClient;
+    await act(async () => root.render(<Harness />));
+  }
+  await act(async () => { finish({ status: "ok" }); await pending; });
+  if (transition !== "unmount") {
+    expect(result.items).toEqual([]);
+    await act(async () => root.unmount());
+  }
+});

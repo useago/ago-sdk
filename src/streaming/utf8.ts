@@ -1,6 +1,7 @@
 /** Incremental UTF-8 decoder: bytes in, text out, chunk boundaries handled. */
 export interface StreamDecoder {
   decode(chunk: Uint8Array): string;
+  flush(): string;
 }
 
 /**
@@ -12,7 +13,10 @@ export interface StreamDecoder {
 export function createStreamDecoder(): StreamDecoder {
   if (typeof TextDecoder !== "undefined") {
     const decoder = new TextDecoder();
-    return { decode: (chunk) => decoder.decode(chunk, { stream: true }) };
+    return {
+      decode: (chunk) => decoder.decode(chunk, { stream: true }),
+      flush: () => decoder.decode(),
+    };
   }
   return createFallbackDecoder();
 }
@@ -23,6 +27,11 @@ export function createFallbackDecoder(): StreamDecoder {
   let pending: number[] = [];
 
   return {
+    flush() {
+      const result = pending.length ? "\ufffd" : "";
+      pending = [];
+      return result;
+    },
     decode(chunk) {
       const bytes = pending.length > 0 ? [...pending, ...chunk] : chunk;
       pending = [];
@@ -31,7 +40,8 @@ export function createFallbackDecoder(): StreamDecoder {
 
       while (i < bytes.length) {
         const b = bytes[i];
-        const size = b < 0x80 ? 1 : b >= 0xf0 ? 4 : b >= 0xe0 ? 3 : b >= 0xc0 ? 2 : 0;
+        const size =
+          b < 0x80 ? 1 : b >= 0xf0 ? 4 : b >= 0xe0 ? 3 : b >= 0xc0 ? 2 : 0;
 
         // Stray continuation byte: emit the replacement char, like TextDecoder.
         if (size === 0) {
@@ -46,7 +56,8 @@ export function createFallbackDecoder(): StreamDecoder {
 
         let code =
           size === 1 ? b : b & (size === 2 ? 0x1f : size === 3 ? 0x0f : 0x07);
-        for (let k = 1; k < size; k++) code = (code << 6) | (bytes[i + k] & 0x3f);
+        for (let k = 1; k < size; k++)
+          code = (code << 6) | (bytes[i + k] & 0x3f);
         out += String.fromCodePoint(code);
         i += size;
       }

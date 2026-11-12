@@ -1,0 +1,507 @@
+{
+  "contract_status": "proposed; source-checked existing portions; not backend HTTP-verified",
+  "fixture_format": 1,
+  "ids": {
+    "conversation_id": "11111111-1111-4111-8111-111111111111",
+    "assistant_message_id": "33333333-3333-4333-8333-333333333333",
+    "approval_id": "66666666-6666-4666-8666-666666666666"
+  },
+  "clock": "2026-11-10T10:00:04Z",
+  "single_response_cases": [
+    "reject",
+    "approval-rejected",
+    "history-approval-rejected"
+  ],
+  "download_sha256": "6e2a3478a65e30c7f40591613655342e3cb2bd89590be2877f041ca72b2d405e",
+  "cases": [
+    {
+      "case": "history-running",
+      "method": "GET",
+      "path": "/api/sdk/v1/conversations/11111111-1111-4111-8111-111111111111",
+      "request_body_file": null,
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body_file": "history-running.json"
+      }
+    },
+    {
+      "case": "history-preparing",
+      "method": "GET",
+      "path": "/api/sdk/v1/conversations/11111111-1111-4111-8111-111111111111",
+      "request_body_file": null,
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body_file": "history-preparing.json"
+      }
+    },
+    {
+      "case": "history-final",
+      "method": "GET",
+      "path": "/api/sdk/v1/conversations/11111111-1111-4111-8111-111111111111",
+      "request_body_file": null,
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body_file": "history-final.json"
+      }
+    },
+    {
+      "case": "status-running",
+      "method": "GET",
+      "path": "/api/sdk/v1/messages/33333333-3333-4333-8333-333333333333/status",
+      "request_body_file": null,
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body_file": "status-running.json"
+      }
+    },
+    {
+      "case": "history-approval-authorized",
+      "method": "GET",
+      "path": "/api/sdk/v1/conversations/11111111-1111-4111-8111-111111111111",
+      "request_body_file": null,
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body_file": "history-approval-authorized.json"
+      }
+    },
+    {
+      "case": "history-approval-redacted",
+      "method": "GET",
+      "path": "/api/sdk/v1/conversations/11111111-1111-4111-8111-111111111111",
+      "request_body_file": null,
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body_file": "history-approval-redacted.json"
+      }
+    },
+    {
+      "case": "history-approval-approved",
+      "method": "GET",
+      "path": "/api/sdk/v1/conversations/11111111-1111-4111-8111-111111111111",
+      "request_body_file": null,
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body_file": "history-approval-approved.json"
+      }
+    },
+    {
+      "case": "history-approval-rejected",
+      "method": "GET",
+      "path": "/api/sdk/v1/conversations/11111111-1111-4111-8111-111111111111",
+      "request_body_file": null,
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body_file": "history-approval-rejected.json"
+      }
+    },
+    {
+      "case": "approval-authorized",
+      "method": "GET",
+      "path": "/api/sdk/v1/messages/33333333-3333-4333-8333-333333333333/status",
+      "request_body_file": null,
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body_file": "status-approval-authorized.json"
+      }
+    },
+    {
+      "case": "approval-redacted",
+      "method": "GET",
+      "path": "/api/sdk/v1/messages/33333333-3333-4333-8333-333333333333/status",
+      "request_body_file": null,
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body_file": "status-approval-redacted.json"
+      }
+    },
+    {
+      "case": "approval-approved",
+      "method": "GET",
+      "path": "/api/sdk/v1/messages/33333333-3333-4333-8333-333333333333/status",
+      "request_body_file": null,
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body_file": "status-approval-approved.json"
+      }
+    },
+    {
+      "case": "approval-approved-redacted",
+      "method": "GET",
+      "path": "/api/sdk/v1/messages/33333333-3333-4333-8333-333333333333/status",
+      "request_body_file": null,
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body_file": "status-approval-approved-redacted.json"
+      }
+    },
+    {
+      "case": "approval-rejected",
+      "method": "GET",
+      "path": "/api/sdk/v1/messages/33333333-3333-4333-8333-333333333333/status",
+      "request_body_file": null,
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body_file": "status-approval-rejected.json"
+      }
+    },
+    {
+      "case": "status-final",
+      "method": "GET",
+      "path": "/api/sdk/v1/messages/33333333-3333-4333-8333-333333333333/status",
+      "request_body_file": null,
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body_file": "status-final.json"
+      }
+    },
+    {
+      "case": "status-forked",
+      "method": "GET",
+      "path": "/api/sdk/v1/messages/33333333-3333-4333-8333-333333333333/status",
+      "request_body_file": null,
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body_file": "status-forked.json"
+      }
+    },
+    {
+      "case": "send",
+      "method": "POST",
+      "path": "/api/sdk/v1/messages",
+      "request_body_file": "send.request.json",
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          "X-Accel-Buffering": "no"
+        },
+        "body_file": "initial-send.sse",
+        "sse_eof_after_body": true
+      }
+    },
+    {
+      "case": "follow-approval",
+      "method": "GET",
+      "path": "/api/sdk/v1/messages/33333333-3333-4333-8333-333333333333/events",
+      "request_body_file": null,
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          "X-Accel-Buffering": "no"
+        },
+        "body_file": "follow-to-approval.sse",
+        "sse_eof_after_body": true
+      }
+    },
+    {
+      "case": "follow-redacted",
+      "method": "GET",
+      "path": "/api/sdk/v1/messages/33333333-3333-4333-8333-333333333333/events",
+      "request_body_file": null,
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          "X-Accel-Buffering": "no"
+        },
+        "body_file": "follow-approval-redacted.sse",
+        "sse_eof_after_body": true
+      }
+    },
+    {
+      "case": "follow-waiting",
+      "method": "GET",
+      "path": "/api/sdk/v1/messages/33333333-3333-4333-8333-333333333333/events",
+      "request_body_file": null,
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          "X-Accel-Buffering": "no"
+        },
+        "body_file": "follow-approval-authorized.sse",
+        "sse_eof_after_body": true
+      }
+    },
+    {
+      "case": "follow-final",
+      "method": "GET",
+      "path": "/api/sdk/v1/messages/33333333-3333-4333-8333-333333333333/events",
+      "request_body_file": null,
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          "X-Accel-Buffering": "no"
+        },
+        "body_file": "follow-to-final.sse",
+        "sse_eof_after_body": true
+      }
+    },
+    {
+      "case": "follow-final-redacted",
+      "method": "GET",
+      "path": "/api/sdk/v1/messages/33333333-3333-4333-8333-333333333333/events",
+      "request_body_file": null,
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          "X-Accel-Buffering": "no"
+        },
+        "body_file": "follow-to-final-redacted.sse",
+        "sse_eof_after_body": true
+      }
+    },
+    {
+      "case": "status-final-redacted",
+      "method": "GET",
+      "path": "/api/sdk/v1/messages/33333333-3333-4333-8333-333333333333/status",
+      "request_body_file": null,
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body_file": "status-final-redacted.json"
+      }
+    },
+    {
+      "case": "history-final-redacted",
+      "method": "GET",
+      "path": "/api/sdk/v1/conversations/11111111-1111-4111-8111-111111111111",
+      "request_body_file": null,
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body_file": "history-final-redacted.json"
+      }
+    },
+    {
+      "case": "follow-final-baseline",
+      "method": "GET",
+      "path": "/api/sdk/v1/messages/33333333-3333-4333-8333-333333333333/events",
+      "request_body_file": null,
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          "X-Accel-Buffering": "no"
+        },
+        "body_file": "follow-final-baseline.sse",
+        "sse_eof_after_body": true
+      }
+    },
+    {
+      "case": "approve",
+      "method": "POST",
+      "path": "/api/sdk/v1/approvals/66666666-6666-4666-8666-666666666666/decision",
+      "request_body_file": "decision-approve.request.json",
+      "response": {
+        "status": 204,
+        "headers": {},
+        "body_file": null
+      }
+    },
+    {
+      "case": "approve-retry",
+      "method": "POST",
+      "path": "/api/sdk/v1/approvals/66666666-6666-4666-8666-666666666666/decision",
+      "request_body_file": "decision-approve.request.json",
+      "response": {
+        "status": 204,
+        "headers": {},
+        "body_file": null
+      }
+    },
+    {
+      "case": "reject",
+      "method": "POST",
+      "path": "/api/sdk/v1/approvals/66666666-6666-4666-8666-666666666666/decision",
+      "request_body_file": "decision-reject.request.json",
+      "response": {
+        "status": 204,
+        "headers": {},
+        "body_file": null
+      }
+    },
+    {
+      "case": "approval-conflict",
+      "method": "POST",
+      "path": "/api/sdk/v1/approvals/66666666-6666-4666-8666-666666666666/decision",
+      "request_body_file": "decision-approve.request.json",
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body_file": "error-approval-conflict.json"
+      }
+    },
+    {
+      "case": "conversation-busy",
+      "method": "POST",
+      "path": "/api/sdk/v1/messages",
+      "request_body_file": "send.request.json",
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body_file": "error-conversation-busy.json"
+      }
+    },
+    {
+      "case": "unauthorized",
+      "method": "GET",
+      "path": "/api/sdk/v1/conversations/11111111-1111-4111-8111-111111111111",
+      "request_body_file": null,
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body_file": "error-unauthorized.json"
+      }
+    },
+    {
+      "case": "forbidden",
+      "method": "GET",
+      "path": "/api/sdk/v1/conversations/11111111-1111-4111-8111-111111111111",
+      "request_body_file": null,
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body_file": "error-forbidden.json"
+      }
+    },
+    {
+      "case": "fatal-pre-id",
+      "method": "POST",
+      "path": "/api/sdk/v1/messages",
+      "request_body_file": "send.request.json",
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          "X-Accel-Buffering": "no"
+        },
+        "body_file": "fatal-pre-id.sse",
+        "sse_eof_after_body": true
+      }
+    },
+    {
+      "case": "download",
+      "method": "GET",
+      "path": "/fixture-files/background-report.csv",
+      "request_body_file": null,
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "text/csv",
+          "Content-Disposition": "attachment; filename=\"background-report.csv\"",
+          "Content-Length": "82"
+        },
+        "body_file": "files/background-report.csv"
+      }
+    }
+  ],
+  "scenario": {
+    "name": "staff-approval",
+    "initial_phase": "running",
+    "phases": {
+      "running": {
+        "history": "history-running",
+        "status": "status-running",
+        "follow": "follow-approval"
+      },
+      "waiting": {
+        "history": "history-approval-authorized",
+        "status": "approval-authorized",
+        "follow": "follow-waiting"
+      },
+      "approved": {
+        "history": "history-approval-approved",
+        "status": "approval-approved",
+        "follow": "follow-final"
+      },
+      "final": {
+        "history": "history-final",
+        "status": "status-final",
+        "follow": "follow-final-baseline"
+      }
+    },
+    "transitions": [
+      {
+        "trigger": "follow-approval sends its waiting snapshot",
+        "to": "waiting"
+      },
+      {
+        "trigger": "first accepted POST approve",
+        "to": "approved"
+      },
+      {
+        "trigger": "follow-final sends its terminal snapshot",
+        "to": "final"
+      }
+    ]
+  }
+}

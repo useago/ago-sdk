@@ -1,0 +1,9 @@
+{
+  "error": {
+    "type": "invalid_request_error",
+    "code": "approval_conflict",
+    "message": "This approval is expired or has a conflicting decision.",
+    "param": null,
+    "doc_url": "https://docs.useago.com/api/errors#approval_conflict"
+  }
+}

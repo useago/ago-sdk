@@ -66,6 +66,10 @@ export class AgoService {
   /** Observable of complete messages */
   readonly messages$: Observable<AgoMessage>;
 
+  readonly messageUpdates$: Observable<AgoClientEvents["message:update"]>;
+  readonly conversationUpdates$: Observable<AgoClientEvents["conversation:update"]>;
+  readonly connectionStatus$: Observable<AgoClientEvents["connection:status"]>;
+
   /** Observable of streaming chunks */
   readonly chunks$: Observable<{ content: string; conversationId: string; messageId: string }>;
 
@@ -78,6 +82,9 @@ export class AgoService {
   constructor(config: AgoConfig) {
     this.client = new AgoClient(config);
 
+    this.messageUpdates$ = this.fromEvent("message:update");
+    this.conversationUpdates$ = this.fromEvent("conversation:update");
+    this.connectionStatus$ = this.fromEvent("connection:status");
     this.messages$ = this.fromEvent("message:complete");
     this.chunks$ = this.fromEvent("message:chunk");
     this.errors$ = this.fromEvent("message:error");
@@ -132,6 +139,15 @@ export class AgoService {
   /** Get the most recent conversations (first page). */
   getConversations(): Promise<Conversation[]> {
     return this.client.getConversations().then((result) => result.data);
+  }
+
+  /** Load and follow the selected conversation, or detach with null. */
+  setActiveConversation(id: string | null): Promise<Conversation | null> {
+    return this.client.setActiveConversation(id);
+  }
+
+  submitApprovalDecision(id: string, decision: "approve" | "reject"): Promise<void> {
+    return this.client.submitApprovalDecision(id, decision);
   }
 
   /** Get a specific conversation with messages */

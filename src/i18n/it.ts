@@ -109,6 +109,27 @@ export default {
     "noSpeech": "Non è stato registrato alcun audio. Riprovi.",
     "transcriptionFailed": "Trascrizione non riuscita. Riprovi."
   },
+  "responseState": {
+      "progress": "Avanzamento",
+      "activity": "Attività",
+      "truncated": "Attività precedente omessa",
+      "approval": "Revisione richiesta",
+      "waiting": "In attesa di approvazione",
+      "approved": "Approvato",
+      "rejected": "Rifiutato",
+      "expired": "Scaduto",
+      "approve": "Approva",
+      "reject": "Rifiuta",
+      "submitting": "Invio…",
+      "decisionFailed": "Impossibile inviare la decisione. Riprova.",
+      "incomplete": "Incompleto",
+      "failed": "Non riuscito",
+      "paused": "In pausa",
+      "pending": "In attesa",
+      "inProgress": "In corso",
+      "completed": "Completato",
+      "notCompleted": "Non completato"
+  },
   "common": {
     "stopButton": "Interrompi",
     "close": "Chiudi",

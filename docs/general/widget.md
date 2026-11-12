@@ -442,12 +442,30 @@ Microphone access requires HTTPS or localhost. An iframe must allow microphone
 access. Your host page's origin must also be allowed by the tenant. See
 [Speech to text](core.md#speech-to-text) for the underlying SDK method.
 
+### Background work and approval
+
+When your workspace has a background agent, the widget displays its progress,
+waiting state and final report in the open conversation. Published files appear
+as download links. If review is needed, authorized staff see the permitted
+approval actions; other viewers see the waiting state. Staff review requires a
+verified JWT whose email matches an AGO staff account. Configure authentication
+for your workspace before using approval controls.
+
+The widget disables new messages and suggested replies when the conversation's
+interaction policy blocks sending. Closing the bubble or opening Home or History
+suspends background observation; reopen the conversation to see its current
+state. Starting a new conversation or opening another detaches the previous
+background view without canceling its work. For an ordinary active response,
+the widget retains its existing Stop-before-switch behavior. Background
+cancellation, steering and recovery controls are not available here.
+
 ### Stop button
 
-While the agent answers, the send button becomes a **Stop** button that
-interrupts the turn. The stream closes and the backend is told to stop
+When cancellation is available while the agent answers, the send button becomes
+a **Stop** button that interrupts the turn. The stream closes and the backend is told to stop
 generating, so the partial answer stays on screen with status `CANCELED` instead
-of the agent finishing in the background. Set `allowStop: false` to keep the
+of the agent finishing in the background. A response with `canStop: false` does
+not show Stop. When the field is absent, the existing Stop behavior applies. Set `allowStop: false` to keep the
 disabled spinner shown by earlier versions.
 
 ```ts

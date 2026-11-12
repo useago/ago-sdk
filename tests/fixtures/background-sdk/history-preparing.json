@@ -1,0 +1,35 @@
+{
+  "object": "conversation",
+  "id": "11111111-1111-4111-8111-111111111111",
+  "title": "Example report",
+  "created_at": "2026-11-10T10:00:00Z",
+  "last_message_at": "2026-11-10T10:00:01Z",
+  "viewer_id": "viewer-staff-1",
+  "interaction": {
+    "can_send_message": false,
+    "blocking_message_id": null
+  },
+  "messages": [
+    {
+      "object": "message",
+      "id": "22222222-2222-4222-8222-222222222222",
+      "conversation_id": "11111111-1111-4111-8111-111111111111",
+      "content": "Prepare a report and publish the result.",
+      "used_speech_to_text": false,
+      "role": "user",
+      "status": "DONE",
+      "created_at": "2026-11-10T10:00:00Z",
+      "hidden": false,
+      "agent": null,
+      "sources": [],
+      "attachments": [],
+      "tool_call_data": [],
+      "follow_up_replies": [],
+      "progress": null,
+      "approval": null,
+      "outcome": null,
+      "can_stop": false,
+      "background_agent": null
+    }
+  ]
+}

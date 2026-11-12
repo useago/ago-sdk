@@ -33,7 +33,10 @@ import {
   SEND_BACKGROUND,
   SHADOW,
 } from "./styles";
-import type { AudioTranscription, TranscribeAudioOptions } from "../client/types";
+import type {
+  AudioTranscription,
+  TranscribeAudioOptions,
+} from "../client/types";
 import { createSpeechToText } from "./speechToText";
 import type { SpeechToTextLabels } from "./speechToText";
 
@@ -60,7 +63,10 @@ interface BuildInputArgs {
    * enabled Stop button while the agent is answering instead of a dead spinner.
    */
   onStop?: () => void;
-  transcribeAudio?: (file: File, options: TranscribeAudioOptions) => Promise<AudioTranscription>;
+  transcribeAudio?: (
+    file: File,
+    options: TranscribeAudioOptions,
+  ) => Promise<AudioTranscription>;
   speechToTextLabels?: Partial<SpeechToTextLabels>;
   /** Visual preset. Defaults to `classic`. */
   look?: InputLook;
@@ -76,13 +82,16 @@ interface BuildInputArgs {
 export interface InputHandle {
   inputRow: HTMLElement;
   getValueAndClear: () => { content: string; files: File[] };
-  setDisabled: (disabled: boolean) => void;
+  setDisabled: (disabled: boolean, canStop?: boolean) => void;
   focus: () => void;
   blur: () => void;
   restoreDraft: (content: string, files?: File[]) => void;
   /** Swap the placeholder (the bubble widget uses one per screen). */
   setPlaceholder: (text: string) => void;
-  setLabels: (labels: InputLabels, speechLabels?: Partial<SpeechToTextLabels>) => void;
+  setLabels: (
+    labels: InputLabels,
+    speechLabels?: Partial<SpeechToTextLabels>,
+  ) => void;
   setSpeechToTextEnabled: (enabled: boolean) => void;
   cancelRecording: () => void;
   destroy: () => void;
@@ -128,7 +137,9 @@ export function buildInput(args: BuildInputArgs): InputHandle {
   const thumbUrls = new Map<File, string>();
 
   const form = document.createElement("form");
-  form.className = embed ? "ago-chat-input ago-chat-input--embed" : "ago-chat-input";
+  form.className = embed
+    ? "ago-chat-input ago-chat-input--embed"
+    : "ago-chat-input";
   if (embed) {
     css(form, {
       width: "100%",
@@ -293,7 +304,8 @@ export function buildInput(args: BuildInputArgs): InputHandle {
   // button is disabled when there's nothing to send, matching `submit()`.
   let answering = false;
   let dictating = false;
-  const canStop = (): boolean => answering && !!args.onStop;
+  let stopAllowed = true;
+  const canStop = (): boolean => answering && stopAllowed && !!args.onStop;
   const refreshSendBtn = (): void => {
     const hasContent = textarea.value.trim() !== "";
     const stopping = canStop();
@@ -301,7 +313,12 @@ export function buildInput(args: BuildInputArgs): InputHandle {
     sendBtn.disabled = disabled;
     // `type` drives the click: a submit button would send instead of stopping.
     sendBtn.type = stopping ? "button" : "submit";
-    sendBtn.setAttribute("aria-label", stopping ? (args.labels?.stop ?? "Stop generating") : (args.labels?.send ?? "Send"));
+    sendBtn.setAttribute(
+      "aria-label",
+      stopping
+        ? (args.labels?.stop ?? "Stop generating")
+        : (args.labels?.send ?? "Send"),
+    );
     if (embed) {
       sendBtn.replaceChildren(
         stopping ? stopIcon({ size: 16 }) : arrowUpwardIcon({ size: 16 }),
@@ -361,7 +378,12 @@ export function buildInput(args: BuildInputArgs): InputHandle {
     padding: "0",
     minHeight: "20px",
   });
-  let currentFileError: { key: "tooManyFiles" | "invalidFileType" | "fileTooLarge"; values: Record<string, string> } | undefined;
+  let currentFileError:
+    | {
+        key: "tooManyFiles" | "invalidFileType" | "fileTooLarge";
+        values: Record<string, string>;
+      }
+    | undefined;
   errorDismiss.addEventListener("click", () => {
     currentFileError = undefined;
     speech?.clearError();
@@ -374,15 +396,22 @@ export function buildInput(args: BuildInputArgs): InputHandle {
   };
 
   const fill = (template: string, vars: Record<string, string>): string =>
-    template.replace(/\{(\w+)\}/g, (match, key: string) => Object.prototype.hasOwnProperty.call(vars, key) ? vars[key] : match);
+    template.replace(/\{(\w+)\}/g, (match, key: string) =>
+      Object.prototype.hasOwnProperty.call(vars, key) ? vars[key] : match,
+    );
 
   /** The reference's checks, in its order: count, type, size. */
   const acceptFiles = (incoming: File[]): File[] => {
     if (!embed) return incoming;
-    const fileError = (key: "tooManyFiles" | "invalidFileType" | "fileTooLarge", values: Record<string, string>) => {
+    const fileError = (
+      key: "tooManyFiles" | "invalidFileType" | "fileTooLarge",
+      values: Record<string, string>,
+    ) => {
       speech?.clearError();
       currentFileError = { key, values };
-      showFileError(fill(args.labels?.[key] ?? uiCatalog("en").widget[key], values));
+      showFileError(
+        fill(args.labels?.[key] ?? uiCatalog("en").widget[key], values),
+      );
     };
     const accepted: File[] = [];
     for (const file of incoming) {
@@ -395,7 +424,10 @@ export function buildInput(args: BuildInputArgs): InputHandle {
         continue;
       }
       if (file.size > MAX_FILE_SIZE) {
-        fileError("fileTooLarge", { name: file.name, max: humanSize(MAX_FILE_SIZE) });
+        fileError("fileTooLarge", {
+          name: file.name,
+          max: humanSize(MAX_FILE_SIZE),
+        });
         continue;
       }
       accepted.push(file);
@@ -461,7 +493,10 @@ export function buildInput(args: BuildInputArgs): InputHandle {
 
   function thumbFor(file: File): string | null {
     if (!embed || !file.type.startsWith("image/")) return null;
-    if (typeof URL === "undefined" || typeof URL.createObjectURL !== "function") {
+    if (
+      typeof URL === "undefined" ||
+      typeof URL.createObjectURL !== "function"
+    ) {
       return null;
     }
     let url = thumbUrls.get(file);
@@ -545,7 +580,13 @@ export function buildInput(args: BuildInputArgs): InputHandle {
       }
       const remove = document.createElement("button");
       remove.type = "button";
-      remove.setAttribute("aria-label", (args.labels?.removeFile ?? "Remove {filename}").replace("{filename}", () => file.name));
+      remove.setAttribute(
+        "aria-label",
+        (args.labels?.removeFile ?? "Remove {filename}").replace(
+          "{filename}",
+          () => file.name,
+        ),
+      );
       if (embed) remove.appendChild(closeIcon({ size: 16 }));
       else remove.textContent = "×";
       css(remove, {
@@ -616,42 +657,57 @@ export function buildInput(args: BuildInputArgs): InputHandle {
     }
   });
 
-  const speech: ReturnType<typeof createSpeechToText> | undefined = args.transcribeAudio ? createSpeechToText({
-    transcribe: args.transcribeAudio,
-    labels: args.speechToTextLabels,
-    onBusy: (busy) => {
-      const shouldFocus = dictating && !busy && !answering && form.contains(document.activeElement);
-      dictating = busy;
-      textarea.disabled = answering || busy;
-      if (embed) {
-        leftCol.style.display = busy ? "none" : "";
-        rightCol.style.display = busy ? "none" : "flex";
-        row.style.padding = busy ? "8px" : "16px";
-        if (speech) {
-          if (busy) row.append(speech.el);
-          else rightCol.prepend(speech.el);
-        }
-      } else {
-        textarea.style.display = busy ? "none" : "";
-        sendBtn.style.display = busy ? "none" : "flex";
-        if (attachBtn) attachBtn.style.display = busy ? "none" : "flex";
-      }
-      refreshSendBtn();
-      if (shouldFocus) textarea.focus();
-    },
-    onText: (text) => {
-      textarea.value += `${textarea.value && !/\s$/.test(textarea.value) ? " " : ""}${text}`;
-      autoResize();
-      refreshSendBtn();
-      textarea.focus();
-    },
-    onError: (message) => { currentFileError = undefined; showFileError(message); },
-  }) : undefined;
+  const speech: ReturnType<typeof createSpeechToText> | undefined =
+    args.transcribeAudio
+      ? createSpeechToText({
+          transcribe: args.transcribeAudio,
+          labels: args.speechToTextLabels,
+          onBusy: (busy) => {
+            const shouldFocus =
+              dictating &&
+              !busy &&
+              !answering &&
+              form.contains(document.activeElement);
+            dictating = busy;
+            textarea.disabled = answering || busy;
+            if (embed) {
+              leftCol.style.display = busy ? "none" : "";
+              rightCol.style.display = busy ? "none" : "flex";
+              row.style.padding = busy ? "8px" : "16px";
+              if (speech) {
+                if (busy) row.append(speech.el);
+                else rightCol.prepend(speech.el);
+              }
+            } else {
+              textarea.style.display = busy ? "none" : "";
+              sendBtn.style.display = busy ? "none" : "flex";
+              if (attachBtn) attachBtn.style.display = busy ? "none" : "flex";
+            }
+            refreshSendBtn();
+            if (shouldFocus) textarea.focus();
+          },
+          onText: (text) => {
+            textarea.value += `${textarea.value && !/\s$/.test(textarea.value) ? " " : ""}${text}`;
+            autoResize();
+            refreshSendBtn();
+            textarea.focus();
+          },
+          onError: (message) => {
+            currentFileError = undefined;
+            showFileError(message);
+          },
+        })
+      : undefined;
 
   // Embed layout: [ left column: files / textarea / toolbar ] [ send ].
   const leftCol = div({ flex: "1", minWidth: "0" });
   leftCol.className = "ago-chat-input__editor";
-  const rightCol = div({ display: "flex", alignItems: "flex-end", flexShrink: "0", gap: "4px" });
+  const rightCol = div({
+    display: "flex",
+    alignItems: "flex-end",
+    flexShrink: "0",
+    gap: "4px",
+  });
   if (embed) {
     // The error banner lives in the editor column and is display:none until a
     // file is rejected, so the resting card stays 16px + 40px + 16px tall.
@@ -686,7 +742,8 @@ export function buildInput(args: BuildInputArgs): InputHandle {
   return {
     inputRow: form,
     getValueAndClear,
-    setDisabled: (disabled: boolean) => {
+    setDisabled: (disabled: boolean, canStop = true) => {
+      stopAllowed = canStop;
       // The send button also stays disabled when the input is empty; let
       // refreshSendBtn reconcile the answering state with content presence.
       answering = disabled;
@@ -728,7 +785,10 @@ export function buildInput(args: BuildInputArgs): InputHandle {
       errorDismiss.textContent = labels.dismiss;
       errorDismiss.setAttribute("aria-label", labels.dismiss);
       if (currentFileError && errorBox.style.display !== "none") {
-        errorText.textContent = fill(labels[currentFileError.key], currentFileError.values);
+        errorText.textContent = fill(
+          labels[currentFileError.key],
+          currentFileError.values,
+        );
       }
       speech?.setLabels(speechLabels ?? uiCatalog("en").speech);
       renderFiles();

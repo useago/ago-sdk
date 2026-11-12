@@ -157,7 +157,9 @@ export class HttpClient {
     if (config.userEmail) {
       this.headers["X-User-Email"] = config.userEmail;
     }
-    if (config.userJwt) {
+    if (config.userJwt === null) {
+      delete this.headers["Authorization"];
+    } else if (config.userJwt) {
       this.headers["Authorization"] = `Bearer ${config.userJwt}`;
     }
     if (config.permission !== undefined) {
@@ -181,6 +183,53 @@ export class HttpClient {
    */
   async get<T>(path: string): Promise<T> {
     return this.request<T>("GET", path);
+  }
+
+  async getStream(path: string, signal?: AbortSignal): Promise<Response> {
+    try {
+      const response = await this.doFetch(`${this.baseUrl}${path}`, {
+        method: "GET",
+        headers: { ...this.headers },
+        signal,
+      });
+      if (!response.ok) await this.handleErrorResponse(response);
+      return response;
+    } catch (error) {
+      if (error instanceof AgoApiError || isAbortError(error)) throw error;
+      throw new AgoNetworkError(
+        "Network error while observing the conversation.",
+        error instanceof Error ? error : undefined,
+      );
+    }
+  }
+
+  async postNoContent(
+    path: string,
+    body: unknown,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    try {
+      const response = await this.doFetch(`${this.baseUrl}${path}`, {
+        method: "POST",
+        headers: { ...this.headers, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal,
+      });
+      if (!response.ok) await this.handleErrorResponse(response);
+      if (response.status !== 204)
+        throw new AgoApiError(
+          "Unexpected decision response.",
+          "invalid_response",
+          response.status,
+          "api_error",
+        );
+    } catch (error) {
+      if (error instanceof AgoApiError || isAbortError(error)) throw error;
+      throw new AgoNetworkError(
+        "Network error while submitting the decision.",
+        error instanceof Error ? error : undefined,
+      );
+    }
   }
 
   /**

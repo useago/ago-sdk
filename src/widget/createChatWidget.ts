@@ -1,6 +1,8 @@
 import { uiCatalog, withOverrides } from "../i18n";
 import { AgoClient } from "../client/AgoClient";
 import { AgoError } from "../client/errors";
+import { beginBindingActivation, captureBindingPrincipal, isBindingOwner, withBindingOwnership } from "../client/bindingOwnership";
+import { renderResponseState } from "./renderResponseState";
 import type {
   AgoClientEvents,
   AgoConfig,
@@ -62,7 +64,7 @@ import {
   type FeedbackLabels,
   type MessageFeedbackState,
 } from "./renderFeedback";
-import { renderFormNotice, renderMessage } from "./renderMessage";
+import { buildAttachments, renderFormNotice, renderMessage } from "./renderMessage";
 import { buildChatScreen, type ChatScreenHandle } from "./screens/chat";
 import { buildHistoryScreen, type HistoryScreenHandle } from "./screens/history";
 import { buildHomeScreen, type HomeScreenHandle } from "./screens/home";
@@ -358,6 +360,60 @@ export function mountChatWidget(
   // swap a single bubble instead of rebuilding the thread.
   let messageNodes: HTMLElement[] = [];
   let isLoading = false;
+  let interaction: import("../client/types").ConversationInteraction | null = null;
+  let interactionVersion = 0;
+  let messageVersion = 0;
+  let sendVersion = 0;
+  const messageVisibility = new Map<string, boolean>();
+  let hydration: { id: string; epoch: number; identity: number; token?: symbol; sendVersion: number; applied: boolean; updates: Map<string, AgoMessage> } | null = null;
+  let lease: symbol | undefined;
+  let viewEpoch = 0;
+  let identityEpoch = 0;
+  let suspended = false;
+  let allowFreshClaim = false;
+  let sendInFlight = false;
+  let preparingSend = false;
+  let inHostCallback = false;
+  let stopRequested = false;
+  const approvalPending = new Set<string>();
+  const approvalFailed = new Set<string>();
+  const widgetCollectors = new Map<string, FormCollector>();
+  const ownsView = (): boolean => !destroyed && !!lease && isBindingOwner(client, lease);
+  const blocked = (): boolean => inHostCallback || preparingSend || isLoading || interaction?.canSendMessage === false;
+  function claim(id: string | null): Promise<Conversation | null> {
+    const activation = beginBindingActivation(client, () => client.setActiveConversation(id));
+    lease = activation.token;
+    suspended = false;
+    return activation.result;
+  }
+  function detachOwned(): void {
+    if (lease && isBindingOwner(client, lease)) void withBindingOwnership(client, lease, () => client.setActiveConversation(null)).catch(() => {});
+    lease = undefined;
+  }
+  function suspendBackground(): void {
+    if (!isLoading && interaction?.canSendMessage === false) {
+      detachOwned();
+      suspended = true;
+    }
+  }
+  function restoreObservation(): void {
+    if (suspended && conversationId) void loadHistory(conversationId);
+  }
+  function acceptConversation(id: string): boolean {
+    if (!ownsView() || !id) return false;
+    if (id === conversationId) return true;
+    if (sendInFlight) { conversationId = id; return true; }
+    return false;
+  }
+  async function decideApproval(id: string, decision: "approve" | "reject"): Promise<void> {
+    if (!ownsView() || approvalPending.has(id)) return;
+    const epoch = viewEpoch, identity = identityEpoch, token = lease;
+    approvalPending.add(id); approvalFailed.delete(id); render();
+    try { await client.submitApprovalDecision(id, decision); }
+    catch { if (epoch === viewEpoch && identity === identityEpoch && token === lease && ownsView() && messages.some((m) => m.approval?.id === id)) approvalFailed.add(id); }
+    finally { if (epoch === viewEpoch && identity === identityEpoch && token === lease && ownsView()) { approvalPending.delete(id); render(); } }
+  }
+
   let errorMessage: string | null = null;
   // Handle for the streamed-welcome typewriter, so it can be canceled when the
   // user sends a message mid-stream or the widget is destroyed.
@@ -984,7 +1040,7 @@ export function mountChatWidget(
     }
   };
   const followUpHandler =
-    onFollowUpClick === false ? undefined : (onFollowUpClick ?? sendFollowUp);
+    onFollowUpClick === false ? undefined : (reply: string) => { if (!blocked()) (onFollowUpClick ?? sendFollowUp)(reply); };
 
   // ── Feedback ───────────────────────────────────────────────────────
   const feedbackOptions = feedback === true ? {} : feedback || null;
@@ -1019,13 +1075,17 @@ export function mountChatWidget(
       feedbackStates.set(message.id, state);
     }
 
+    const epoch = viewEpoch, identity = identityEpoch, token = lease;
+    const current = (): boolean => ownsView() && epoch === viewEpoch && identity === identityEpoch && token === lease;
     /** Resolves true once the API accepted the report. */
     const report = async (
       rating: FeedbackRating,
       details?: { reasons: FeedbackReason[]; comment: string },
     ): Promise<boolean> => {
+      if (!current()) return false;
       try {
         await client.submitFeedback(message.id, rating, details);
+        if (!current()) return false;
         feedbackOptions.onSubmit?.({
           messageId: message.id,
           rating,
@@ -1034,6 +1094,7 @@ export function mountChatWidget(
         });
         return true;
       } catch (error) {
+        if (!current()) return false;
         feedbackOptions.onError?.(
           error instanceof Error ? error : new Error(String(error)),
         );
@@ -1211,6 +1272,8 @@ export function mountChatWidget(
   function ticketFormEntry(call: ToolCallData, toolCallLabels: ToolCallFormLabels): ToolCallEntry {
     const existing = toolCallViews.get(call.id);
     if (existing) return existing;
+    const epoch = viewEpoch, identity = identityEpoch, token = lease;
+    const current = (): boolean => ownsView() && epoch === viewEpoch && identity === identityEpoch && token === lease;
     let entry: ToolCallEntry;
     if (call.allowedToCreateTicket === false) {
       const wrap = div({ display: "flex", flexDirection: "column", gap: "16px" });
@@ -1231,6 +1294,7 @@ export function mountChatWidget(
         message: call.message,
         successMessage: toolCallFormOptions.successMessage || toolCallFormOptions.labels?.embeddedFormSubmitted || ticketForm?.successMessageText,
         onSubmitted: (captured) => {
+          if (!current()) return;
           submittedToolCalls.add(call.id);
           void client
             .submitToolCallForm(call.id, {
@@ -1240,6 +1304,7 @@ export function mountChatWidget(
               captured_form_data: captured,
             })
             .then((response) => {
+              if (!current()) return;
               const raw =
                 response.ticket ??
                 (response.result as { ticket?: { ticket_id?: string; ticket_url?: string } } | undefined)
@@ -1255,12 +1320,13 @@ export function mountChatWidget(
               });
             })
             .catch((error: unknown) => {
+              if (!current()) return;
               toolCallFormOptions.onError?.(
                 error instanceof Error ? error : new Error(String(error)),
               );
             })
             .finally(() => {
-              if (!destroyed) render();
+              if (current()) render();
             });
         },
       });
@@ -1279,7 +1345,7 @@ export function mountChatWidget(
         successMessage: toolCallFormOptions.successMessage || toolCallFormOptions.labels?.ticketSubmitted,
         successUrlLabel: toolCallFormOptions.successUrlLabel || toolCallFormOptions.labels?.findTicketHere,
         createTicket: (payload) =>
-          client.createTicket({
+          current() ? client.createTicket({
             subject: payload.subject,
             body: payload.body,
             priority: payload.priority,
@@ -1289,8 +1355,9 @@ export function mountChatWidget(
             customFields: payload.customFields,
             files: payload.files,
             ticketFormId: payload.ticketFormId,
-          }),
+          }) : Promise.reject(new AgoError("The request was detached from the conversation.", "request_detached")),
         onCreated: (result, formState) => {
+          if (!current()) return;
           submittedToolCalls.add(call.id);
           const customFields = Object.entries(formState.customFields).map(
             ([id, value]) => ({ id, value }),
@@ -1309,11 +1376,13 @@ export function mountChatWidget(
               created_at: new Date().toISOString(),
             })
             .catch((error: unknown) => {
+              if (!current()) return;
               toolCallFormOptions.onError?.(
                 error instanceof Error ? error : new Error(String(error)),
               );
             })
             .finally(() => {
+              if (!current()) return;
               toolCallFormOptions.onSubmitted?.({
                 toolCallId: call.id,
                 toolName: call.toolName,
@@ -1328,7 +1397,7 @@ export function mountChatWidget(
               if (!destroyed) render();
             });
         },
-        onError: toolCallFormOptions.onError,
+        onError: (error) => { if (current()) toolCallFormOptions.onError?.(error); },
       });
       entry = { kind: "ticket", state, view, call, hydrated: !!ticketForm };
     }
@@ -1469,11 +1538,14 @@ export function mountChatWidget(
   function renderOne(index: number): HTMLElement {
     const message = messages[index];
     if (!isBubble) {
-      return renderMessage(message, { ...messageOpts(index), renderToolCall });
+      const node = renderMessage(message, { ...messageOpts(index), renderToolCall });
+      const state = message.role === "assistant" && renderResponseState(message, text.responseState, !!message.approval && approvalPending.has(message.approval.id), !!message.approval && approvalFailed.has(message.approval.id), (id, decision) => void decideApproval(id, decision));
+      if (state) node.prepend(state);
+      return node;
     }
-    return renderEmbedMessage(message, {
+    const node = renderEmbedMessage(message, {
       isLast: index === messages.length - 1,
-      followUpEnabled,
+      followUpEnabled: followUpEnabled && !blocked(),
       followUpHandler,
       agentRowTinted: !!theme?.agentBubbleBg,
       agentRowTextTinted: !!theme?.agentBubbleText,
@@ -1481,6 +1553,10 @@ export function mountChatWidget(
       actionsRow: buildFeedback(message),
       renderToolCall,
     });
+    const state = message.role === "assistant" && renderResponseState(message, text.responseState, !!message.approval && approvalPending.has(message.approval.id), !!message.approval && approvalFailed.has(message.approval.id), (id, decision) => void decideApproval(id, decision));
+    if (state) node.append(state);
+    if (message.role === "assistant" && message.attachments?.length) node.append(buildAttachments(message.attachments, { isUser: false, cardBackground: PANEL_BACKGROUND, cardColor: TEXT_COLOR }));
+    return node;
   }
 
   /** Presentation options for the bubble at `index`. Shared by both render paths. */
@@ -1494,7 +1570,7 @@ export function mountChatWidget(
       bubbleStyle,
       showAgentName,
       agentBubble,
-      followUpEnabled,
+      followUpEnabled: followUpEnabled && !blocked(),
       followUpHandler,
       // On a small viewport let bubbles run wider to reclaim horizontal space.
       isMobile: !!mobileMQ?.matches,
@@ -1552,7 +1628,7 @@ export function mountChatWidget(
     // Defer live-region announcements while the answer is being written; the
     // completed answer is announced once, when aria-busy clears.
     messagesEl.setAttribute("aria-busy", isAnswering ? "true" : "false");
-    setDisabled(isAnswering);
+    setDisabled(isAnswering || inHostCallback || preparingSend || interaction?.canSendMessage === false, last?.canStop !== false && isLoading && !preparingSend);
     syncBlockedCard();
   }
 
@@ -1648,17 +1724,30 @@ export function mountChatWidget(
   }
 
   const onStart = (data: { conversationId: string }): void => {
+    if (!acceptConversation(data.conversationId)) return;
     if (!conversationId) conversationId = data.conversationId;
   };
   const onChunk = (data: { content: string }): void => {
+    if (!ownsView()) return;
     const target = lastInProgressAssistant();
     if (!target) return;
+    messageVersion++;
     target.content += data.content;
     // Swap just the bubble being written into; fall back to a full render only
     // when the thread shape rules the fast path out (see renderStreamingTail).
     if (!renderStreamingTail()) render();
   };
   const onAnswerComplete = (message: AgoMessage): void => {
+    if (!acceptConversation(message.conversationId)) return;
+    const known = messageVisibility.get(message.id);
+    if (known === false && message.hidden === true) return;
+    if (known === undefined && message.hidden !== undefined) messageVisibility.set(message.id, message.hidden);
+    if (messageVisibility.get(message.id) === true) {
+      messages = messages.filter((entry) => entry.id !== message.id && !entry.id.startsWith("temp-assistant-"));
+      render();
+      return;
+    }
+    messageVersion++;
     // Main answer text is done; follow-up replies may still be streaming. Reveal
     // the answer and flip the streaming assistant message to DONE (adopting the
     // real id so message:complete updates the same entry). Keep isLoading true so
@@ -1681,6 +1770,17 @@ export function mountChatWidget(
     if (!isCompact()) focus();
   };
   const onComplete = (message: AgoMessage): void => {
+    if (!acceptConversation(message.conversationId)) return;
+    messageVersion++;
+    const known = messageVisibility.get(message.id);
+    if (known === false && message.hidden === true) return;
+    if (known === undefined && message.hidden !== undefined) messageVisibility.set(message.id, message.hidden);
+    if (messageVisibility.get(message.id) === true) {
+      messages = messages.filter((entry) => entry.id !== message.id && !entry.id.startsWith("temp-assistant-"));
+      isLoading = false;
+      render();
+      return;
+    }
     const idx = messages.findIndex(
       (m) =>
         m.id === message.id ||
@@ -1702,6 +1802,7 @@ export function mountChatWidget(
   // the backend named the message, and a turn stopped while it was paused on a
   // client function (no stream is open then, so no completion event follows).
   const onStopped = (): void => {
+    if (!ownsView()) return;
     const target = lastInProgressAssistant();
     if (target) {
       if (target.content) target.status = "CANCELED";
@@ -1711,6 +1812,7 @@ export function mountChatWidget(
     render();
   };
   const onError = (data: { error: string }): void => {
+    if (!ownsView()) return;
     errorMessage = data.error;
     isLoading = false;
     messages = messages.filter((m) => !m.id.startsWith("temp-"));
@@ -1755,6 +1857,7 @@ export function mountChatWidget(
   // A generated title lands on the thread list live, so the history screen
   // does not show "New conversation" for a thread that just got named.
   const onTitle = (data: AgoClientEvents["conversation:title"]): void => {
+    if (!ownsView() || data.conversationId !== conversationId) return;
     const thread = threads.find((t) => t.id === data.conversationId);
     if (thread) thread.title = data.title;
     if (isBubble && screen === "history") {
@@ -1767,6 +1870,7 @@ export function mountChatWidget(
   // turn. The final message carries the same call (same id), so the cached
   // form node is reused rather than rebuilt.
   const onToolCall = (call: ToolCallData): void => {
+    if (!ownsView()) return;
     if (call.type !== "form") return;
     const target =
       lastInProgressAssistant() ??
@@ -1780,6 +1884,50 @@ export function mountChatWidget(
     render();
   };
 
+  const onUpdate = (message: AgoMessage): void => {
+    if (!acceptConversation(message.conversationId)) return;
+    messageVersion++;
+    if (hydration?.id === message.conversationId) hydration.updates.set(message.id, message);
+    const index = messages.findIndex((m) => m.id === message.id || (m.id.startsWith("temp-assistant-") && m.role === "assistant"));
+    if (message.hidden !== undefined) messageVisibility.set(message.id, message.hidden);
+    if (messageVisibility.get(message.id) === true) { if (index >= 0) messages.splice(index, 1); }
+    else if (index >= 0) messages[index] = message;
+    else messages.push(message);
+    render();
+  };
+  const onInteraction = (data: AgoClientEvents["conversation:update"]): void => {
+    if (data.conversationId === null) {
+      identityEpoch++; viewEpoch++; lease = undefined; suspended = false; allowFreshClaim = true; messageVisibility.clear(); hydration = null;
+      conversationId = undefined; interaction = null; messages = []; isLoading = false; sendInFlight = false; preparingSend = false;
+      approvalPending.clear(); approvalFailed.clear(); threads.splice(0); session?.clear(); getValueAndClear();
+      for (const collector of widgetCollectors.values()) collector.reset();
+      clearToolCallViews(); feedbackStates.clear(); formNotices.length = 0; errorMessage = null; render();
+      return;
+    }
+    if (!acceptConversation(data.conversationId)) return;
+    interactionVersion++;
+    interaction = data.interaction;
+    render();
+  };
+  const onLoaded = (conversation: Conversation): void => {
+    const current = hydration;
+    if (!current || current.id !== conversation.id || current.epoch !== viewEpoch || current.identity !== identityEpoch || current.token !== lease || current.sendVersion !== sendVersion || !ownsView()) return;
+    const baseline = conversation.messages ?? [];
+    const merged = baseline.map((message) => current.updates.get(message.id) ?? message);
+    for (const [id, message] of current.updates) if (!baseline.some((item) => item.id === id)) merged.push(message);
+    const previousVisibility = new Map(messageVisibility);
+    messageVisibility.clear();
+    for (const message of merged) {
+      const hidden = message.hidden ?? previousVisibility.get(message.id);
+      if (hidden !== undefined) messageVisibility.set(message.id, hidden);
+    }
+    messages = merged.filter((message) => messageVisibility.get(message.id) !== true);
+    current.applied = true;
+    render();
+  };
+  client.on("conversation:loaded", onLoaded);
+  client.on("message:update", onUpdate);
+  client.on("conversation:update", onInteraction);
   client.on("config:changed", onConfigChanged);
   window.addEventListener("online", retryTicketFormConfig);
   window.addEventListener("focus", retryTicketFormConfig);
@@ -1795,17 +1943,34 @@ export function mountChatWidget(
   // Forward form submit outcomes to the optional callbacks. The success notice is
   // still driven by the collector store below; these are additive (and the only
   // way to observe a failure, which never touches the store).
-  const onFormSubmittingEvent = (
-    data: AgoClientEvents["form:submitting"],
-  ): void => onFormSubmitting?.(data);
-  const onFormSubmittedEvent = (
-    data: AgoClientEvents["form:submitted"],
-  ): void => onFormSubmitted?.(data);
-  const onFormErrorEvent = (data: AgoClientEvents["form:error"]): void =>
+  const formScopes = new Map<string, { values: Record<string, unknown>; epoch: number; identity: number; token: symbol | undefined }>();
+  const formCurrent = (name: string, values: Record<string, unknown>): boolean => {
+    const scope = formScopes.get(name);
+    return !!scope && scope.values === values && scope.epoch === viewEpoch && scope.identity === identityEpoch && scope.token === lease && ownsView();
+  };
+  const onFormSubmittingEvent = (data: AgoClientEvents["form:submitting"]): void => {
+    if (!ownsView()) return;
+    formScopes.set(data.name, { values: data.values, epoch: viewEpoch, identity: identityEpoch, token: lease });
+    onFormSubmitting?.(data);
+  };
+  const onFormSubmittedEvent = (data: AgoClientEvents["form:submitted"]): void => {
+    if (!formCurrent(data.name, data.values)) {
+      const collector = widgetCollectors.get(data.name);
+      if (collector) collector.store.set({ ...collector.store.get(), submitted: false, submitResult: undefined });
+      formScopes.delete(data.name);
+      return;
+    }
+    onFormSubmitted?.(data);
+    formScopes.delete(data.name);
+  };
+  const onFormErrorEvent = (data: AgoClientEvents["form:error"]): void => {
+    if (!formCurrent(data.name, data.values)) return;
     onFormError?.(data);
-  if (onFormSubmitting) client.on("form:submitting", onFormSubmittingEvent);
-  if (onFormSubmitted) client.on("form:submitted", onFormSubmittedEvent);
-  if (onFormError) client.on("form:error", onFormErrorEvent);
+    formScopes.delete(data.name);
+  };
+  client.on("form:submitting", onFormSubmittingEvent);
+  client.on("form:submitted", onFormSubmittedEvent);
+  client.on("form:error", onFormErrorEvent);
 
   // ── Form collectors ────────────────────────────────────────────────
   // Inline configs (with `schema`) install synchronously; name-only entries are
@@ -1816,10 +1981,11 @@ export function mountChatWidget(
   // submit or a manual submit_<name>), append a confirmation notice to the chat.
   const installForm = (collector: FormCollector): void => {
     if (formsDestroyed) return;
+    widgetCollectors.set(collector.name, collector);
     uninstallForms.push(collector.install(client));
     let wasSubmitted = collector.store.get().submitted;
     const unsubscribe = collector.store.subscribe((state) => {
-      if (state.submitted && !wasSubmitted) {
+      if (state.submitted && !wasSubmitted && formCurrent(collector.name, state.values as Record<string, unknown>)) {
         // Echo the server's message when the submit response carries one.
         formNotices.push(resolveNoticeText(state.submitResult));
         render();
@@ -1846,15 +2012,26 @@ export function mountChatWidget(
     sendOptions?: { agentId?: string },
   ): Promise<void> {
     const trimmed = content.trim();
-    if (!trimmed || isLoading) return;
+    if (!trimmed || blocked()) return;
+    if (allowFreshClaim) { allowFreshClaim = false; void claim(null).catch(() => {}); }
+    if (!ownsView()) return;
     // Sending from the home screen (composer or a starter card) lands the
     // exchange on the conversation screen.
     if (isBubble && screen !== "chat") {
       cameFrom = "home";
       showScreen("chat", { byUser: true });
     }
-    onMessageSent?.(trimmed);
+    const guard = captureBindingPrincipal(client);
+    const epoch = viewEpoch, identity = identityEpoch, token = lease;
+    preparingSend = true;
+    inHostCallback = true;
+    render();
+    try { onMessageSent?.(trimmed); } catch (error) { preparingSend = false; inHostCallback = false; render(); throw error; } finally { inHostCallback = false; }
+    if (epoch !== viewEpoch || identity !== identityEpoch || token !== lease || !ownsView()) { preparingSend = false; render(); return; }
+    sendVersion++;
     isLoading = true;
+    sendInFlight = true;
+    stopRequested = false;
     errorMessage = null;
     ticketFormError = false;
     // In automatic mode, sending re-attaches even if the reader scrolled away.
@@ -1897,13 +2074,21 @@ export function mountChatWidget(
     if (!autoScrollEnabled) jumpToLatest();
 
     try {
-      const response = await client.sendMessage(trimmed, {
+      const response = await guard(() => {
+        if (epoch !== viewEpoch || identity !== identityEpoch || token !== lease || !ownsView()) throw new AgoError("The request was detached from the conversation.", "request_detached");
+        if (interaction?.canSendMessage === false) throw new AgoError("The conversation is busy.", "conversation_busy");
+        preparingSend = false;
+        render();
+        return withBindingOwnership(client, token!, () => client.sendMessage(trimmed, {
         conversationId,
         files,
         // A dashboard starter can name the agent that answers it; without one
         // the client falls back to the configured default.
         ...(sendOptions?.agentId ? { agentId: sendOptions.agentId } : {}),
+        }));
       });
+      if (epoch !== viewEpoch || identity !== identityEpoch || token !== lease || !ownsView()) return;
+      sendInFlight = false;
       if (response.conversationId) {
         if (!conversationId) conversationId = response.conversationId;
         // Cache the thread + its last message time so the front can resume it next
@@ -1920,7 +2105,7 @@ export function mountChatWidget(
       // A turn stopped before the backend named the message has no id and no
       // text: the placeholder below is simply dropped, leaving the user's
       // message and no empty assistant bubble.
-      if (response.id && !messages.some((m) => m.id === response.id)) {
+      if (response.id && !response.hidden && messageVisibility.get(response.id) !== true && !messages.some((m) => m.id === response.id)) {
         const idx = messages.findIndex(
           (m) => m.id === `temp-assistant-${stamp}`,
         );
@@ -1934,9 +2119,15 @@ export function mountChatWidget(
         isLoading = false;
       }
       render();
+      if ((!panelOpen || (isBubble && screen !== "chat"))) suspendBackground();
       // Keep the exposed thread list current (new thread, bumped last-message date).
       if (loadThreads) void refreshThreads();
     } catch (err) {
+      if (epoch !== viewEpoch || identity !== identityEpoch || token !== lease || !ownsView()) return;
+      sendInFlight = false;
+      preparingSend = false;
+      if (err instanceof AgoError && err.code === "request_detached") return;
+      if (stopRequested) { isLoading = false; messages = messages.filter((m) => !m.id.startsWith("temp-")); render(); return; }
       errorMessage =
         err instanceof Error ? err.message : text.common.sendFailed;
       isLoading = false;
@@ -1954,15 +2145,18 @@ export function mountChatWidget(
   // stays on screen. `onComplete` fires with status CANCELED and clears the
   // loading state, so there is nothing to unwind here.
   async function stop(): Promise<void> {
-    if (!isLoading) return;
+    if (!isLoading || preparingSend || messages[messages.length - 1]?.canStop === false || !ownsView()) return;
+    stopRequested = true;
     await client.stop();
   }
 
   // Load the visitor's conversation list and publish it on `widget.threads`. The
   // array reference is kept stable (mutated in place) so a held reference stays live.
   async function refreshThreads(): Promise<Conversation[]> {
+    const identity = identityEpoch, epoch = viewEpoch;
     try {
       const { data: next } = await client.getConversations();
+      if (destroyed || identity !== identityEpoch || epoch !== viewEpoch) return threads;
       threads.splice(0, threads.length, ...next);
     } catch {
       // Keep the previous list on failure (offline, transient error).
@@ -1981,22 +2175,33 @@ export function mountChatWidget(
   // fetch its history so a reload shows the previous messages, not an empty panel.
   async function loadHistory(id: string): Promise<void> {
     ticketFormError = false;
+    const epoch = viewEpoch, identity = identityEpoch, version = interactionVersion, initialMessages = messageVersion;
+    const current = { id, epoch, identity, token: undefined as symbol | undefined, sendVersion, applied: false, updates: new Map<string, AgoMessage>() };
+    hydration = current;
     try {
-      const conv = await client.getConversation(id);
+      const promise = claim(id);
+      const token = lease;
+      current.token = token;
+      const conv = await promise;
+      if (!conv || epoch !== viewEpoch || identity !== identityEpoch || token !== lease || !ownsView()) return;
       // The visitor moved on (new conversation, another thread) meanwhile.
       if (conversationId !== id) return;
+      if (version === interactionVersion) interaction = conv.interaction ?? null;
       const history = conv?.messages ?? [];
       threadLoading = false;
-      // Skip if the user already started a message while we were loading.
-      if (history.length > 0 && messages.length === 0) {
-        messages = history;
-        render();
-      } else if (isBubble) {
-        render();
+      if (!current.applied && current.sendVersion === sendVersion && initialMessages === messageVersion) {
+        const previousVisibility = new Map(messageVisibility);
+        messageVisibility.clear();
+        for (const message of history) {
+          const hidden = message.hidden ?? previousVisibility.get(message.id);
+          if (hidden !== undefined) messageVisibility.set(message.id, hidden);
+        }
+        messages = history.filter((message) => messageVisibility.get(message.id) !== true);
       }
+      render();
       if (isBubble) session?.setActiveThread(id, conv.lastMessageDate);
     } catch {
-      if (conversationId !== id) return;
+      if (conversationId !== id || epoch !== viewEpoch || identity !== identityEpoch || !ownsView()) return;
       threadLoading = false;
       // Expired, deleted, or offline — forget it and start fresh on the next send.
       if (messages.length === 0) {
@@ -2007,6 +2212,8 @@ export function mountChatWidget(
           render();
         }
       }
+    } finally {
+      if (hydration === current) hydration = null;
     }
   }
 
@@ -2020,7 +2227,7 @@ export function mountChatWidget(
       return;
     }
     if (opts?.byUser) navigatedByUser = true;
-    if (screen !== next) cancelRecording();
+    if (screen !== next) { cancelRecording(); if (next !== "chat") suspendBackground(); }
     screen = next;
     // One composer, moved to whichever screen shows it.
     if (next === "home") {
@@ -2042,6 +2249,7 @@ export function mountChatWidget(
       historyScreen.render({ threads, loading: threadsLoading });
     }
     if (next === "chat") {
+      restoreObservation();
       stickToBottom = true;
       autoScroll();
     }
@@ -2054,7 +2262,10 @@ export function mountChatWidget(
   async function openThread(id: string): Promise<void> {
     if (!isBubble) return;
     cancelRecording();
+    const epoch = ++viewEpoch;
     if (isLoading) await stop();
+    if (epoch !== viewEpoch || destroyed) return;
+    isLoading = false; sendInFlight = false; preparingSend = false; interaction = null; approvalPending.clear(); approvalFailed.clear(); messageVisibility.clear(); hydration = null;
     conversationId = id;
     messages = [];
     errorMessage = null;
@@ -2073,7 +2284,9 @@ export function mountChatWidget(
    */
   function startNewConversation(): void {
     if (isLoading) void stop();
+    viewEpoch++; detachOwned(); void claim(null).catch(() => {}); isLoading = false; sendInFlight = false; preparingSend = false; interaction = null; approvalPending.clear(); approvalFailed.clear();
     conversationId = undefined;
+    messageVisibility.clear(); hydration = null;
     messages = [];
     errorMessage = null;
     formNotices.length = 0;
@@ -2243,6 +2456,7 @@ export function mountChatWidget(
     }, 150);
   }
 
+  if (!conversationId) void claim(null).catch(() => {});
   if (isBubble) {
     showScreen("home");
     render();
@@ -2259,6 +2473,7 @@ export function mountChatWidget(
       void openThread(conversationId);
     } else {
       conversationId = undefined;
+      if (!lease) void claim(null).catch(() => {});
     }
   } else {
     render();
@@ -2305,6 +2520,10 @@ export function mountChatWidget(
       if (teaserTimer) clearTimeout(teaserTimer);
       if (resizeTimer) clearTimeout(resizeTimer);
       teaser?.remove();
+      detachOwned();
+      client.off("conversation:loaded", onLoaded);
+      client.off("message:update", onUpdate);
+      client.off("conversation:update", onInteraction);
       client.off("config:changed", onConfigChanged);
       window.removeEventListener("online", retryTicketFormConfig);
       window.removeEventListener("focus", retryTicketFormConfig);
@@ -2317,9 +2536,9 @@ export function mountChatWidget(
       client.off("conversation:title", onTitle);
       client.off("toolCall:received", onToolCall);
       clearToolCallViews();
-      if (onFormSubmitting) client.off("form:submitting", onFormSubmittingEvent);
-      if (onFormSubmitted) client.off("form:submitted", onFormSubmittedEvent);
-      if (onFormError) client.off("form:error", onFormErrorEvent);
+      client.off("form:submitting", onFormSubmittingEvent);
+      client.off("form:submitted", onFormSubmittedEvent);
+      client.off("form:error", onFormErrorEvent);
       formsDestroyed = true;
       uninstallForms.forEach((fn) => fn());
       mountInto.remove();
@@ -2483,6 +2702,7 @@ export function mountChatWidget(
     teaser?.remove();
     teaser = undefined;
     applyOpenState();
+    restoreObservation();
     // On a compact viewport, focusing the textarea would pop the on-screen
     // keyboard immediately and eat half the panel before anything is read. Move
     // focus into the dialog itself instead, so screen-reader and keyboard users
@@ -2499,6 +2719,7 @@ export function mountChatWidget(
   function closePanel(): void {
     cancelRecording();
     panelOpen = false;
+    suspendBackground();
     applyOpenState();
     onClose?.();
   }

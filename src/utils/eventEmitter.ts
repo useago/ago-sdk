@@ -1,3 +1,14 @@
+type ScopeCheck = () => boolean | Promise<boolean>;
+const emissionScopes = new WeakMap<object, { isCurrent: ScopeCheck; latest?: () => unknown }>();
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function emitScoped<Events extends Record<string, any>, K extends keyof Events>(
+  emitter: EventEmitter<Events>, event: K, data: Events[K], isCurrent: ScopeCheck, latest?: () => Events[K],
+): void {
+  emissionScopes.set(emitter, { isCurrent, latest });
+  try { emitter.emit(event, data); } finally { emissionScopes.delete(emitter); }
+}
+
 type EventHandler<T = unknown> = (data: T) => void;
 
 /**
@@ -25,16 +36,37 @@ export class EventEmitter<Events extends Record<string, any> = Record<string, un
   }
 
   emit<K extends keyof Events>(event: K, data: Events[K]): void {
+    const scope = emissionScopes.get(this);
+    const isCurrent = scope?.isCurrent;
+    emissionScopes.delete(this);
     const eventHandlers = this.handlers.get(event);
-    if (eventHandlers) {
+    if (!eventHandlers) return;
+    if (!isCurrent) {
       eventHandlers.forEach((handler) => {
-        try {
-          handler(data);
-        } catch (error) {
+        try { handler(data); } catch (error) {
           console.error(`Error in event handler for ${String(event)}:`, error);
         }
       });
+      return;
     }
+    const recipients = [...eventHandlers];
+    let index = 0;
+    const deliver = (): void => {
+      while (index < recipients.length) {
+        const allowed = isCurrent();
+        if (allowed instanceof Promise) {
+          void allowed.then((valid) => { if (valid) deliver(); }, () => {});
+          return;
+        }
+        if (!allowed) return;
+        const handler = recipients[index++];
+        if (this.handlers.get(event) !== eventHandlers || !eventHandlers.has(handler)) continue;
+        try { handler(scope?.latest ? scope.latest() : data); } catch (error) {
+          console.error(`Error in event handler for ${String(event)}:`, error);
+        }
+      }
+    };
+    deliver();
   }
 
   /**

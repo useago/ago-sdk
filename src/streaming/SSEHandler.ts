@@ -4,8 +4,9 @@ import type {
   ToolCallData,
   SSEChunkData,
 } from "../client/types";
-import { AgoStreamError } from "../client/errors";
-import { logger } from "../utils/logger";
+import { AgoApiError, AgoError, AgoNetworkError, AgoStreamError, type ApiErrorResponse } from "../client/errors";
+import { mapToolCall, normalizeInteraction, normalizeMessage } from "../client/messageNormalizer";
+import type { ConversationInteraction } from "../client/types";
 import { createStreamDecoder } from "./utf8";
 
 /**
@@ -32,8 +33,17 @@ export interface SSEHandlerCallbacks {
    * the higher-level callbacks below. The verbatim payload, for debugging/logging.
    */
   onRawChunk?: (data: SSEChunkData) => void;
+  onState?: (data: {
+    viewerId: string;
+    interaction: ConversationInteraction;
+    message: AgoMessage;
+  }) => void;
   onStart?: (data: { conversationId: string; messageId: string }) => void;
-  onChunk?: (data: { content: string; conversationId: string; messageId: string }) => void;
+  onChunk?: (data: {
+    content: string;
+    conversationId: string;
+    messageId: string;
+  }) => void;
   onToolCall?: (toolCall: ToolCallData) => void;
   onClientFunction?: (data: {
     invocationId: string;
@@ -90,6 +100,7 @@ export class SSEHandler {
   private sources: AgoSource[] = [];
   private followUpReplies: string[] = [];
   private isFirstChunk = true;
+  private hasSnapshot = false;
   private answerCompleteEmitted = false;
   private waitingClientEmitted = false;
   // Client-function invocations already dispatched this stream: name+arguments
@@ -113,6 +124,9 @@ export class SSEHandler {
 
     const reader = response.body.getReader();
     const decoder = createStreamDecoder();
+    const cancel = () => { void reader.cancel().catch(() => {}); };
+    this.options.signal?.addEventListener("abort", cancel, { once: true });
+    if (this.options.signal?.aborted) cancel();
 
     try {
       while (true) {
@@ -126,18 +140,16 @@ export class SSEHandler {
         this.processBuffer();
       }
 
-      // Process any remaining data
-      if (this.buffer.trim()) {
-        this.processBuffer();
-      }
-
+      this.buffer += decoder.flush();
+      this.processBuffer(true);
+      if (this.options.signal?.aborted) this.message = { ...this.message, status: "CANCELED" };
       return this.buildFinalMessage();
     } catch (error) {
       // The caller closed the stream (see `AgoClient.stop`). Not a failure:
       // finish the message as CANCELED with whatever text already arrived, so
       // the partial answer stays on screen and `onComplete` still fires once.
       if (this.options.signal?.aborted) {
-        this.message.status = "CANCELED";
+        this.message = { ...this.message, status: "CANCELED" };
         return this.buildFinalMessage();
       }
       const streamError =
@@ -149,6 +161,7 @@ export class SSEHandler {
       this.callbacks.onError?.(streamError);
       throw streamError;
     } finally {
+      this.options.signal?.removeEventListener("abort", cancel);
       reader.releaseLock();
     }
   }
@@ -161,11 +174,21 @@ export class SSEHandler {
    */
   private async processWholeBody(response: Response): Promise<AgoMessage> {
     let text = "";
+    let onAbort: (() => void) | undefined;
     try {
-      text = typeof response.text === "function" ? await response.text() : "";
+      const body = typeof response.text === "function" ? response.text() : Promise.resolve("");
+      const signal = this.options.signal;
+      if (signal) {
+        const aborted = new Promise<never>((_, reject) => {
+          onAbort = () => { const error = new Error("The operation was aborted."); error.name = "AbortError"; reject(error); };
+          signal.addEventListener("abort", onAbort, { once: true });
+          if (signal.aborted) onAbort();
+        });
+        text = await Promise.race([body, aborted]);
+      } else text = await body;
     } catch (error) {
       if (this.options.signal?.aborted) {
-        this.message.status = "CANCELED";
+        this.message = { ...this.message, status: "CANCELED" };
         return this.buildFinalMessage();
       }
       const streamError =
@@ -174,6 +197,8 @@ export class SSEHandler {
           : new AgoStreamError("Reading the reply failed. Retry the message.");
       this.callbacks.onError?.(streamError);
       throw streamError;
+    } finally {
+      if (onAbort) this.options.signal?.removeEventListener("abort", onAbort);
     }
 
     if (!text.trim()) {
@@ -184,41 +209,72 @@ export class SSEHandler {
       );
     }
 
-    // A final event may lack its trailing blank line; terminate it.
-    this.buffer += text.endsWith("\n\n") ? text : `${text}\n\n`;
-    this.processBuffer();
-    return this.buildFinalMessage();
+    try {
+      this.buffer += text;
+      this.processBuffer(true);
+      return this.buildFinalMessage();
+    } catch (error) {
+      const streamError = error instanceof Error ? error : new AgoStreamError("Stream processing failed.");
+      this.callbacks.onError?.(streamError);
+      throw streamError;
+    }
   }
 
-  private processBuffer(): void {
-    // SSE messages are separated by double newlines
-    const parts = this.buffer.split("\n\n");
-
-    // Keep the last part (might be incomplete)
-    this.buffer = parts.pop() || "";
-
+  private processBuffer(eof = false): void {
+    // Normalize complete lines only; a trailing CR may be half of CRLF.
+    const normalized = this.buffer
+      .replace(/\r\n/g, "\n")
+      .replace(/\r(?!$)/g, "\n");
+    const parts = normalized.split("\n\n");
+    this.buffer = parts.pop() ?? "";
+    if (eof && this.buffer) {
+      parts.push(this.buffer.replace(/\r$/, "\n"));
+      this.buffer = "";
+    }
     for (const part of parts) {
-      if (!part.trim()) continue;
-
-      // Handle SSE format: "data: {...}" or ": heartbeat"
-      const lines = part.split("\n");
-
-      for (const line of lines) {
-        if (line.startsWith(": ")) {
-          // Comment/heartbeat, ignore
-          continue;
-        }
-
-        if (line.startsWith("data: ")) {
-          const jsonStr = line.slice(6);
-          try {
-            const data = JSON.parse(jsonStr) as SSEChunkData;
-            this.handleChunk(data);
-          } catch (error) {
-            logger.warn("Failed to parse SSE data:", jsonStr, error);
-          }
-        }
+      let event = "";
+      const data: string[] = [];
+      for (const line of part.split("\n")) {
+        if (!line || line.startsWith(":")) continue;
+        const colon = line.indexOf(":");
+        const field = colon < 0 ? line : line.slice(0, colon);
+        let value = colon < 0 ? "" : line.slice(colon + 1);
+        if (value.startsWith(" ")) value = value.slice(1);
+        if (field === "event") event = value;
+        if (field === "data") data.push(value);
       }
+      if (!data.length || (event && event !== "message" && event !== "error"))
+        continue;
+      const payload = JSON.parse(data.join("\n"));
+      if (event === "error")
+        throw AgoApiError.fromResponse(payload as ApiErrorResponse);
+      if (event === "message") {
+        const state = payload as {
+          viewer_id: string;
+          interaction: {
+            can_send_message: boolean;
+            blocking_message_id: string | null;
+          };
+          message: Parameters<typeof normalizeMessage>[0];
+        };
+        if (typeof state.viewer_id !== "string" || !state.viewer_id || !state.interaction ||
+          typeof state.interaction.can_send_message !== "boolean" ||
+          !(state.interaction.blocking_message_id === null || typeof state.interaction.blocking_message_id === "string") ||
+          !state.message || typeof state.message !== "object")
+          throw new AgoStreamError("Invalid message snapshot.");
+        const message = normalizeMessage(state.message, "", true);
+        const interaction = normalizeInteraction(state.interaction);
+        this.hasSnapshot = true;
+        this.message = message;
+        this.sources = message.sources ?? [];
+        this.toolCalls = message.toolCalls ?? [];
+        this.followUpReplies = message.followUpReplies ?? [];
+        this.callbacks.onState?.({
+          viewerId: state.viewer_id,
+          interaction,
+          message,
+        });
+      } else this.handleChunk(payload as SSEChunkData);
     }
   }
 
@@ -342,7 +398,7 @@ export class SSEHandler {
 
     // Handle standard tool call UI events
     if (data.tool_call_data && data.type && data.type !== "client_function") {
-      const toolCall = this.parseToolCall(data);
+      const toolCall = mapToolCall(data as unknown as Record<string, unknown>);
       this.callbacks.onToolCall?.(toolCall);
 
       const existingIndex = this.toolCalls.findIndex((t) => t.id === toolCall.id);
@@ -386,34 +442,9 @@ export class SSEHandler {
     }
   }
 
-  private parseToolCall(data: SSEChunkData): ToolCallData {
-    return {
-      id: data.id || "",
-      type: (data.type as ToolCallData["type"]) || "status_message",
-      status: data.status || "unknown",
-      toolName: data.tool_name || "",
-      toolDisplayName: data.tool_display_name,
-      toolType: data.tool_type ?? undefined,
-      messageId: data.message_id ?? undefined,
-      conversationId: data.thread?.id,
-      message: data.message,
-      formSchema: data.form_schema,
-      data: data.data,
-      functionName: data.function_name,
-      arguments: data.arguments,
-      displayMode: data.display_mode,
-      askToTalkToHuman: data.ask_to_talk_to_human,
-      allowedToCreateTicket: data.allowed_to_create_ticket,
-      ticket: data.ticket,
-      mode: data.mode,
-      ticketFormId: data.ticket_form_id,
-      embedHtml: data.embed_html,
-      embedDescription: data.embed_description,
-    };
-  }
-
   /** Snapshot the accumulated message. Shared by the answer-complete and final builds. */
   private buildMessage(): AgoMessage {
+    if (this.hasSnapshot) return this.message as AgoMessage;
     return {
       id: this.message.id || "",
       conversationId: this.message.conversationId || "",
@@ -433,7 +464,7 @@ export class SSEHandler {
     const message = this.buildMessage();
     // A paused turn is not complete: onComplete stays silent for this stream and
     // fires at the end of the resumed one, so one logical turn completes once.
-    if (message.status !== "WAITING_CLIENT") {
+    if (["DONE", "ERROR", "CANCELED"].includes(message.status)) {
       this.callbacks.onComplete?.(message);
     }
     return message;
@@ -444,6 +475,7 @@ export class SSEHandler {
  * Check if an error is a network error that should trigger polling fallback
  */
 export function isStreamNetworkError(error: Error): boolean {
+  if (error instanceof AgoError && !(error instanceof AgoNetworkError) && !(error instanceof AgoStreamError)) return false;
   const message = error.message.toLowerCase();
   return (
     message.includes("load failed") ||
