@@ -109,6 +109,27 @@ export default {
     "noSpeech": "Es wurde kein Audio aufgenommen. Bitte versuchen Sie es erneut.",
     "transcriptionFailed": "Transkription fehlgeschlagen. Bitte versuchen Sie es erneut."
   },
+  "responseState": {
+      "progress": "Fortschritt",
+      "activity": "Aktivität",
+      "truncated": "Frühere Aktivitäten ausgelassen",
+      "approval": "Prüfung angefordert",
+      "waiting": "Wartet auf Freigabe",
+      "approved": "Genehmigt",
+      "rejected": "Abgelehnt",
+      "expired": "Abgelaufen",
+      "approve": "Genehmigen",
+      "reject": "Ablehnen",
+      "submitting": "Wird gesendet…",
+      "decisionFailed": "Entscheidung konnte nicht gesendet werden. Bitte erneut versuchen.",
+      "incomplete": "Unvollständig",
+      "failed": "Fehlgeschlagen",
+      "paused": "Pausiert",
+      "pending": "Ausstehend",
+      "inProgress": "In Bearbeitung",
+      "completed": "Abgeschlossen",
+      "notCompleted": "Nicht abgeschlossen"
+  },
   "common": {
     "stopButton": "Stoppen",
     "close": "Schließen",

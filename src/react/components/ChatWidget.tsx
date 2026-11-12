@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import type { AgoClient } from "../../client/AgoClient";
+import { AgoError } from "../../client/errors";
 import {
   createFormCollector,
   loadFormCollector,
@@ -22,7 +23,9 @@ import {
 import type { SheetOptions, SheetState } from "../../widget/sheetController";
 import { useAgoActivity } from "../hooks/useAgoActivity";
 import type { AgoActivityItem } from "../hooks/useAgoActivity";
-import { useMessages } from "../hooks/useMessages";
+import { useMessagesInternal } from "../hooks/useMessages";
+import { ResponseState } from "./ResponseState";
+import type { AgoClientEvents, ConversationInteraction } from "../../client/types";
 import { useSheet } from "../hooks/useSheet";
 import { ActivityLine } from "./ActivityLine";
 import { renderInlineMarkdown } from "./inlineMarkdown";
@@ -192,10 +195,42 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
   const isPeek = sheet.compact && sheet.state === "peek";
   const contextClient = useOptionalAgoClient();
   const resolvedClient = client ?? contextClient;
-  const { messages, isLoading, error, sendMessage, stop } = useMessages({
+  const { messages, isLoading, isPreparing, error, sendMessage, stop, conversationId, currentConversation, suspendObservation, resumeObservation, prepareSend } = useMessagesInternal({
     client,
     conversationId: initialConversationId,
-  });
+  }, (message) => onMessageReceived?.({ id: message.id, content: message.content }));
+
+  const [interactions, setInteractions] = useState<Record<string, ConversationInteraction>>({});
+  const interactionRef = useRef<Record<string, ConversationInteraction>>({});
+  const [identityEpoch, setIdentityEpoch] = useState(0);
+  const draftScope = useRef({ client: resolvedClient, conversationId, epoch: 0 });
+  if (draftScope.current.client !== resolvedClient || draftScope.current.conversationId !== conversationId) {
+    const changedView = draftScope.current.client !== resolvedClient || draftScope.current.conversationId !== undefined;
+    draftScope.current = { client: resolvedClient, conversationId, epoch: draftScope.current.epoch + (changedView ? 1 : 0) };
+  }
+  useEffect(() => {
+    interactionRef.current = {};
+    setInteractions({});
+    if (!resolvedClient) return;
+    const update = (data: AgoClientEvents["conversation:update"]) => {
+      if (data.conversationId === null) {
+        interactionRef.current = {};
+        setInteractions({});
+        draftScope.current.epoch++;
+        setIdentityEpoch((epoch) => epoch + 1);
+      } else {
+        interactionRef.current = { ...interactionRef.current, [data.conversationId]: data.interaction };
+        setInteractions(interactionRef.current);
+      }
+    };
+    resolvedClient.on("conversation:update", update);
+    return () => resolvedClient.off("conversation:update", update);
+  }, [resolvedClient]);
+  const interaction = conversationId ? interactions[conversationId] ?? (currentConversation?.id === conversationId ? currentConversation.interaction : undefined) : undefined;
+  useEffect(() => {
+    if (isPeek) suspendObservation(interaction?.canSendMessage === false && interaction.blockingMessageId === null);
+    else resumeObservation();
+  }, [isPeek, messages, isLoading, interaction, suspendObservation, resumeObservation]);
 
   // Install the conversational form collectors for the widget's lifetime.
   // Inline configs (with `schema`) are built synchronously; name-only entries are
@@ -258,18 +293,6 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
     pane.scrollTop = pane.scrollHeight;
   };
 
-  // Callback when message is received
-  useEffect(() => {
-    const lastMessage = messages[messages.length - 1];
-    if (
-      lastMessage &&
-      lastMessage.role === "assistant" &&
-      lastMessage.status === "DONE" &&
-      onMessageReceived
-    ) {
-      onMessageReceived({ id: lastMessage.id, content: lastMessage.content });
-    }
-  }, [messages, onMessageReceived]);
 
   useEffect(() => {
     if (isPeek) setHasUnread(true);
@@ -381,15 +404,41 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
   }, [sheet.isModal, collapse]);
 
     const handleSend = async (content: string, files?: File[]) => {
+    if (interaction?.canSendMessage === false) return false;
     // Sending is an explicit "show me the latest" gesture: re-attach the pane
     // even if the reader had scrolled up to re-read something.
     shouldAutoScrollRef.current = true;
     setAtBottom(true);
-    onMessageSent?.(content);
-    // `sendMessage` resolves to null when the send failed. Reporting that back
-    // lets the composer put the draft back instead of losing what was typed.
-    const result = await sendMessage(content, files);
-    return result !== null;
+    const prepared = prepareSend();
+    if (!prepared) return true;
+    try {
+      onMessageSent?.(content);
+    } catch (error) {
+      prepared.finish();
+      prepared.release();
+      throw error;
+    }
+    try {
+      return await prepared.run(() => {
+        if (!prepared.isCurrent()) {
+          prepared.finish();
+          prepared.release();
+          return true;
+        }
+        if (conversationId && interactionRef.current[conversationId]?.canSendMessage === false) {
+          prepared.finish();
+          prepared.release();
+          return false;
+        }
+        prepared.finish();
+        return sendMessage(content, files).then((result) => result !== null);
+      });
+    } catch (error) {
+      prepared.finish();
+      prepared.release();
+      if (error instanceof AgoError && error.code === "request_detached") return true;
+      return false;
+    }
   };
 
   // The input is blocked only while the agent is generating the main answer.
@@ -401,6 +450,8 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
     isLoading &&
     lastMessage?.role === "assistant" &&
     (lastMessage.status === "IN_PROGRESS" || lastMessage.status === "WAITING_CLIENT");
+
+  const inputBlocked = interaction?.canSendMessage === false || isAnswering || isPreparing;
 
   // What the agent is doing right now. The dots alone say "something is
   // happening" and then vanish as soon as the first token lands, which is
@@ -442,7 +493,7 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
   // Default: clicking a suggested reply sends it as a new user message.
   // `onFollowUpClick={false}` disables interactivity; a function overrides it.
   const handleFollowUpClick =
-    onFollowUpClick === false
+    onFollowUpClick === false || inputBlocked
       ? undefined
       : (onFollowUpClick ?? ((reply: string) => handleSend(reply)));
 
@@ -722,8 +773,8 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
           </div>
         ) : (
           messages.map((message, index) => (
+            <div key={message.id}>
             <Message
-              key={message.id}
               message={message}
               showAgentName={showAgentName}
               isLast={index === messages.length - 1}
@@ -743,6 +794,8 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
                 ) : undefined
               }
             />
+            {message.role === "assistant" && resolvedClient && <ResponseState message={message} client={resolvedClient} labels={text.responseState} />}
+            </div>
           ))
         )}
 
@@ -815,13 +868,14 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
       {/* Input */}
       <ChatInput
         onSend={handleSend}
-        onStop={allowStop ? () => void stop() : undefined}
-        disabled={isAnswering}
+        key={`${identityEpoch}:${draftScope.current.epoch}`}
+        onStop={allowStop && isAnswering && lastMessage?.canStop !== false ? () => void stop() : undefined}
+        disabled={inputBlocked}
         placeholder={placeholder}
         allowFiles={allowFiles}
         speechToText={speechToText}
         client={resolvedClient ?? undefined}
-        scopeKey={`${initialConversationId ?? messages[0]?.conversationId ?? ""}:${sheet.state}`}
+        scopeKey={`${conversationId ?? ""}:${sheet.state}`}
       />
     </div>
   );

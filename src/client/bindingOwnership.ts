@@ -1,3 +1,5 @@
+import { AgoError } from "./errors";
+
 /** Internal coordination between one client and its framework bindings. */
 const owners = new WeakMap<object, symbol>();
 const operations = new WeakMap<object, symbol>();
@@ -44,4 +46,17 @@ export function invalidateBindingOwner(
 ): void {
   if (preserve === undefined || owners.get(client) !== preserve)
     owners.delete(client);
+}
+
+type PrincipalGuard = <T>(effect: () => T) => Promise<Awaited<T>>;
+const principalCaptures = new WeakMap<object, () => PrincipalGuard>();
+
+export function registerBindingPrincipalCapture(client: object, capture: () => PrincipalGuard): void {
+  principalCaptures.set(client, capture);
+}
+
+export function captureBindingPrincipal(client: object): PrincipalGuard {
+  const capture = principalCaptures.get(client);
+  if (!capture) throw new AgoError("Binding principal guard is unavailable for this client.", "binding_guard_unavailable");
+  return capture();
 }

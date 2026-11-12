@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { beginBindingActivation, isBindingOwner, withBindingOwnership } from "../../client/bindingOwnership";
+import { beginBindingActivation, captureBindingPrincipal, invalidateBindingOwner, isBindingOwner, withBindingOwnership } from "../../client/bindingOwnership";
 import { AgoError } from "../../client/errors";
 import type { AgoClient } from "../../client/AgoClient";
 import type { AgoMessage, AgoUploadFile } from "../../client/types";
@@ -41,7 +41,9 @@ export interface UseMessagesResult {
 export function useMessagesInternal({
   client: clientProp,
   conversationId: initialConversationId,
-}: UseMessagesOptions = {}) {
+}: UseMessagesOptions = {}, onAcceptedComplete?: (message: AgoMessage) => void) {
+  const completeCallback = useRef(onAcceptedComplete);
+  completeCallback.current = onAcceptedComplete;
   const contextClient = useOptionalAgoClient();
   const client = clientProp || contextClient;
 
@@ -55,15 +57,25 @@ export function useMessagesInternal({
     initialConversationId
   );
   const [isLoading, setIsLoading] = useState(false);
+  const [isPreparing, setIsPreparing] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
+  const boundClient = useRef(client);
   const owner = useRef<symbol>();
   const viewEpoch = useRef(0);
   const pendingSend = useRef<{ token: symbol; epoch: number; retargeted: boolean }>();
+  const preparing = useRef<symbol>();
+  const resetPending = useRef(false);
   const selected = useRef<string | undefined>(initialConversationId);
+  const latestMessages = useRef(messages);
+  latestMessages.current = messages;
+  const suspended = useRef(false);
   const [currentConversation, setCurrentConversation] = useState<import("../../client/types").Conversation | null>(null);
   const activate = useCallback(async (id: string | null) => {
     viewEpoch.current++;
+    preparing.current = undefined;
+    setIsPreparing(false);
+    suspended.current = false;
     selected.current = id ?? undefined;
     setConversationId(id ?? undefined);
     setMessages([]);
@@ -85,6 +97,20 @@ export function useMessagesInternal({
 
   useEffect(() => {
     const epoch = viewEpoch;
+    if (boundClient.current !== client) {
+      boundClient.current = client;
+      epoch.current++;
+      selected.current = initialConversationId;
+      suspended.current = false;
+      pendingSend.current = undefined;
+      preparing.current = undefined;
+      setIsPreparing(false);
+      setMessages([]);
+      setConversationId(initialConversationId);
+      setCurrentConversation(null);
+      setError(null);
+      setIsLoading(false);
+    }
     if (initialConversationId) void activate(initialConversationId);
     return () => {
       const token = owner.current;
@@ -92,9 +118,15 @@ export function useMessagesInternal({
         void withBindingOwnership(client, token, () => client.setActiveConversation(null)).catch(() => {});
       }
       epoch.current++;
+      preparing.current = undefined;
       owner.current = undefined;
+      suspended.current = false;
     };
   }, [activate, client, initialConversationId]);
+
+  useEffect(() => {
+    resetPending.current = false;
+  });
 
   // Subscribe to message events
   useEffect(() => {
@@ -209,6 +241,7 @@ export function useMessagesInternal({
         return [...prev, message];
       });
       setIsLoading(false);
+      if (message.status === "DONE") completeCallback.current?.(message);
     };
 
     const handleMessageError = (data: { error: string; conversationId?: string }) => {
@@ -255,6 +288,10 @@ export function useMessagesInternal({
     const handleConversationUpdate = (data: import("../../client/types").AgoClientEvents["conversation:update"]) => {
       if (data.conversationId === null) {
         viewEpoch.current++;
+        resetPending.current = true;
+        preparing.current = undefined;
+        setIsPreparing(false);
+        suspended.current = false;
         selected.current = undefined;
         owner.current = undefined;
         setConversationId(undefined); setMessages([]); setCurrentConversation(null); setError(null); setIsLoading(false);
@@ -386,6 +423,68 @@ export function useMessagesInternal({
     [client, conversationId]
   );
 
+  const suspendObservation = useCallback((isPreMessage = false) => {
+    const token = owner.current;
+    const last = [...latestMessages.current].reverse().find((message) => message.role === "assistant");
+    if (suspended.current || !token || !isBindingOwner(client, token) || pendingSend.current || preparing.current || client.isGenerating() || !selected.current || (!isPreMessage && (!last || !["TODO", "IN_PROGRESS", "WAITING_APPROVAL", "PAUSED"].includes(last.status)))) return;
+    viewEpoch.current++;
+    suspended.current = true;
+    void withBindingOwnership(client, token, () => client.setActiveConversation(null)).catch(() => {});
+  }, [client]);
+
+  const resumeObservation = useCallback(() => {
+    const id = selected.current;
+    const previous = owner.current;
+    if (!suspended.current || !id || !previous || !isBindingOwner(client, previous)) return;
+    suspended.current = false;
+    const epoch = ++viewEpoch.current;
+    const activation = beginBindingActivation(client, () => client.setActiveConversation(id));
+    owner.current = activation.token;
+    void activation.result.then((conversation) => {
+      if (viewEpoch.current !== epoch || !isBindingOwner(client, activation.token)) return;
+      setCurrentConversation(conversation);
+      const restored = (conversation?.messages ?? []).filter((message) => !message.hidden);
+      setMessages(restored);
+      const lastAssistant = [...restored].reverse().find((message) => message.role === "assistant");
+      if ((!lastAssistant && conversation?.interaction?.canSendMessage !== false) || (lastAssistant && ["DONE", "ERROR", "CANCELED"].includes(lastAssistant.status))) setIsLoading(false);
+    }).catch((err: unknown) => {
+      if (viewEpoch.current === epoch && isBindingOwner(client, activation.token) && !(err instanceof AgoError && err.code === "request_detached")) setError(err instanceof Error ? err : new Error("Failed to load messages"));
+    });
+  }, [client]);
+
+  const prepareSend = useCallback(() => {
+    if (preparing.current || resetPending.current || boundClient.current !== client || selected.current !== conversationId) return null;
+    const guard = captureBindingPrincipal(client);
+    let token = owner.current;
+    let acquired = false;
+    if (!token || !isBindingOwner(client, token)) {
+      const activation = beginBindingActivation(client, () => Promise.resolve());
+      token = activation.token;
+      owner.current = token;
+      acquired = true;
+    }
+    const epoch = viewEpoch.current;
+    const attempt = Symbol();
+    preparing.current = attempt;
+    setIsPreparing(true);
+    return {
+      run: guard,
+      finish: () => {
+        if (preparing.current === attempt) {
+          preparing.current = undefined;
+          setIsPreparing(false);
+        }
+      },
+      isCurrent: () => boundClient.current === client && viewEpoch.current === epoch && isBindingOwner(client, token),
+      release: () => {
+        if (acquired && isBindingOwner(client, token)) {
+          invalidateBindingOwner(client);
+          if (owner.current === token) owner.current = undefined;
+        }
+      },
+    };
+  }, [client, conversationId]);
+
   const stop = useCallback(async () => {
     await client.stop();
   }, [client]);
@@ -395,15 +494,19 @@ export function useMessagesInternal({
   }, [activate]);
 
   return {
-    messages,
-    isLoading,
-    error,
+    messages: boundClient.current === client ? messages : [],
+    isLoading: boundClient.current === client ? isLoading : false,
+    isPreparing: boundClient.current === client ? isPreparing : false,
+    error: boundClient.current === client ? error : null,
     sendMessage,
     stop,
     clearMessages,
-    conversationId,
-    currentConversation,
+    conversationId: boundClient.current === client ? conversationId : initialConversationId,
+    currentConversation: boundClient.current === client ? currentConversation : null,
     activate,
+    suspendObservation,
+    resumeObservation,
+    prepareSend,
   };
 }
 

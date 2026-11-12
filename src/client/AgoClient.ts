@@ -52,7 +52,7 @@ import type { PageStateBaseline } from "../state/pageStateDelta";
 import { computePageStateDelta } from "../state/pageStateDelta";
 import { SSEHandler } from "../streaming/SSEHandler";
 import { ConversationObserver } from "./ConversationObserver";
-import { currentBindingOperation, invalidateBindingOwner } from "./bindingOwnership";
+import { currentBindingOperation, invalidateBindingOwner, registerBindingPrincipalCapture } from "./bindingOwnership";
 import { mapConversation, type RawConversation } from "./conversationMapping";
 import { appendFile, isNativeFile } from "../utils/uploadFile";
 import { EventEmitter, emitScoped } from "../utils/eventEmitter";
@@ -388,6 +388,14 @@ export class AgoClient {
         this.pausedTurn = null;
       },
     );
+    registerBindingPrincipalCapture(this, () => {
+      const principal = this.observer.principal;
+      return (effect) => {
+        this.observer.assertPrincipalNow(principal);
+        this.observer.retryVerification();
+        return this.observer.withPrincipal(principal, effect);
+      };
+    });
     this.registerActivityContext();
 
     this.functionRegistry.onChange(() => {

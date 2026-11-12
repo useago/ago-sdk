@@ -109,6 +109,27 @@ export default {
     "noSpeech": "No audio was recorded. Please try again.",
     "transcriptionFailed": "Transcription failed. Please try again."
   },
+  "responseState": {
+      "progress": "Progress",
+      "activity": "Activity",
+      "truncated": "Earlier activity omitted",
+      "approval": "Review requested",
+      "waiting": "Waiting for approval",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "expired": "Expired",
+      "approve": "Approve",
+      "reject": "Reject",
+      "submitting": "Submitting…",
+      "decisionFailed": "Could not submit decision. Try again.",
+      "incomplete": "Incomplete",
+      "failed": "Failed",
+      "paused": "Paused",
+      "pending": "Pending",
+      "inProgress": "In progress",
+      "completed": "Completed",
+      "notCompleted": "Not completed"
+  },
   "common": {
     "stopButton": "Stop",
     "close": "Close",

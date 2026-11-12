@@ -10,6 +10,12 @@ export interface UiCatalog {
   timeAgo: TimeAgoLabels;
   feedback: FeedbackLabels;
   speech: SpeechToTextLabels;
+  responseState: {
+    progress: string; activity: string; truncated: string; approval: string; waiting: string;
+    approved: string; rejected: string; expired: string; approve: string; reject: string;
+    submitting: string; decisionFailed: string; incomplete: string; failed: string; paused: string;
+    pending: string; inProgress: string; completed: string; notCompleted: string;
+  };
   common: {
     stopButton: string;
     close: string;
