@@ -1,6 +1,12 @@
 // Main SDK exports
 export { AgoClient } from "./client/AgoClient";
 export type { ResumeGate } from "./client/AgoClient";
+export { AgoConversation } from "./client/AgoConversation";
+export type {
+  AgoConversationEvents,
+  AgoConversationSnapshot,
+  ConversationSendOptions,
+} from "./client/AgoConversation";
 
 // Auto-continue after navigation (framework-agnostic; React/Angular wrap this)
 export { attachAutoContinueAfterNavigation } from "./client/autoContinue";
@@ -31,6 +37,8 @@ export type {
   FeedbackReason,
   FormField,
   FormSchema,
+  FunctionCallState,
+  FunctionCallStatus,
   FunctionDefinition,
   FunctionSchema,
   MessageStatus,

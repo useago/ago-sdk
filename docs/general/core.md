@@ -99,8 +99,11 @@ it was paused on client functions (no stream is open then).
 
 `stop()` resolves with the backend's verdict, or `null` when nothing was
 generating (or when the stop landed before the backend had named the message).
-`isGenerating()` tells you whether there is anything to stop, so a button can
-switch between Send and Stop. A turn paused on client functions
+`stop(conversationId)` stops that conversation only; `stop()` stops the
+conversation on screen (every answer when none is, see
+[the conversation on screen](conversations.md#the-conversation-on-screen)).
+`isGenerating()` (same rule) or `isGenerating(conversationId)` tells you whether there is anything to stop, so
+a button can switch between Send and Stop. A turn paused on client functions
 (`WAITING_CLIENT`) counts as generating and is still stoppable; stopping it also
 cancels the automatic resume.
 
@@ -246,6 +249,9 @@ const thread = await ago.getConversation(conversations[0].id);
 
 const messages = await ago.getMessages(conversations[0].id);
 ```
+
+To keep several conversations answering at once (each with its own Stop), use
+conversation objects: see [Several conversations at once](conversations.md).
 
 ---
 
@@ -516,10 +522,16 @@ Prefer callbacks over raw events? See the
 
 - `sendMessage(content, options?)` → `Promise<AgoMessage>`
   - `options.conversationId?` · `options.agentId?` · `options.files?: File[]`
-- `stop()` → `Promise<StopMessageResult | null>`: stop the turn being generated
-  (`null` when nothing was generating)
+- `stop(conversationId?)` → `Promise<StopMessageResult | null>`: stop that
+  conversation's answer, or every answer without an id (`null` when nothing was
+  generating)
 - `stopMessage(messageId)` → `Promise<StopMessageResult>`: stop a turn by id
-- `isGenerating()` → `boolean`
+- `isGenerating(conversationId?)` → `boolean`: that conversation, or the one on screen
+- `conversation(id?)` → `AgoConversation`: one conversation's messages, answer
+  and Stop ([guide](conversations.md))
+- `setActiveConversation(id | null)`: the conversation on screen (by default
+  the one last sent in or opened); others' client functions are refused
+- `onGeneratingChanged(listener)` → unsubscribe function
 
 ### Audio
 
@@ -565,10 +577,11 @@ Prefer callbacks over raw events? See the
   → `Promise<{ id, url? }>`: file a support ticket (`POST /tickets`, multipart)
 - `getUserIdentity()` → `{ email?, hasJwt }`: how the client identifies the
   visitor (the ticket form asks for an email when it has neither)
-- `submitFormCollector(name, values)` → `Promise<unknown>`: relay form
-  values through the backend, which resolves the destination from the named
-  form's stored definition (used by `createFormCollector` in
-  `{ via: "backend" }` mode)
+- `submitFormCollector(name, values, conversationId?)` → `Promise<unknown>`:
+  relay form values through the backend, which resolves the destination from
+  the named form's stored definition (used by `createFormCollector` in
+  `{ via: "backend" }` mode). AGO links the submission to `conversationId`
+  when it is one of the visitor's conversations
 - `submitFeedback(messageId, "positive" | "negative", details?)`
   - `details.reasons?: FeedbackReason[]` · `details.comment?: string`
 - `submitConversationFeedback(conversationId, rating, details?)` →
