@@ -2,7 +2,7 @@ import { uiCatalog } from "../src/i18n";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildInput } from "../src/widget/buildInput";
 import { mountChatWidget } from "../src/widget/createChatWidget";
-import { createMockClient } from "../src/testing";
+import { createMockClient } from "./widgetMockClient";
 
 class FakeRecorder {
   static instances: FakeRecorder[] = [];

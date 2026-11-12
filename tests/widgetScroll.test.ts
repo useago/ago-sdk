@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgoMessage } from "../src/client/types";
-import { createMockClient } from "../src/testing/createMockClient";
+import { createMockClient } from "./widgetMockClient";
 import { mountChatWidget } from "../src/widget/createChatWidget";
 import type { MountChatWidgetOptions } from "../src/widget/types";
 
