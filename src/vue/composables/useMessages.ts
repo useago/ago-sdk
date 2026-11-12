@@ -30,9 +30,12 @@ export function useMessagesInternal(options: UseMessagesOptions = {}) {
   let viewEpoch = 0;
   let pendingSend: { token: symbol; epoch: number; retargeted: boolean } | undefined;
   let selected = options.conversationId;
+  const visibility = new Map<string, boolean>();
+  const snapshots = new Map<string, AgoMessage>();
   async function activate(id: string | null) {
     viewEpoch++;
     selected = id ?? undefined;
+    visibility.clear(); snapshots.clear();
     conversationId.value = selected;
     messages.value = [];
     currentConversation.value = null;
@@ -44,7 +47,10 @@ export function useMessagesInternal(options: UseMessagesOptions = {}) {
       const conversation = await activation.result;
       if (!isBindingOwner(client, activation.token)) return;
       currentConversation.value = conversation;
-      messages.value = (conversation?.messages ?? []).filter((m) => !m.hidden);
+      for (const message of conversation?.messages ?? []) {
+        if (!visibility.has(message.id)) visibility.set(message.id, !!message.hidden);
+      }
+      messages.value = (conversation?.messages ?? []).filter((m) => !m.hidden && !visibility.get(m.id));
     } catch (err) {
       if (isBindingOwner(client, activation.token) && !(err instanceof AgoError && err.code === "request_detached"))
         error.value = err instanceof Error ? err : new Error("Failed to load messages");
@@ -52,9 +58,17 @@ export function useMessagesInternal(options: UseMessagesOptions = {}) {
   }
   const accepts = (id?: string, allowRetarget = false) => {
     if (owner && !isBindingOwner(client, owner)) return false;
-    if (!id || !selected || selected === id) return true;
+    if (!id || selected === id) return true;
+    if (!selected) {
+      if (allowRetarget && pendingSend && pendingSend.epoch === viewEpoch && isBindingOwner(client, pendingSend.token)) {
+        selected = id;
+        conversationId.value = id;
+      }
+      return true;
+    }
     if (!allowRetarget || !pendingSend || pendingSend.retargeted || pendingSend.epoch !== viewEpoch || !isBindingOwner(client, pendingSend.token)) return false;
     pendingSend.retargeted = true;
+    visibility.clear(); snapshots.clear();
     selected = id;
     conversationId.value = id;
     currentConversation.value = null;
@@ -63,14 +77,17 @@ export function useMessagesInternal(options: UseMessagesOptions = {}) {
   };
   const handleUpdate = (message: AgoMessage) => {
     if (!accepts(message.conversationId, true)) return;
+    const hidden = message.hidden ?? visibility.get(message.id) ?? false;
+    visibility.set(message.id, hidden);
+    snapshots.set(message.id, message);
     const idx = messages.value.findIndex((m) => m.id === message.id);
-    if (message.hidden) messages.value = messages.value.filter((m) => m.id !== message.id);
+    if (hidden) messages.value = messages.value.filter((m) => m.id !== message.id);
     else if (idx < 0) messages.value.push(message);
     else messages.value[idx] = message;
   };
   const handleConversationUpdate = (data: import("../../client/types").AgoClientEvents["conversation:update"]) => {
     if (data.conversationId === null) {
-      viewEpoch++; owner = undefined; selected = undefined; conversationId.value = undefined;
+      viewEpoch++; owner = undefined; selected = undefined; visibility.clear(); snapshots.clear(); conversationId.value = undefined;
       messages.value = []; currentConversation.value = null; error.value = null; isLoading.value = false;
     } else if (accepts(data.conversationId, true) && currentConversation.value?.id === data.conversationId) {
       currentConversation.value = { ...currentConversation.value, interaction: data.interaction };
@@ -78,7 +95,7 @@ export function useMessagesInternal(options: UseMessagesOptions = {}) {
   };
 
   const handleStart = (data: { conversationId: string; messageId: string }) => {
-    if (!accepts(data.conversationId, true)) return;
+    if (!accepts(data.conversationId, true) || visibility.get(data.messageId)) return;
     if (!conversationId.value) {
       selected = data.conversationId;
       conversationId.value = data.conversationId;
@@ -86,7 +103,7 @@ export function useMessagesInternal(options: UseMessagesOptions = {}) {
   };
 
   const handleChunk = (data: { content: string; messageId: string; conversationId: string }) => {
-    if (!accepts(data.conversationId)) return;
+    if (!accepts(data.conversationId) || visibility.get(data.messageId)) return;
     const idx = messages.value.findIndex((m: AgoMessage) => m.id === data.messageId);
     if (idx >= 0) {
       messages.value[idx] = {
@@ -98,6 +115,19 @@ export function useMessagesInternal(options: UseMessagesOptions = {}) {
 
   const handleComplete = (message: AgoMessage) => {
     if (!accepts(message.conversationId)) return;
+    if (!visibility.has(message.id)) visibility.set(message.id, !!message.hidden);
+    if (message.hidden && !visibility.get(message.id)) {
+      const snapshot = snapshots.get(message.id);
+      if (snapshot && ["DONE", "ERROR", "CANCELED"].includes(snapshot.status)) isLoading.value = false;
+      return;
+    }
+    if (visibility.get(message.id)) {
+      messages.value = messages.value.filter((m) => m.id !== message.id && !m.id.startsWith("temp-assistant-"));
+      isLoading.value = false;
+      return;
+    }
+    const snapshot = snapshots.get(message.id);
+    if (snapshot && snapshot !== message && ["DONE", "ERROR", "CANCELED"].includes(snapshot.status)) message = snapshot;
     const idx = messages.value.findIndex((m: AgoMessage) => m.id === message.id);
     if (idx >= 0) {
       messages.value[idx] = message;
@@ -160,7 +190,7 @@ export function useMessagesInternal(options: UseMessagesOptions = {}) {
     client.off("message:error", handleError);
     client.off("message:stopped", handleStopped);
     if (owner && isBindingOwner(client, owner)) void withBindingOwnership(client, owner, () => client.setActiveConversation(null)).catch(() => {});
-    viewEpoch++; owner = undefined;
+    viewEpoch++; owner = undefined; visibility.clear(); snapshots.clear();
   });
 
   async function sendMessage(content: string, files?: AgoUploadFile[]): Promise<AgoMessage | null> {
@@ -201,6 +231,7 @@ export function useMessagesInternal(options: UseMessagesOptions = {}) {
       if ((token && !isBindingOwner(client, token)) || viewEpoch !== epoch) return null;
       const retargeted = !!response.conversationId && response.conversationId !== selected;
       if (retargeted) {
+        visibility.clear(); snapshots.clear();
         selected = response.conversationId;
         conversationId.value = response.conversationId;
         currentConversation.value = null;
@@ -211,7 +242,8 @@ export function useMessagesInternal(options: UseMessagesOptions = {}) {
       // Replace temp messages
       messages.value = messages.value.filter((m: AgoMessage) => !m.id.startsWith("temp-") && (!retargeted || m.conversationId === response.conversationId));
       const updatedUser = { ...userMsg, id: userMsg.id.replace("temp-", "user-"), conversationId: response.conversationId };
-      if (!messages.value.some((m: AgoMessage) => m.id === response.id)) {
+      if (!visibility.has(response.id)) visibility.set(response.id, !!response.hidden);
+      if (!messages.value.some((m: AgoMessage) => m.id === response.id) && !visibility.get(response.id) && !response.hidden) {
         messages.value.push(updatedUser, response);
       } else {
         messages.value.push(updatedUser);

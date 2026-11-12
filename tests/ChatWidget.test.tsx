@@ -1480,3 +1480,20 @@ it("does not resubmit the old draft reentrantly during an authentication reset",
   expect(container.querySelector("textarea")!.value).toBe("");
   await act(async () => root.unmount()); client.destroy();
 });
+
+it("does not render or report hidden completions, and renders an authoritative unhide", async () => {
+  const client = new AgoClient({ baseUrl: "https://example.test" });
+  const received = vi.fn(); const headless = vi.fn();
+  client.on("message:complete", headless);
+  const container = document.createElement("div"); const root = createRoot(container);
+  await act(async () => root.render(<ChatWidget client={client} onMessageReceived={received} />));
+  const bus = (client as unknown as { eventEmitter: { emit: (event: string, value: unknown) => void } }).eventEmitter;
+  const message: AgoMessage = { id: "m", conversationId: "a", role: "assistant", status: "DONE", content: "hidden answer", hidden: true, createdAt: new Date() };
+  await act(async () => { bus.emit("message:start", { conversationId: "a", messageId: "m" }); bus.emit("message:update", message); bus.emit("message:complete", message); });
+  expect(container.textContent).not.toContain("hidden answer");
+  expect(received).not.toHaveBeenCalled();
+  expect(headless).toHaveBeenCalledExactlyOnceWith(message);
+  await act(async () => bus.emit("message:update", { ...message, hidden: false }));
+  expect(container.textContent).toContain("hidden answer");
+  await act(async () => root.unmount()); client.destroy();
+});

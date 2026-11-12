@@ -417,3 +417,143 @@ it.each(["React", "Vue"] as const)("%s ignores a real fork's late follow after n
   expect(fetcher).toHaveBeenCalledTimes(4);
   await dispose(); client.destroy();
 });
+
+it.each(["React", "Vue"] as const)("%s keeps a hidden terminal message hidden after a delayed initial response", async (framework) => {
+  const client = new AgoClient({ baseUrl: "https://example.test" });
+  let resolve!: (message: AgoMessage) => void;
+  vi.spyOn(client, "sendMessage").mockImplementation(() => new Promise((done) => { resolve = done; }));
+  let react!: ReturnType<typeof useChat>;
+  let vue!: ReturnType<typeof useVueChat>;
+  let dispose: () => Promise<void>;
+  if (framework === "React") {
+    function Harness() { react = useChat({ client, autoLoad: false }); return null; }
+    const mounted = await mount(client, Harness);
+    dispose = async () => { await act(async () => mounted.root.unmount()); };
+  } else {
+    const app = createApp(defineComponent({ setup() { vue = useVueChat({ client, autoLoad: false }); return () => h("div"); } }));
+    app.mount(document.createElement("div")); await nextTick();
+    dispose = async () => { app.unmount(); };
+  }
+  let sending!: Promise<AgoMessage | null>;
+  await act(async () => { sending = framework === "React" ? react.sendMessage("go") : vue.sendMessage("go"); });
+  const visible: AgoMessage = { id: "m", conversationId: "a", role: "assistant", status: "IN_PROGRESS", content: "private", hidden: false, createdAt: new Date() };
+  await act(async () => {
+    emit(client, "message:start", { conversationId: "a", messageId: "m" });
+    emit(client, "message:update", { ...visible, status: "DONE", hidden: true });
+    emit(client, "message:complete", { ...visible, status: "DONE", hidden: true });
+  });
+  await nextTick();
+  const messages = () => framework === "React" ? react.messages : vue.messages.value;
+  expect(messages().some((message) => message.id === "m")).toBe(false);
+  await act(async () => { resolve(visible); await sending; }); await nextTick();
+  expect(messages().some((message) => message.id === "m")).toBe(false);
+  await act(async () => emit(client, "message:update", { ...visible, status: "DONE", hidden: false })); await nextTick();
+  expect(messages().find((message) => message.id === "m")?.content).toBe("private");
+  await dispose(); client.destroy();
+});
+
+it.each(["React", "Vue"] as const)("%s clears hidden projection on navigation and identity reset", async (framework) => {
+  const client = new AgoClient({ baseUrl: "https://example.test" });
+  vi.spyOn(client, "setActiveConversation").mockImplementation(async (id) => id ? { id, title: id, lastMessageDate: new Date(), messages: [] } : null);
+  let react!: ReturnType<typeof useChat>;
+  let vue!: ReturnType<typeof useVueChat>;
+  let dispose: () => Promise<void>;
+  if (framework === "React") {
+    function Harness() { react = useChat({ client, conversationId: "a", autoLoad: false }); return null; }
+    const mounted = await mount(client, Harness);
+    dispose = async () => { await act(async () => mounted.root.unmount()); };
+  } else {
+    const app = createApp(defineComponent({ setup() { vue = useVueChat({ client, conversationId: "a", autoLoad: false }); return () => h("div"); } }));
+    app.mount(document.createElement("div")); await nextTick();
+    dispose = async () => { app.unmount(); };
+  }
+  const message: AgoMessage = { id: "m", conversationId: "a", role: "assistant", status: "DONE", content: "hidden", hidden: true, createdAt: new Date() };
+  await act(async () => emit(client, "message:update", message));
+  await act(async () => { await (framework === "React" ? react.selectConversation("b") : vue.selectConversation("b")); });
+  await act(async () => emit(client, "message:complete", { ...message, conversationId: "b", hidden: false, content: "new view" })); await nextTick();
+  const messages = () => framework === "React" ? react.messages : vue.messages.value;
+  expect(messages().find((m) => m.id === "m")?.content).toBe("new view");
+  await act(async () => { emit(client, "message:update", { ...message, conversationId: "b" }); emit(client, "conversation:update", { conversationId: null, interaction: null }); });
+  await act(async () => { emit(client, "message:start", { conversationId: "c", messageId: "m" }); emit(client, "message:complete", { ...message, conversationId: "c", hidden: false, content: "new viewer" }); }); await nextTick();
+  expect(messages().find((m) => m.id === "m")?.content).toBe("new viewer");
+  await dispose(); client.destroy();
+});
+
+it.each(["React", "Vue"] as const)("%s keeps a real observed hidden completion out of the transcript", async (framework) => {
+  const initial = 'event: message\ndata: {"viewer_id":"viewer","interaction":{"can_send_message":false,"blocking_message_id":"m"},"message":{"id":"m","conversation_id":"a","role":"assistant","status":"IN_PROGRESS","content":"initial","hidden":false,"created_at":"2026-01-01T00:00:00Z"}}\n\n';
+  const terminal = 'event: message\ndata: {"viewer_id":"viewer","interaction":{"can_send_message":true,"blocking_message_id":null},"message":{"id":"m","conversation_id":"a","role":"assistant","status":"DONE","content":"private final","hidden":true,"created_at":"2026-01-01T00:00:00Z"}}\n\n';
+  const fetcher = vi.fn(async (url: string | URL | Request) => {
+    if (String(url).endsWith("/messages")) return new Response(initial, { headers: { "Content-Type": "text/event-stream" } });
+    if (String(url).endsWith("/messages/m/events")) return new Response(terminal, { headers: { "Content-Type": "text/event-stream" } });
+    throw new Error(`Unexpected request: ${String(url)}`);
+  });
+  const client = new AgoClient({ baseUrl: "https://example.test", fetch: fetcher as typeof fetch });
+  const realSend = client.sendMessage.bind(client);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  vi.spyOn(client, "sendMessage").mockImplementation(async (...args) => { const result = await realSend(...args); await gate; return result; });
+  let react!: ReturnType<typeof useChat>;
+  let vue!: ReturnType<typeof useVueChat>;
+  let dispose: () => Promise<void>;
+  if (framework === "React") {
+    function Harness() { react = useChat({ client, autoLoad: false }); return null; }
+    const mounted = await mount(client, Harness);
+    dispose = async () => { await act(async () => mounted.root.unmount()); };
+  } else {
+    const app = createApp(defineComponent({ setup() { vue = useVueChat({ client, autoLoad: false }); return () => h("div"); } }));
+    app.mount(document.createElement("div")); await nextTick();
+    dispose = async () => { app.unmount(); };
+  }
+  const done = client.waitFor("message:complete", { timeout: 2000 });
+  let sending!: Promise<AgoMessage | null>;
+  await act(async () => { sending = framework === "React" ? react.sendMessage("hello") : vue.sendMessage("hello"); await done; });
+  await act(async () => { release(); await sending; }); await nextTick();
+  const messages = framework === "React" ? react.messages : vue.messages.value;
+  expect(messages.some((message) => message.id === "m")).toBe(false);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  await dispose(); client.destroy();
+});
+
+it.each(["React", "Vue"] as const)("%s preserves hidden state when a later snapshot omits hidden", async (framework) => {
+  const client = new AgoClient({ baseUrl: "https://example.test" });
+  let react!: ReturnType<typeof useChat>; let vue!: ReturnType<typeof useVueChat>; let dispose: () => Promise<void>;
+  if (framework === "React") {
+    function Harness() { react = useChat({ client, autoLoad: false }); return null; }
+    const mounted = await mount(client, Harness); dispose = async () => { await act(async () => mounted.root.unmount()); };
+  } else {
+    const app = createApp(defineComponent({ setup() { vue = useVueChat({ client, autoLoad: false }); return () => h("div"); } }));
+    app.mount(document.createElement("div")); await nextTick(); dispose = async () => { app.unmount(); };
+  }
+  const message: AgoMessage = { id: "m", conversationId: "a", role: "assistant", status: "DONE", content: "private", hidden: true, createdAt: new Date() };
+  await act(async () => { emit(client, "message:update", message); const { hidden: _hidden, ...omitted } = message; emit(client, "message:update", omitted); }); await nextTick();
+  const messages = () => framework === "React" ? react.messages : vue.messages.value;
+  expect(messages().some((item) => item.id === "m")).toBe(false);
+  await act(async () => emit(client, "message:update", { ...message, id: "legacy", hidden: undefined, content: "visible legacy" })); await nextTick();
+  expect(messages().find((item) => item.id === "legacy")?.content).toBe("visible legacy");
+  await dispose(); client.destroy();
+});
+
+it.each(["React", "Vue"] as const)("%s keeps a newer visible snapshot when an older hidden completion reenters", async (framework) => {
+  const client = new AgoClient({ baseUrl: "https://example.test" });
+  const old: AgoMessage = { id: "m", conversationId: "a", role: "assistant", status: "DONE", content: "old hidden", hidden: true, createdAt: new Date() };
+  const latest = { ...old, content: "new visible", hidden: false };
+  const headless = vi.fn((message: AgoMessage) => emit(client, "message:update", message.id === "m" ? latest : { ...message, content: "newer visible" }));
+  client.on("message:complete", headless);
+  let react!: ReturnType<typeof useChat>; let vue!: ReturnType<typeof useVueChat>; let dispose: () => Promise<void>;
+  if (framework === "React") {
+    function Harness() { react = useChat({ client, autoLoad: false }); return null; }
+    const mounted = await mount(client, Harness); dispose = async () => { await act(async () => mounted.root.unmount()); };
+  } else {
+    const app = createApp(defineComponent({ setup() { vue = useVueChat({ client, autoLoad: false }); return () => h("div"); } }));
+    app.mount(document.createElement("div")); await nextTick(); dispose = async () => { app.unmount(); };
+  }
+  await act(async () => { emit(client, "message:update", old); emit(client, "message:complete", old); }); await nextTick();
+  const messages = framework === "React" ? react.messages : vue.messages.value;
+  expect(messages.find((item) => item.id === "m")).toMatchObject({ content: "new visible", hidden: false });
+  expect(headless).toHaveBeenCalledExactlyOnceWith(old);
+  const olderVisible = { ...old, id: "visible", hidden: false, content: "older visible" };
+  await act(async () => { emit(client, "message:update", olderVisible); emit(client, "message:complete", olderVisible); }); await nextTick();
+  const updated = framework === "React" ? react.messages : vue.messages.value;
+  expect(updated.find((item) => item.id === "visible")?.content).toBe("newer visible");
+  await dispose(); client.destroy();
+});

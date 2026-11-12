@@ -67,6 +67,8 @@ export function useMessagesInternal({
   const preparing = useRef<symbol>();
   const resetPending = useRef(false);
   const selected = useRef<string | undefined>(initialConversationId);
+  const visibility = useRef(new Map<string, boolean>());
+  const snapshots = useRef(new Map<string, AgoMessage>());
   const latestMessages = useRef(messages);
   latestMessages.current = messages;
   const suspended = useRef(false);
@@ -77,6 +79,8 @@ export function useMessagesInternal({
     setIsPreparing(false);
     suspended.current = false;
     selected.current = id ?? undefined;
+    visibility.current.clear();
+    snapshots.current.clear();
     setConversationId(id ?? undefined);
     setMessages([]);
     setCurrentConversation(null);
@@ -88,7 +92,10 @@ export function useMessagesInternal({
       const conversation = await result;
       if (!isBindingOwner(client, token)) return;
       setCurrentConversation(conversation);
-      setMessages((conversation?.messages ?? []).filter((m) => !m.hidden));
+      for (const message of conversation?.messages ?? []) {
+        if (!visibility.current.has(message.id)) visibility.current.set(message.id, !!message.hidden);
+      }
+      setMessages((conversation?.messages ?? []).filter((m) => !m.hidden && !visibility.current.get(m.id)));
     } catch (err) {
       if (isBindingOwner(client, token) && !(err instanceof AgoError && err.code === "request_detached"))
         setError(err instanceof Error ? err : new Error("Failed to load messages"));
@@ -97,10 +104,13 @@ export function useMessagesInternal({
 
   useEffect(() => {
     const epoch = viewEpoch;
+    const currentVisibility = visibility;
     if (boundClient.current !== client) {
       boundClient.current = client;
       epoch.current++;
       selected.current = initialConversationId;
+      visibility.current.clear();
+      snapshots.current.clear();
       suspended.current = false;
       pendingSend.current = undefined;
       preparing.current = undefined;
@@ -120,6 +130,7 @@ export function useMessagesInternal({
       epoch.current++;
       preparing.current = undefined;
       owner.current = undefined;
+      currentVisibility.current.clear();
       suspended.current = false;
     };
   }, [activate, client, initialConversationId]);
@@ -137,10 +148,19 @@ export function useMessagesInternal({
 
     const accepts = (id?: string, allowRetarget = false) => {
       if (owner.current && !isBindingOwner(client, owner.current)) return false;
-      if (!id || !selected.current || selected.current === id) return true;
+      if (!id || selected.current === id) return true;
       const pending = pendingSend.current;
+      if (!selected.current) {
+        if (allowRetarget && pending && pending.epoch === viewEpoch.current && isBindingOwner(client, pending.token)) {
+          selected.current = id;
+          setConversationId(id);
+        }
+        return true;
+      }
       if (!allowRetarget || !pending || pending.retargeted || pending.epoch !== viewEpoch.current || !isBindingOwner(client, pending.token)) return false;
       pending.retargeted = true;
+      visibility.current.clear();
+      snapshots.current.clear();
       selected.current = id;
       setConversationId(id);
       setCurrentConversation(null);
@@ -149,7 +169,7 @@ export function useMessagesInternal({
     };
 
     const handleMessageStart = (data: { conversationId: string; messageId: string }) => {
-      if (!accepts(data.conversationId, true)) return;
+      if (!accepts(data.conversationId, true) || visibility.current.get(data.messageId)) return;
       // Update conversation ID if this is a new conversation
       if (!conversationId) {
         selected.current = data.conversationId;
@@ -194,7 +214,7 @@ export function useMessagesInternal({
       conversationId: string;
       messageId: string;
     }) => {
-      if (!accepts(data.conversationId)) return;
+      if (!accepts(data.conversationId) || visibility.current.get(data.messageId)) return;
       // Append by id, wherever the entry sits. Optimistic `temp-` placeholders
       // never match a real messageId, so hook-initiated sends keep revealing
       // their text at answer-complete, exactly as before.
@@ -209,6 +229,14 @@ export function useMessagesInternal({
 
     const handleAnswerComplete = (message: AgoMessage) => {
       if (!accepts(message.conversationId)) return;
+      if (!visibility.current.has(message.id)) visibility.current.set(message.id, !!message.hidden);
+      if (message.hidden && !visibility.current.get(message.id)) return;
+      if (visibility.current.get(message.id)) {
+        setMessages((prev) => prev.filter((m) => m.id !== message.id && !m.id.startsWith("temp-assistant-")));
+        return;
+      }
+      const snapshot = snapshots.current.get(message.id);
+      if (snapshot && snapshot !== message && ["DONE", "ERROR", "CANCELED"].includes(snapshot.status)) return;
       // Main answer text is done; follow-up replies may still be streaming. Reveal
       // the answer and flip the streaming assistant message to DONE (adopting the
       // real id from the event so message:complete updates the same entry), but
@@ -232,7 +260,16 @@ export function useMessagesInternal({
 
     const handleMessageComplete = (message: AgoMessage) => {
       if (!accepts(message.conversationId)) return;
+      if (!visibility.current.has(message.id)) visibility.current.set(message.id, !!message.hidden);
+      const hidden = visibility.current.get(message.id) === true;
+      const snapshot = snapshots.current.get(message.id);
+      if (message.hidden && !hidden) {
+        if (snapshot && ["DONE", "ERROR", "CANCELED"].includes(snapshot.status)) setIsLoading(false);
+        return;
+      }
+      if (snapshot && snapshot !== message && ["DONE", "ERROR", "CANCELED"].includes(snapshot.status)) message = snapshot;
       setMessages((prev) => {
+        if (hidden) return prev.filter((m) => m.id !== message.id && !m.id.startsWith("temp-assistant-"));
         // Replace the streaming message with the complete one
         const existingIndex = prev.findIndex((m) => m.id === message.id);
         if (existingIndex >= 0) {
@@ -241,7 +278,7 @@ export function useMessagesInternal({
         return [...prev, message];
       });
       setIsLoading(false);
-      if (message.status === "DONE") completeCallback.current?.(message);
+      if (!hidden && message.status === "DONE") completeCallback.current?.(message);
     };
 
     const handleMessageError = (data: { error: string; conversationId?: string }) => {
@@ -278,9 +315,12 @@ export function useMessagesInternal({
 
     const handleUpdate = (message: AgoMessage) => {
       if (!accepts(message.conversationId, true)) return;
+      const hidden = message.hidden ?? visibility.current.get(message.id) ?? false;
+      visibility.current.set(message.id, hidden);
+      snapshots.current.set(message.id, message);
       setMessages((prev) => {
         const index = prev.findIndex((m) => m.id === message.id);
-        if (message.hidden) return prev.filter((m) => m.id !== message.id);
+        if (hidden) return prev.filter((m) => m.id !== message.id);
         if (index < 0) return [...prev, message];
         return prev.map((m, i) => i === index ? message : m);
       });
@@ -293,6 +333,8 @@ export function useMessagesInternal({
         setIsPreparing(false);
         suspended.current = false;
         selected.current = undefined;
+        visibility.current.clear();
+        snapshots.current.clear();
         owner.current = undefined;
         setConversationId(undefined); setMessages([]); setCurrentConversation(null); setError(null); setIsLoading(false);
       } else if (accepts(data.conversationId, true) && data.conversationId === selected.current) {
@@ -366,6 +408,8 @@ export function useMessagesInternal({
 
         const retargeted = !!response.conversationId && response.conversationId !== selected.current;
         if (retargeted) {
+          visibility.current.clear();
+          snapshots.current.clear();
           selected.current = response.conversationId;
           setConversationId(response.conversationId);
           setCurrentConversation(null);
@@ -374,6 +418,9 @@ export function useMessagesInternal({
         if (response.status === "DONE" || response.status === "ERROR" || response.status === "CANCELED") {
           setIsLoading(false);
         }
+
+        if (!visibility.current.has(response.id)) visibility.current.set(response.id, !!response.hidden);
+        const hidden = visibility.current.get(response.id) === true;
 
         // Replace temp messages with real ones.
         // The handleMessageComplete callback may also fire — it uses findIndex
@@ -398,7 +445,7 @@ export function useMessagesInternal({
             );
           }
 
-          return [...filtered, updatedUserMessage, response];
+          return hidden || response.hidden ? [...filtered, updatedUserMessage] : [...filtered, updatedUserMessage, response];
         });
 
         return response;
@@ -437,13 +484,18 @@ export function useMessagesInternal({
     const previous = owner.current;
     if (!suspended.current || !id || !previous || !isBindingOwner(client, previous)) return;
     suspended.current = false;
+    visibility.current.clear();
+    snapshots.current.clear();
     const epoch = ++viewEpoch.current;
     const activation = beginBindingActivation(client, () => client.setActiveConversation(id));
     owner.current = activation.token;
     void activation.result.then((conversation) => {
       if (viewEpoch.current !== epoch || !isBindingOwner(client, activation.token)) return;
       setCurrentConversation(conversation);
-      const restored = (conversation?.messages ?? []).filter((message) => !message.hidden);
+      for (const message of conversation?.messages ?? []) {
+        if (!visibility.current.has(message.id)) visibility.current.set(message.id, !!message.hidden);
+      }
+      const restored = (conversation?.messages ?? []).filter((message) => !message.hidden && !visibility.current.get(message.id));
       setMessages(restored);
       const lastAssistant = [...restored].reverse().find((message) => message.role === "assistant");
       if ((!lastAssistant && conversation?.interaction?.canSendMessage !== false) || (lastAssistant && ["DONE", "ERROR", "CANCELED"].includes(lastAssistant.status))) setIsLoading(false);
