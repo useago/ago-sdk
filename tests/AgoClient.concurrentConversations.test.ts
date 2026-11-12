@@ -86,7 +86,7 @@ describe("two conversations answering at once", () => {
     await b.sent;
   });
 
-  it("stop() with no id stops every answer, and isGenerating() with no id means any", async () => {
+  it("stop() and isGenerating() with no id mean the conversation the user last sent in", async () => {
     const client = makeClient();
     expect(client.isGenerating()).toBe(false);
     const a = await startAnswer(client, "cA");
@@ -94,6 +94,29 @@ describe("two conversations answering at once", () => {
     a.stream.push({ message_id: "mA", thread: { id: "cA" }, content: "a" });
     b.stream.push({ message_id: "mB", thread: { id: "cB" }, content: "b" });
     await flush();
+    expect(client.getActiveConversation()).toBe("cB");
+    expect(client.isGenerating()).toBe(true);
+
+    await client.stop();
+    await b.sent;
+
+    expect(b.stream.signal?.aborted).toBe(true);
+    expect(a.stream.signal?.aborted).toBe(false);
+    expect(client.isGenerating()).toBe(false);
+    expect(client.isGenerating("cA")).toBe(true);
+    a.stream.end();
+    await a.sent;
+  });
+
+  it("stop() and isGenerating() with no id mean every conversation when none is active", async () => {
+    const client = makeClient();
+    client.setActiveConversation(null);
+    const a = await startAnswer(client, "cA");
+    const b = await startAnswer(client, "cB");
+    a.stream.push({ message_id: "mA", thread: { id: "cA" }, content: "a" });
+    b.stream.push({ message_id: "mB", thread: { id: "cB" }, content: "b" });
+    await flush();
+    expect(client.getActiveConversation()).toBeNull();
     expect(client.isGenerating()).toBe(true);
 
     await client.stop();
@@ -287,8 +310,44 @@ describe("client functions of a conversation that is not on screen", () => {
     expect(answer.functionCalls).toBeUndefined();
   });
 
-  it("run as before when no active conversation is set", async () => {
+  it("are refused once the user sent in another conversation, without any setActiveConversation", async () => {
     const { client, handler } = clientWithNavigation();
+    const { sent, stream } = await startAnswer(client, "cA");
+    const b = await startAnswer(client, "cB");
+    expect(client.getActiveConversation()).toBe("cB");
+
+    for (const frame of CLIENT_FUNCTION_FRAMES("cA", "mA")) stream.push(frame);
+    stream.end();
+    await sent;
+    await vi.waitFor(() => expect(server.streams).toHaveLength(3));
+
+    expect(handler).not.toHaveBeenCalled();
+    const submit = server.calls.find((c) => c.url.endsWith("/tool-calls/bag1/submit"));
+    expect(submit?.body?.formData).toMatchObject({
+      result: { performed: false, code: "conversation_not_active" },
+    });
+    server.streams[2].end();
+    b.stream.end();
+    await b.sent;
+  });
+
+  it("follow the conversation opened with getConversation", async () => {
+    const client = makeClient();
+    server.onConversation = () => RAW_CONVERSATION("DONE", "Answer");
+    await client.getConversation("cA");
+    expect(client.getActiveConversation()).toBe("cA");
+    client.conversation("cB").subscribe(() => {});
+    await flush();
+    expect(client.getActiveConversation()).toBe("cA");
+  });
+
+  it("run as before after setActiveConversation(null), whatever the user sends", async () => {
+    const { client, handler } = clientWithNavigation();
+    client.setActiveConversation(null);
+    const b = await startAnswer(client, "cB");
+    b.stream.end();
+    await b.sent;
+    expect(client.getActiveConversation()).toBeNull();
     const invoked = vi.fn();
     client.on("function:invoke", invoked);
 
@@ -296,13 +355,13 @@ describe("client functions of a conversation that is not on screen", () => {
     for (const frame of CLIENT_FUNCTION_FRAMES("cA", "mA")) stream.push(frame);
     stream.end();
     await sent;
-    await vi.waitFor(() => expect(server.streams).toHaveLength(2));
+    await vi.waitFor(() => expect(server.streams).toHaveLength(3));
 
     expect(handler).toHaveBeenCalledWith({ page: "billing" });
     expect(invoked).toHaveBeenCalledWith(
       expect.objectContaining({ invocationId: "bag1", conversationId: "cA", messageId: "mA" }),
     );
-    server.streams[1].end();
+    server.streams[2].end();
   });
 
   it("run when their conversation is the active one", async () => {
@@ -521,6 +580,24 @@ describe("an answer left running by a reload", () => {
     expect(conversationGets()).toHaveLength(gets);
   });
 
+  it("does not hold back a new message: the user moved on, so it is sent at once", async () => {
+    const client = makeClient();
+    const { conversation } = await openReloaded(client, true);
+    expect(conversation.isGenerating()).toBe(true);
+
+    const sent = conversation.sendMessage("still there?");
+    await vi.waitFor(() => expect(server.streams).toHaveLength(1));
+    expect(conversation.getMessages().map((m) => m.content)).toContain("still there?");
+
+    expect(assistant(conversation.getMessages())[0]).toMatchObject({ id: "mA", status: "ERROR" });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(conversationGets()).toHaveLength(1);
+    server.streams[0].push({ message_id: "mB", thread: { id: "cA" }, content: "Yes" });
+    server.streams[0].push({ message_id: "mB", thread: { id: "cA" }, status: "DONE" });
+    server.streams[0].end();
+    expect((await sent).content).toBe("Yes");
+  });
+
   it("is stopped server-side by Stop", async () => {
     const client = makeClient();
     const { conversation } = await openReloaded(client, true);
@@ -561,6 +638,7 @@ describe("conversation object lifetime", () => {
     const client = makeClient();
     const { sent, stream } = await startAnswer(client, "cA");
     const conversation = client.conversation("cA");
+    client.setActiveConversation("cB");
     expect(client.conversation("cA")).toBe(conversation);
     stream.push({ message_id: "mA", thread: { id: "cA" }, content: "x" });
     stream.end();
@@ -576,6 +654,44 @@ describe("conversation object lifetime", () => {
     expect(client.conversation("cA")).toBe(conversation);
     client.setActiveConversation("cB");
     expect(client.conversation("cA")).not.toBe(conversation);
+  });
+});
+
+describe("continueMessage for a turn paused before a reload", () => {
+  async function openPaused(client: AgoClient) {
+    server.onConversation = () => RAW_CONVERSATION("WAITING_CLIENT", "Fill the form");
+    client.setActiveConversation("cA");
+    const onScreen = client.conversation("cA");
+    onScreen.subscribe(() => {});
+    await flush();
+    return onScreen;
+  }
+
+  async function resume(client: AgoClient, conversationId?: string) {
+    const resumed = client.continueMessage("mA", conversationId);
+    await vi.waitFor(() => expect(server.streams).toHaveLength(1));
+    server.streams[0].push({ message_id: "mA", thread: { id: "cA" }, content: " Thanks!" });
+    server.streams[0].push({ status: "DONE" });
+    server.streams[0].end();
+    await resumed;
+  }
+
+  it("streams into the conversation it names", async () => {
+    const client = makeClient();
+    const onScreen = await openPaused(client);
+    await resume(client, "cA");
+    expect(onScreen.getMessages().map((m) => [m.id, m.content])).toEqual([
+      ["u1", "hi"],
+      ["mA", "Fill the form Thanks!"],
+    ]);
+  });
+
+  it("never replaces the conversation object on screen when no conversation is named", async () => {
+    const client = makeClient();
+    const onScreen = await openPaused(client);
+    await resume(client);
+    expect(client.conversation("cA")).toBe(onScreen);
+    expect(onScreen.getMessages().map((m) => m.id)).toEqual(["u1", "mA"]);
   });
 });
 

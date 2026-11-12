@@ -76,6 +76,7 @@ export function createMockClient(
     stopMessage: async () => ({ status: "not_running" }),
     isGenerating: () => false,
     setActiveConversation: () => undefined,
+    _followUser: () => undefined,
     getActiveConversation: () => null,
     onGeneratingChanged: () => () => undefined,
     resumePendingClientFunctions: async () => null,

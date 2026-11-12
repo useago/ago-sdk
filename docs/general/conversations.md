@@ -50,10 +50,12 @@ an answer.
 
 ## The conversation on screen
 
-Tell the client which conversation the user is looking at:
+The client tracks it for you: it is the conversation the user last sent a
+message in, opened with `ago.getConversation(id)`, or shows with
+`useConversationChat`. To name it yourself (this turns the tracking off):
 
 ```ts
-ago.setActiveConversation(conversationId); // null (the default) refuses nothing
+ago.setActiveConversation(conversationId); // null refuses nothing
 ```
 
 A conversation that is not on screen never runs your client functions (no
@@ -64,7 +66,8 @@ whose `result.code` is `"conversation_not_active"`.
 
 While the active conversation's last answer is still running after a page
 reload (no stream is open for it), the conversation polls the server every 2
-seconds until it finishes, for at most 5 minutes.
+seconds until it finishes, for at most 5 minutes. A message sent meanwhile does
+not wait for it: the client stops polling and sends at once.
 
 ## Details
 
@@ -76,8 +79,9 @@ seconds until it finishes, for at most 5 minutes.
   `contentOffset`, the text length when the call started, to place it between
   the text before and after.
 - **Stop.** `conversation.stop()` or `ago.stop(conversationId)` stops one
-  conversation; `ago.stop()` stops them all. `ago.isGenerating(conversationId)`
-  answers for one, `ago.isGenerating()` for any.
+  conversation; `ago.stop()` stops the active one (all of them when none is
+  active). `ago.isGenerating(conversationId)` answers for one,
+  `ago.isGenerating()` for the active one (any when none is active).
 - **A spinner per conversation.** `ago.onGeneratingChanged(listener)` fires when
   any conversation starts or stops answering.
 - **Lifetime.** An object lives while it is the active conversation, answers,

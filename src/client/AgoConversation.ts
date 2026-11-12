@@ -67,6 +67,7 @@ export interface ConversationHost {
   stopConversation(conversation: AgoConversation): Promise<StopMessageResult | null>;
   hasTurn(conversation: AgoConversation): boolean;
   isActive(conversation: AgoConversation): boolean;
+  userSent(conversation: AgoConversation): void;
   getConversation(conversationId: string): Promise<Conversation>;
   fetchConversation(conversationId: string): Promise<Conversation>;
   stopMessage(messageId: string): Promise<StopMessageResult>;
@@ -168,6 +169,8 @@ export class AgoConversation {
   ): Promise<AgoMessage> {
     assertMessageContent(content);
     this.host.retain(this);
+    this.host.userSent(this);
+    this.stopWaitingForPolled();
     const userMessage: AgoMessage = {
       id: `local-${++this.seq}`,
       conversationId: this.currentId,
@@ -661,6 +664,20 @@ export class AgoConversation {
     this.stopPolling();
     this.notify();
     this.drain();
+  }
+
+  /**
+   * The user moved on from an answer a reload left running: send now instead
+   * of waiting for it (it may have died on the server). Its final state shows
+   * on the next load.
+   */
+  private stopWaitingForPolled(): void {
+    const poll = this.poll;
+    if (!poll || this.host.hasTurn(this)) return;
+    this.stopPolling();
+    this.messages = this.messages.map((m) =>
+      m.id === poll.messageId ? { ...m, status: "ERROR" } : m,
+    );
   }
 
   private stopPolling(): void {

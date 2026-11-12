@@ -1,10 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { AgoClient } from "../src/client/AgoClient";
 import { AgoProvider } from "../src/react/context/AgoContext";
 import { useMessages } from "../src/react/hooks/useMessages";
 import type { AgoMessage } from "../src/client/types";
+import { createFakeServer } from "./helpers/sseServer";
 
 // React's act() requires this flag outside of @testing-library.
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -172,5 +173,43 @@ describe("useMessages — other conversations' answers", () => {
       ["m1", "CANCELED"],
       ["m2", "IN_PROGRESS"],
     ]);
+  });
+});
+
+describe("useMessages — stop", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("stops only its own new conversation, before the server named it", async () => {
+    const server = createFakeServer();
+    vi.stubGlobal("fetch", server.fetch);
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    let hook!: ReturnType<typeof useMessages>;
+    function Harness() {
+      hook = useMessages();
+      return <span>ok</span>;
+    }
+    await mount(client, Harness);
+
+    // Another conversation is answering in the background.
+    void client.conversation("other").sendMessage("Summarize last week");
+    await vi.waitFor(() => expect(server.streams).toHaveLength(1));
+
+    // The hook's first message: no frame yet, so no conversation id.
+    let sent!: Promise<unknown>;
+    await act(async () => {
+      sent = hook.sendMessage("Hello");
+    });
+    await vi.waitFor(() => expect(server.streams).toHaveLength(2));
+
+    await act(async () => {
+      await hook.stop();
+      await sent;
+    });
+
+    expect(server.streams[1].signal?.aborted).toBe(true);
+    expect(server.streams[0].signal?.aborted).toBe(false);
+    expect(client.isGenerating("other")).toBe(true);
   });
 });

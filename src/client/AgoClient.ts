@@ -300,6 +300,8 @@ export class AgoClient {
 
   /** The conversation on screen; other conversations' client functions are refused. */
   private activeConversationId: string | null = null;
+  /** The app called setActiveConversation: stop following sends and opens. */
+  private activeSetByApp = false;
 
   private generatingListeners = new Set<() => void>();
 
@@ -666,7 +668,8 @@ export class AgoClient {
   /**
    * Stop generating: closes the stream so the UI stops immediately, and tells
    * the backend to stop generating. With a `conversationId`, stops that
-   * conversation's answer only; without, stops every running answer.
+   * conversation's answer only; without, stops the active conversation's
+   * answer, or every running answer when no conversation is active.
    *
    * Both halves matter. Closing the stream alone does NOT stop the agent — it
    * keeps running and the full answer reappears the next time the conversation
@@ -688,6 +691,7 @@ export class AgoClient {
    * the message had an id (the stream is still closed).
    */
   async stop(conversationId?: string): Promise<StopMessageResult | null> {
+    conversationId ??= this.activeConversationId ?? undefined;
     const turns = [...this.turns.values()].filter(
       (turn) => conversationId === undefined || this.turnIn(turn, conversationId),
     );
@@ -762,9 +766,11 @@ export class AgoClient {
 
   /**
    * Whether {@link stop} has something to stop: in the given conversation, or
-   * in any conversation when called without one.
+   * without one, in the active conversation (any conversation when none is
+   * active).
    */
   isGenerating(conversationId?: string): boolean {
+    conversationId ??= this.activeConversationId ?? undefined;
     if (conversationId === undefined) {
       return (
         this.turns.size > 0 ||
@@ -900,9 +906,23 @@ export class AgoClient {
    * Name the conversation on screen. A turn of any other conversation that
    * calls a client function gets it refused (the agent is told the user moved
    * on, and why), so a background answer never navigates or acts on the page.
-   * `null` (the default) refuses nothing.
+   * Until the app calls this, the active conversation is the one the user last
+   * sent in or opened with {@link getConversation}. `null` refuses nothing.
    */
   setActiveConversation(conversationId: string | null): void {
+    this.activeSetByApp = true;
+    this.applyActive(conversationId);
+  }
+
+  /**
+   * @internal The conversation the user sends in or opens is the one on
+   * screen, until the app names it with {@link setActiveConversation}.
+   */
+  _followUser(conversationId: string): void {
+    if (!this.activeSetByApp) this.applyActive(conversationId);
+  }
+
+  private applyActive(conversationId: string | null): void {
     const previous = this.activeConversationId;
     // A re-keyed draft is still known by its local id: store its server id.
     const next = conversationId
@@ -918,7 +938,7 @@ export class AgoClient {
     if (next) this.conversationObjects.get(next)?._activeChanged();
   }
 
-  /** The conversation set with {@link setActiveConversation}, or `null`. */
+  /** The conversation on screen (see {@link setActiveConversation}), or `null`. */
   getActiveConversation(): string | null {
     return this.activeConversationId;
   }
@@ -984,7 +1004,8 @@ export class AgoClient {
     hasTurn: (conversation) =>
       [...this.turns.values()].some((turn) => turn.conversation === conversation),
     isActive: (conversation) => this.activeConversationId === conversation.id,
-    getConversation: (id) => this.getConversation(id),
+    userSent: (conversation) => this._followUser(conversation.id),
+    getConversation: (id) => this.loadConversation(id),
     fetchConversation: (id) => this.fetchConversation(id),
     stopMessage: (id) => this.stopMessage(id),
     emitStopped: (conversation, messageId) =>
@@ -993,7 +1014,10 @@ export class AgoClient {
         messageId,
       }),
     rekeyed: (conversation, previousId) => {
-      this.conversationObjects.set(conversation.id, conversation);
+      // Never displace the object already known by that id: it may be on screen.
+      if (!this.conversationObjects.has(conversation.id)) {
+        this.conversationObjects.set(conversation.id, conversation);
+      }
       if (this.activeConversationId === previousId) {
         this.activeConversationId = conversation.id;
       }
@@ -1044,10 +1068,12 @@ export class AgoClient {
    *
    * The SDK calls this automatically after submitting the waiting results; call
    * it manually only for custom flows (e.g. after restoring a reloaded page via
-   * {@link resumePendingClientFunctions}).
+   * {@link resumePendingClientFunctions}). Pass the `conversationId` when the
+   * paused turn did not start on this page (after a reload), so the answer
+   * streams into that conversation.
    */
-  async continueMessage(messageId: string): Promise<AgoMessage> {
-    return this.continueTurn(messageId);
+  async continueMessage(messageId: string, conversationId?: string): Promise<AgoMessage> {
+    return this.continueTurn(messageId, conversationId);
   }
 
   /** Resume `messageId` in the conversation its paused turn (or the caller) names. */
@@ -1549,6 +1575,12 @@ export class AgoClient {
    * Get a specific conversation with messages
    */
   async getConversation(conversationId: string): Promise<Conversation> {
+    this._followUser(conversationId);
+    return this.loadConversation(conversationId);
+  }
+
+  /** `getConversation` without following the user (a conversation object loading itself). */
+  private async loadConversation(conversationId: string): Promise<Conversation> {
     const conversation = await this.fetchConversation(conversationId);
 
     // Let stateful helpers (e.g. createFormCollector) replay the conversation's

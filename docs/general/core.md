@@ -99,9 +99,10 @@ it was paused on client functions (no stream is open then).
 
 `stop()` resolves with the backend's verdict, or `null` when nothing was
 generating (or when the stop landed before the backend had named the message).
-`stop(conversationId)` stops that conversation only; `stop()` stops every
-answer running. `isGenerating()` (any conversation) or
-`isGenerating(conversationId)` tells you whether there is anything to stop, so
+`stop(conversationId)` stops that conversation only; `stop()` stops the
+conversation on screen (every answer when none is, see
+[the conversation on screen](conversations.md#the-conversation-on-screen)).
+`isGenerating()` (same rule) or `isGenerating(conversationId)` tells you whether there is anything to stop, so
 a button can switch between Send and Stop. A turn paused on client functions
 (`WAITING_CLIENT`) counts as generating and is still stoppable; stopping it also
 cancels the automatic resume.
@@ -525,11 +526,11 @@ Prefer callbacks over raw events? See the
   conversation's answer, or every answer without an id (`null` when nothing was
   generating)
 - `stopMessage(messageId)` → `Promise<StopMessageResult>`: stop a turn by id
-- `isGenerating(conversationId?)` → `boolean`: that conversation, or any
+- `isGenerating(conversationId?)` → `boolean`: that conversation, or the one on screen
 - `conversation(id?)` → `AgoConversation`: one conversation's messages, answer
   and Stop ([guide](conversations.md))
-- `setActiveConversation(id | null)`: the conversation on screen; others'
-  client functions are refused
+- `setActiveConversation(id | null)`: the conversation on screen (by default
+  the one last sent in or opened); others' client functions are refused
 - `onGeneratingChanged(listener)` → unsubscribe function
 
 ### Audio

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import type { AgoClient } from "../../client/AgoClient";
 import type {
   AgoConversation,
@@ -62,6 +62,8 @@ export function useConversationChat(
     () => client.conversation(conversationId),
     [client, conversationId],
   );
+  // The conversation on screen: a background answer may not act on the page.
+  useEffect(() => client._followUser(conversation.id), [client, conversation]);
   const snapshot = useSyncExternalStore(
     conversation.subscribe,
     conversation.getSnapshot,
