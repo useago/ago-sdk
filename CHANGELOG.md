@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Follow background work in the open conversation with message snapshots,
+  interaction policy and exact approval decisions. The React and embeddable
+  widgets display progress, review requests, outcomes and published files.
+
 ## [1.15.0] - 2026-11-03
 
 ### Added

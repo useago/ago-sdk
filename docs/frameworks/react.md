@@ -111,6 +111,23 @@ function Support() {
 | `onMessageSent?` | `(content) => void` | — |
 | `onMessageReceived?` | `({ id, content }) => void` | — |
 
+### Background work
+
+`<ChatWidget>` displays background progress, approval requests, outcome and
+published files in the response. It blocks new messages while the conversation
+is busy. Authorized staff can approve or reject the current request; other
+viewers see the waiting state. A staff reviewer needs a verified JWT whose email
+matches an AGO staff account. Configure a background agent in your workspace to
+try this flow.
+
+For a custom interface, use `message:update` for complete message snapshots and
+`conversation:update` for input policy. See
+[Follow background work](../general/core.md#follow-background-work). The SDK
+follows the open conversation; detaching it does not cancel server-owned work.
+A collapsed compact sheet suspends background observation and reloads the
+conversation when expanded. Ordinary active streaming and browser-function
+continuation retain their existing behavior.
+
 ### Showing what the agent is doing
 
 While the agent works, the widget shows a status row naming the client function
@@ -197,13 +214,19 @@ for limits, browser requirements and the shared label types.
 
 ### Stop button
 
-While the agent answers, `<ChatWidget>` turns its send button into a **Stop**
-button. Clicking it closes the stream and tells the backend to stop generating,
+When cancellation is available while the agent answers, `<ChatWidget>` turns
+its send button into a **Stop** button. Clicking it closes the stream and tells the backend to stop generating,
 so the partial answer stays in the transcript as `CANCELED` instead of the agent
 finishing in the background. Pass `allowStop={false}` to keep the send button
-disabled while answering instead.
+disabled while answering instead. A response with `canStop: false` does not
+show Stop. If `canStop` is absent, the existing Stop behavior applies.
+Background responses cannot be canceled through the widget.
 
-Building your own input? `<ChatInput>` takes an `onStop` prop: when it is set and
+For a custom background UI, also apply `conversation:update` input policy and
+only offer Stop when the current message allows it. `isLoading` alone does not
+represent the server's input policy.
+
+Building your own input for ordinary chat? `<ChatInput>` takes an `onStop` prop: when it is set and
 `disabled` is true (the agent is answering), the button becomes an enabled Stop
 button.
 

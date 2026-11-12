@@ -50,8 +50,10 @@ constructing a client.
 
 ## 2. Send a message and stream the reply
 
-`sendMessage` resolves with the final assistant message, but the text arrives
-incrementally through events. Subscribe **before** you send.
+`sendMessage` resolves with the initial assistant response. For an ordinary
+reply this is usually the completed message. A background response can still be
+running when the promise resolves. Subscribe **before** you send; use
+`message:complete` for the end of the turn.
 
 ```ts
 ago.on("message:start", ({ conversationId, messageId }) => {
@@ -72,6 +74,102 @@ ago.on("message:error", ({ error }) => console.error(error));
 
 const reply = await ago.sendMessage("How do I reset my password?");
 ```
+
+### Follow background work
+
+A background agent can continue after the initial response. Configure a
+background agent in your AGO workspace first; the playground may not have one.
+Use your workspace API origin and an agent available to the current user:
+
+```ts
+import { AgoClient } from "@useago/sdk";
+
+const ago = new AgoClient({
+  baseUrl: "https://YOUR-WORKSPACE.api.useago.com",
+  agent: "YOUR-BACKGROUND-AGENT",
+});
+
+ago.on("message:update", (message) => {
+  console.log(message.id, message.status, message.progress, message.approval);
+});
+ago.on("conversation:update", (update) => {
+  if (update.conversationId === null) {
+    console.log("The signed-in viewer changed or lost access");
+  } else {
+    console.log("Can send:", update.interaction.canSendMessage);
+  }
+});
+ago.on("message:complete", (message) => {
+  console.log("Finished:", message.status, message.outcome, message.attachments);
+});
+
+const initial = await ago.sendMessage("Prepare a report");
+console.log("Open conversation:", initial.conversationId);
+```
+
+The SDK follows the open conversation and emits complete `message:update`
+snapshots. Replace your displayed message by ID, including null fields and empty
+arrays; do not merge old approval details into a later snapshot. A snapshot can
+include `progress` (steps and activity), `approval`, `outcome` and `canStop`.
+`outcome` can be `completed`, `incomplete` or `failed`; a `DONE` message can
+have an `incomplete` outcome. `WAITING_APPROVAL` and `PAUSED` are not completed
+turns. A paused background response has no recovery control in the SDK.
+
+Use `interaction.canSendMessage` and your local submission state to disable new
+messages, including suggested replies. `blockingMessageId` identifies the
+blocking assistant message, or is null when work is preparing before a message
+ID exists. `message:complete` fires when the turn ends, including an error or a
+supported cancellation; it does not mean the objective succeeded. Reopening
+already finished work does not replay `message:complete`.
+
+To open an existing conversation and follow its current work, call
+`await ago.setActiveConversation(conversationId)`. To leave it, call
+`await ago.setActiveConversation(null)`. One client follows one active
+conversation. Detaching stops local observation without requesting cancellation;
+server-owned work can continue. `getConversation(id)` and `getMessages(id)` are
+one-off reads and do not activate or follow the conversation. A new send can
+return a different `conversationId`; use the returned ID for that view.
+
+An authorized staff viewer can decide the exact request exposed by the current
+snapshot:
+
+```ts
+import type { AgoClient, MessageApproval } from "@useago/sdk";
+
+async function approve(ago: AgoClient, approval: MessageApproval) {
+  if (approval.allowedDecisions.includes("approve")) {
+    await ago.submitApprovalDecision(approval.id, "approve");
+  }
+}
+```
+
+Use `"reject"` when it is in `allowedDecisions`. The decision applies to that
+approval ID; it does not cancel the background task. Resolution means the
+decision was accepted, not that the task finished. Continue displaying updates.
+A viewer without review access can see a waiting state without review actions or
+decision buttons. For staff review, use a JWT verified by the configured AGO
+identity provider whose email matches an AGO staff account. Supplying an email
+or a signed JWT alone does not grant staff access.
+
+Use `canStop` to decide whether to show Stop for a response. `false` means do
+not offer cancellation; if the field is absent, retain your existing Stop
+behavior for older servers. Background cancellation, steering and interrupted
+run recovery are not available through this SDK. Browser functions still need
+a live client to run or continue.
+
+When credentials refresh for the same verified viewer, the SDK keeps the open
+view and completion tracking. `ago.updateConfig({ userJwt: null })` removes the
+JWT. Logout, a verified viewer change, or an authentication or permission
+failure while observing a conversation emits
+`{ conversationId: null, interaction: null }` on `conversation:update`; clear
+your own identity-bound UI state when you receive it. SDK widgets clear their
+own bound state, not unrelated host application caches. Omitted or `undefined`
+`userJwt` leaves the existing JWT unchanged. An `AgoClient` send or continuation
+interrupted by detaching rejects with `AgoError.code === "request_detached"`; it does not
+show whether the server accepted the request, so do not automatically resend.
+`connection:status` reports observation connectivity separately from task
+outcome. These behaviors require an AGO server or another backend implementing
+the compatible HTTP and SSE contract.
 
 ### Stop the answer
 
@@ -494,7 +592,9 @@ const msg = await ago.waitFor("message:complete", { timeout: 10_000 });
 | `message:start`     | `{ conversationId, messageId }`                             |
 | `message:chunk`     | `{ content, conversationId, messageId }`                    |
 | `message:answer-complete` | `AgoMessage`: main answer done, follow-up replies may still be pending; fires before `message:complete` |
-| `message:complete`  | `AgoMessage`                                                |
+| `message:update` | Full `AgoMessage` snapshot; replace the message by ID |
+| `conversation:update` | `{ conversationId, interaction }`, or `{ conversationId: null, interaction: null }` on identity reset |
+| `message:complete`  | Terminal `AgoMessage`; historical finished messages do not replay this event |
 | `message:stopped`   | `{ conversationId, messageId }`: the turn was stopped with `stop()`; fires after the `message:complete` carrying the partial answer with status `CANCELED`, or on its own when there was nothing to complete |
 | `message:error`     | `{ error, code?, conversationId?, messageId? }`             |
 | `conversation:loaded` | `Conversation`: full conversation loaded from the server (e.g. after a page reload) |
@@ -503,7 +603,7 @@ const msg = await ago.waitFor("message:complete", { timeout: 10_000 });
 | `toolCall:form`     | `ToolCallData` (only when `type === "form"`)                |
 | `function:invoke`   | `{ invocationId, functionName, arguments, conversationId }` |
 | `function:result`   | `{ invocationId, result, error? }`                          |
-| `connection:status` | `{ connected }`                                             |
+| `connection:status` | `{ connected, conversationId?, error? }`                                             |
 
 Prefer callbacks over raw events? See the
 [streaming helpers and async generator](events-and-streaming.md).
@@ -529,9 +629,11 @@ Prefer callbacks over raw events? See the
 
 ### Conversations
 
-- `getConversations()` → `Promise<Conversation[]>`
+- `getConversations()` → `Promise<{ data: Conversation[]; hasMore: boolean; total: number }>`
 - `getConversation(id)` → `Promise<Conversation>` (includes `messages`)
 - `getMessages(conversationId)` → `Promise<AgoMessage[]>`
+- `setActiveConversation(id | null)` → `Promise<Conversation | null>`: load and follow a view, or detach locally
+- `submitApprovalDecision(approvalId, "approve" | "reject")` → `Promise<void>`: submit the exact review decision
 
 ### Functions
 
@@ -604,12 +706,32 @@ interface AgoMessage {
   conversationId: string;
   content: string;
   role: "user" | "assistant";
-  status: "IN_PROGRESS" | "DONE" | "ERROR" | "TODO" | "CANCELED";
+  status: "IN_PROGRESS" | "DONE" | "ERROR" | "TODO" | "CANCELED"
+    | "WAITING_CLIENT" | "WAITING_APPROVAL" | "PAUSED";
   agent?: AgoAgent;
   sources?: AgoSource[]; // knowledge-base citations
   toolCalls?: ToolCallData[];
   followUpReplies?: string[]; // suggested next questions
+  attachments?: AgoAttachment[];
+  progress?: MessageProgress | null;
+  approval?: MessageApproval | null;
+  outcome?: "completed" | "incomplete" | "failed" | null;
+  canStop?: boolean;
   createdAt: Date;
+}
+
+interface MessageProgress {
+  steps: Array<{ name: string; status: "pending" | "in_progress" | "completed" | "failed" | "not_completed"; reason: string | null }> | null;
+  activity: Array<{ text: string; timestamp: string | null }>;
+  truncated: boolean;
+}
+
+interface MessageApproval {
+  id: string;
+  status: "pending" | "approved" | "rejected" | "expired";
+  actions: Array<{ name: string; arguments: Record<string, unknown> }>;
+  allowedDecisions: Array<"approve" | "reject">;
+  expiresAt: string | null;
 }
 
 interface Conversation {
@@ -617,6 +739,7 @@ interface Conversation {
   title: string;
   lastMessageDate: Date;
   messages?: AgoMessage[];
+  interaction?: { canSendMessage: boolean; blockingMessageId: string | null };
 }
 
 interface StopMessageResult {
