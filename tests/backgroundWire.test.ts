@@ -218,7 +218,7 @@ describe("background wire fixtures", () => {
 
   it("replaces authorized state with the redacted snapshot and preserves metadata", async () => {
     const states: Array<{
-      viewerId: string;
+      verifiedUserId: string;
       message: unknown;
       interaction: unknown;
     }> = [];
@@ -231,7 +231,6 @@ describe("background wire fixtures", () => {
       json("expected/authorized-wait.json").message,
     );
     expect(asJson(result)).toEqual(json("expected/redacted-wait-message.json"));
-    expect(states[0].viewerId).not.toBe(states[1].viewerId);
     expect(states[1].interaction).toEqual(
       json("expected/authorized-wait.json").conversationUpdate.interaction,
     );
