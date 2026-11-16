@@ -111,6 +111,7 @@ export default {
   },
   "backgroundState": {
       "backgroundWorkStatus": "Estado del trabajo en segundo plano",
+      "checklistCount": "{completed}/{total} pasos de la lista completados",
       "progress": "Progreso",
       "activity": "Actividad",
       "truncated": "Actividad anterior omitida",

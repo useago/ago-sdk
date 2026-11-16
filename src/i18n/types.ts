@@ -11,7 +11,7 @@ export interface UiCatalog {
   feedback: FeedbackLabels;
   speech: SpeechToTextLabels;
   backgroundState: {
-    backgroundWorkStatus: string; progress: string; activity: string; truncated: string; approval: string; waiting: string;
+    backgroundWorkStatus: string; checklistCount: string; progress: string; activity: string; truncated: string; approval: string; waiting: string;
     approved: string; rejected: string; expired: string; approve: string; reject: string;
     submitting: string; decisionFailed: string; incomplete: string; failed: string; paused: string;
     pending: string; inProgress: string; completed: string; notCompleted: string;

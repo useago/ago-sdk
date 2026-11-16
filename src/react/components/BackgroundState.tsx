@@ -62,7 +62,7 @@ export function BackgroundState({ message, client, labels: overrides, onError, c
   const completed = steps.filter((step) => step.status === "completed").length;
   const header = message.outcome ? labels[message.outcome] :
     message.status === "WAITING_APPROVAL" ? labels.waiting :
-    message.status === "PAUSED" ? labels.paused : labels.progress;
+    message.status === "PAUSED" ? labels.paused : labels.inProgress;
   const marker: Record<string, string> = {
     pending: "○", in_progress: "◉", completed: "✓", failed: "!", not_completed: "−",
   };
@@ -121,7 +121,7 @@ export function BackgroundState({ message, client, labels: overrides, onError, c
                 style={{ height: 6, borderRadius: 6, background: "var(--ago-border-color, #dee3e8)", overflow: "hidden" }}>
                 <div style={{ height: "100%", width: `${completed / steps.length * 100}%`, background: "var(--ago-accent-color, #1b5fc4)" }} />
               </div>
-              <div style={{ marginTop: 5, color: "var(--ago-muted-text-color, #6b6d6f)" }}>{completed} / {steps.length} · {labels.completed}</div>
+              <div style={{ marginTop: 5, color: "var(--ago-muted-text-color, #6b6d6f)" }}>{labels.checklistCount.replace("{completed}", String(completed)).replace("{total}", String(steps.length))}</div>
               <div style={{ fontWeight: 600, marginTop: 10 }}>{labels.progress}</div>
               <ol style={{ listStyle: "none", margin: "4px 0 0", padding: 0 }}>
                 {steps.map((step, index) => (

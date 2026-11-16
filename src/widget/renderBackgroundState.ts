@@ -41,7 +41,7 @@ export function renderBackgroundState(
   const title = document.createElement("span");
   title.textContent = message.outcome ? labels[message.outcome] :
     message.status === "WAITING_APPROVAL" ? labels.waiting :
-    message.status === "PAUSED" ? labels.paused : labels.progress;
+    message.status === "PAUSED" ? labels.paused : labels.inProgress;
   header.append(icon, title);
   root.appendChild(header);
   const approval = message.approval;
@@ -122,7 +122,7 @@ export function renderBackgroundState(
       bar.setAttribute("aria-valuenow", String(completed));
       bar.appendChild(div({ height: "100%", width: `${completed / steps.length * 100}%`, backgroundColor: ACCENT_COLOR }));
       const count = div({ marginTop: "5px", color: MUTED_TEXT_COLOR });
-      count.textContent = `${completed} / ${steps.length} · ${labels.completed}`;
+      count.textContent = labels.checklistCount.replace("{completed}", String(completed)).replace("{total}", String(steps.length));
       const heading = div({ fontWeight: "600", marginTop: "10px" });
       heading.textContent = labels.progress;
       const list = document.createElement("ol");

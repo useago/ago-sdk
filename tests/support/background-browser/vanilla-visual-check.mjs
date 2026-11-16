@@ -13,7 +13,7 @@ try {
   page = await browser.newPage({viewport:{width,height}});
   page.on('request', r => { if (new URL(r.url()).pathname.startsWith('/api')) requests.push(`${r.method()} ${new URL(r.url()).pathname}`); });
    await page.goto(harness.url);
-   await page.getByText('Waiting for approval',{exact:true}).waitFor({timeout:10000});
+   await page.getByText('Waiting for approval',{exact:true}).first().waitFor({timeout:10000});
    const textarea=page.locator('textarea'); if (!await textarea.isDisabled()) throw Error('input not disabled');
    await page.screenshot({path:`${dir}/vanilla-waiting-${width}x${height}.png`});
    const args=page.locator('.ago-background-state__approval pre').first();
@@ -29,7 +29,7 @@ try {
      await page.waitForTimeout(2200);
      if(requests.length!==before) throw Error('inactive background made API requests');
      await page.locator('.ago-chat-widget-launcher').click();
-     await page.getByText('Waiting for approval',{exact:true}).waitFor({timeout:10000});
+     await page.getByText('Waiting for approval',{exact:true}).first().waitFor({timeout:10000});
    }
    await page.getByRole('button',{name:'Approve',exact:true}).click();
    await page.getByText('background-report.csv',{exact:true}).waitFor({timeout:10000});
@@ -83,7 +83,7 @@ try {
    visitorHarness=await launchHarness('vanilla', { caseName:'history-approval-redacted' });
    visitorPage=await browser.newPage({viewport:{width:390,height:844}});
    await visitorPage.goto(visitorHarness.url);
-   await visitorPage.getByText('Waiting for approval',{exact:true}).waitFor({timeout:10000});
+   await visitorPage.getByText('Waiting for approval',{exact:true}).first().waitFor({timeout:10000});
    if(await visitorPage.locator('.ago-background-state__approval button').count()) throw Error('visitor saw approval controls');
    if((await visitorPage.locator('body').innerText()).includes('record-42')) throw Error('visitor saw review data');
    await visitorPage.screenshot({path:`${dir}/vanilla-visitor-390.png`});
