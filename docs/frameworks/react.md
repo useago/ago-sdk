@@ -111,6 +111,28 @@ function Support() {
 | `onMessageSent?` | `(content) => void` | — |
 | `onMessageReceived?` | `({ id, content }) => void` | — |
 
+### Background work
+
+`<ChatWidget>` displays background progress, approval requests, outcome and
+published files in the response. It blocks new messages while the conversation
+is busy. Authorized staff can approve or reject the current request; other
+viewers see the waiting state. A staff reviewer needs a verified JWT whose email
+matches an AGO staff account. Configure a background agent in your workspace to
+try this flow.
+
+A non-empty `userJwt` update continues the same local session, including anonymous
+login, without a verification request. Before switching accounts, set `userJwt` to
+`null` or destroy and recreate the client. See [session behavior](../general/core.md).
+
+For a custom interface, use `message:update` for complete message snapshots and
+`conversation:update` for input policy. See
+[Follow background work](../general/core.md#follow-background-work). The SDK
+follows the open conversation; detaching it does not cancel server-owned work.
+A collapsed compact sheet suspends background observation and reloads the
+conversation when expanded. Ordinary active streaming and browser-function
+continuation retain their existing behavior. The widget clears its bound state on
+a session reset. See [credential changes](../general/core.md#follow-background-work).
+
 ### Showing what the agent is doing
 
 While the agent works, the widget shows a status row naming the client function
@@ -197,13 +219,24 @@ for limits, browser requirements and the shared label types.
 
 ### Stop button
 
-While the agent answers, `<ChatWidget>` turns its send button into a **Stop**
-button. Clicking it closes the stream and tells the backend to stop generating,
+When cancellation is available while the agent answers, `<ChatWidget>` turns
+its send button into a **Stop** button. Clicking it closes the stream and tells the backend to stop generating,
 so the partial answer stays in the transcript as `CANCELED` instead of the agent
 finishing in the background. Pass `allowStop={false}` to keep the send button
-disabled while answering instead.
+disabled while answering instead. A response with `canStop: false` does not
+show Stop. If `canStop` is absent, the existing Stop behavior applies.
+Background responses cannot be canceled through the widget.
 
-Building your own input? `<ChatInput>` takes an `onStop` prop: when it is set and
+For a custom background UI, render `<BackgroundState message={message} />` for
+each assistant message. It displays progress and approvals as they arrive. The
+component uses `AgoProvider` for decisions, accepts an explicit `client`, and
+renders disabled approval buttons without either. It is passive; the conversation
+hook owns observation. Use `interaction.canSendMessage` from `useConversationChat`
+to gate the composer, and `message.canStop` to decide whether to offer Stop.
+`isLoading` alone does not represent the server's input policy. See the
+[custom conversation example](../general/conversations.md#react).
+
+Building your own input for ordinary chat? `<ChatInput>` takes an `onStop` prop: when it is set and
 `disabled` is true (the agent is answering), the button becomes an enabled Stop
 button.
 

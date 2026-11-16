@@ -1,3 +1,4 @@
+import { createDrivableClient } from "./reactWidgetMockClient";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, startTransition, StrictMode, Suspense, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -77,13 +78,15 @@ describe("React dictation", () => {
   });
 
   it("enables the complete control with a single ChatWidget prop", async () => {
-    const mock = client();
+    const mock = createDrivableClient().client;
+    mock.getConfig = vi.fn(async () => ({ permissions: [{ speechToTextEnabled: true }], proactive: { enabled: false } })) as typeof mock.getConfig;
+    mock.transcribeAudio = vi.fn(async () => ({ text: "Bonjour" }));
     await act(async () => root.render(<ChatWidget client={mock} speechToText />));
     expect(mic()).not.toBeNull();
     await act(async () => mic().click());
     await act(async () => mic().click());
     expect(container.querySelector("textarea")!.value).toBe("Bonjour");
-    expect(mock.__callsFor("transcribeAudio")).toHaveLength(1);
+    expect(mock.transcribeAudio).toHaveBeenCalledOnce();
     expect(mock.__callsFor("sendMessage")).toHaveLength(0);
   });
 

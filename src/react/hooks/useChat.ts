@@ -2,7 +2,7 @@ import type { AgoClient } from "../../client/AgoClient";
 import type { AgoMessage, AgoUploadFile, Conversation } from "../../client/types";
 import { useOptionalAgoClient } from "../context/AgoContext";
 import { useConversation } from "./useConversation";
-import { useMessages } from "./useMessages";
+import { useMessagesInternal } from "./useMessages";
 
 export interface UseChatOptions {
   /** AgoClient instance. If omitted, reads from AgoProvider context. */
@@ -60,7 +60,7 @@ export function useChat(options: UseChatOptions = {}): UseChatResult {
     );
   }
 
-  const messageResult = useMessages({
+  const messageResult = useMessagesInternal({
     client,
     conversationId: options.conversationId,
   });
@@ -79,10 +79,10 @@ export function useChat(options: UseChatOptions = {}): UseChatResult {
     clearMessages: messageResult.clearMessages,
     conversationId: messageResult.conversationId,
     conversations: conversationResult.conversations,
-    currentConversation: conversationResult.currentConversation,
-    isConversationsLoading: conversationResult.isLoading,
-    selectConversation: conversationResult.selectConversation,
-    startNewConversation: conversationResult.startNewConversation,
+    currentConversation: messageResult.currentConversation,
+    isConversationsLoading: conversationResult.isLoading || messageResult.isHistoryLoading,
+    selectConversation: messageResult.activate,
+    startNewConversation: messageResult.clearMessages,
     refreshConversations: conversationResult.refreshConversations,
   };
 }

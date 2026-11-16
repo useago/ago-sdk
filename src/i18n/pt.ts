@@ -109,6 +109,28 @@ export default {
     "noSpeech": "Nenhum áudio foi gravado. Tente novamente.",
     "transcriptionFailed": "A transcrição falhou. Tente novamente."
   },
+  "backgroundState": {
+      "backgroundWorkStatus": "Estado do trabalho em segundo plano",
+      "progress": "Progresso",
+      "activity": "Atividade",
+      "truncated": "Atividade anterior omitida",
+      "approval": "Revisão solicitada",
+      "waiting": "Aguardando aprovação",
+      "approved": "Aprovado",
+      "rejected": "Rejeitado",
+      "expired": "Expirado",
+      "approve": "Aprovar",
+      "reject": "Rejeitar",
+      "submitting": "Enviando…",
+      "decisionFailed": "Não foi possível enviar a decisão. Tente novamente.",
+      "incomplete": "Incompleto",
+      "failed": "Falhou",
+      "paused": "Pausado",
+      "pending": "Pendente",
+      "inProgress": "Em andamento",
+      "completed": "Concluído",
+      "notCompleted": "Não concluído"
+  },
   "common": {
     "stopButton": "Parar",
     "close": "Fechar",

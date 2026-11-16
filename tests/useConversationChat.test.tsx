@@ -168,6 +168,7 @@ it("does not detach a later mount of the same conversation", async () => {
   const id = "11111111-1111-4111-8111-111111111111";
   const first = await mountChat(client, id);
   await vi.waitFor(() => expect(followSignal).toBeDefined());
+  expect(first.result.current!.interaction).toEqual({ canSendMessage: false, blockingMessageId: "33333333-3333-4333-8333-333333333333" });
   const second = await mountChat(client, id);
   await act(async () => first.root.unmount());
   expect(followSignal?.aborted).toBe(false);
