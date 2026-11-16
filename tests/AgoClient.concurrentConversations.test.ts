@@ -30,6 +30,41 @@ async function startAnswer(client: AgoClient, conversationId: string, text = "hi
 }
 
 describe("two conversations answering at once", () => {
+  it("does not send a draft when a snapshot listener logs out during optimistic insertion", async () => {
+    const client = makeClient();
+    const conversation = client.conversation();
+    conversation.subscribe(() => {
+      if (conversation.getMessages().some((message) => message.role === "user")) client.updateConfig({ userJwt: null });
+    });
+    await expect(conversation.sendMessage("private draft")).rejects.toMatchObject({ code: "request_detached" });
+    expect(server.streams).toHaveLength(0);
+    client.destroy();
+  });
+
+  it("does not send when a snapshot listener logs out as the turn starts", async () => {
+    const client = makeClient();
+    const conversation = client.conversation();
+    conversation.subscribe(() => {
+      if (conversation.isGenerating()) client.updateConfig({ userJwt: null });
+    });
+    await expect(conversation.sendMessage("private draft")).rejects.toMatchObject({ code: "request_detached" });
+    expect(server.streams).toHaveLength(0);
+    client.destroy();
+  });
+
+  it("rejects queued messages on logout without sending them under new credentials", async () => {
+    const client = makeClient();
+    const first = await startAnswer(client, "cA", "first");
+    const queued = client.conversation("cA").sendMessage("private queued text");
+    const rejected = expect(queued).rejects.toMatchObject({ code: "request_detached" });
+    client.updateConfig({ userJwt: null });
+    await rejected;
+    await expect(first.sent).rejects.toMatchObject({ code: "request_detached" });
+    expect(server.streams).toHaveLength(1);
+    expect(first.stream.signal?.aborted).toBe(true);
+    client.destroy();
+  });
+
   it("keeps each answer in its own conversation, and stopping one leaves the other running", async () => {
     const client = makeClient();
     const conversationA = client.conversation("cA");
@@ -86,7 +121,7 @@ describe("two conversations answering at once", () => {
     await b.sent;
   });
 
-  it("stop() and isGenerating() with no id mean the conversation the user last sent in", async () => {
+  it.each([false, true])("stop() and isGenerating() retain the selected conversation while hidden: %s", async (hidden) => {
     const client = makeClient();
     expect(client.isGenerating()).toBe(false);
     const a = await startAnswer(client, "cA");
@@ -94,6 +129,9 @@ describe("two conversations answering at once", () => {
     a.stream.push({ message_id: "mA", thread: { id: "cA" }, content: "a" });
     b.stream.push({ message_id: "mB", thread: { id: "cB" }, content: "b" });
     await flush();
+    const binding = client._bindConversation();
+    binding.select("cB");
+    binding.setBackgroundObservation(!hidden);
     expect(client.getActiveConversation()).toBe("cB");
     expect(client.isGenerating()).toBe(true);
 
@@ -268,13 +306,16 @@ describe("client functions of a conversation that is not on screen", () => {
     return { client, handler };
   }
 
-  it("are refused: not run, not announced, answered with the reason, and the turn completes", async () => {
+  it.each([false, true])("are refused: not run, not announced, answered with the reason, and the turn completes (hidden: %s)", async (hidden) => {
     const { client, handler } = clientWithNavigation();
     const invoked = vi.fn();
     const results: unknown[] = [];
     client.on("function:invoke", invoked);
     client.on("function:result", (r) => results.push(r));
-    client.setActiveConversation("cB");
+    const binding = client._bindConversation();
+    binding.select("cB");
+    binding.setBackgroundObservation(!hidden);
+    expect(client.getActiveConversation()).toBe("cB");
 
     const conversationA = client.conversation("cA");
     const { sent, stream } = await startAnswer(client, "cA");

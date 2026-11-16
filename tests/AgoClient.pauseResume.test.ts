@@ -245,6 +245,27 @@ describe("pause/resume: full auto flow", () => {
     expect(calls.some((c) => c.url.endsWith("/messages/m1/continue"))).toBe(true);
   });
 
+  it("does not resume an old turn after logout while the resume gate is waiting", async () => {
+    let releaseGate!: () => void;
+    const gateReached = vi.fn();
+    const { fn, calls } = routedFetch([
+      { match: (u) => u.endsWith("/messages"), respond: () => sseResponse(PAUSED_STREAM) },
+      { match: (u) => u.includes("/tool-calls/bag1/submit"), respond: () => jsonResponse({ resume: { message_id: "m1", ready: true } }) },
+      { match: (u) => u.endsWith("/messages/m1/continue"), respond: () => sseResponse(RESUMED_STREAM) },
+    ]);
+    vi.stubGlobal("fetch", fn);
+    const client = makePauseClient();
+    client.registerFunction({ name: "navigateToPage", description: "Navigate", parameters: { type: "object", properties: {} }, handler: () => ({ ok: true }) });
+    client.registerResumeGate(() => new Promise<void>((resolve) => { releaseGate = resolve; gateReached(); }));
+    await client.sendMessage("go");
+    await vi.waitFor(() => expect(gateReached).toHaveBeenCalled());
+    client.updateConfig({ userJwt: null });
+    releaseGate();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(calls.some((call) => call.url.endsWith("/messages/m1/continue"))).toBe(false);
+    client.destroy();
+  });
+
   it("continues only when the LAST result flips resume.ready (multiple functions)", async () => {
     const twoFunctionStream = [
       'data: {"message_id":"m1","thread":{"id":"c1"},"content":""}\n\n',

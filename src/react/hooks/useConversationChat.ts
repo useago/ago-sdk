@@ -63,7 +63,14 @@ export function useConversationChat(
     [client, conversationId],
   );
   // The conversation on screen: a background answer may not act on the page.
-  useEffect(() => client._followUser(conversation.id), [client, conversation]);
+  useEffect(() => {
+    if (!client._followUser(conversation.id)) return;
+    const token = client._bindConversation();
+    return () => {
+      if (token.isCurrent()) client._detachFollowedConversation(conversation);
+      token.release();
+    };
+  }, [client, conversation]);
   const snapshot = useSyncExternalStore(
     conversation.subscribe,
     conversation.getSnapshot,

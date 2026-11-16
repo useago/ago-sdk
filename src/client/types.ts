@@ -72,6 +72,7 @@ export interface AgoConfig {
   /** User email for identification */
   userEmail?: string;
   /** JWT token for authenticated users */
+  /** Non-empty updates continue the same session. Set null or recreate the client before switching accounts. */
   userJwt?: string | null;
   /** User metadata sent with messages. Use null to stop sending defaults. Not an authentication credential. */
   metadata?: Record<string, unknown> | null;

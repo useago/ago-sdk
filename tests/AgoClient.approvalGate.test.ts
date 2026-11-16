@@ -76,7 +76,53 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("streamed client function errors", () => {
+  it("reports an unexpected invocation failure without rejecting the stream callback", async () => {
+    const { fn } = gatedRoutes();
+    vi.stubGlobal("fetch", fn);
+    const client = new AgoClient({ baseUrl: "https://x.example.com" });
+    const conversation = client.conversation("c1");
+    client.setActiveConversation("c1");
+    const failure = new Error("status update failed");
+    vi.spyOn(conversation, "_functionStatus").mockImplementation(() => { throw failure; });
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const errors = vi.fn();
+    client.on("message:error", errors);
+    client.registerFunction({ name: "setPageState", description: "Set page state", parameters: { type: "object", properties: {} }, handler: () => ({}) });
+    try {
+      await conversation.sendMessage("go");
+      await vi.waitFor(() => expect(errors).toHaveBeenCalledWith(expect.objectContaining({ error: failure.message, conversationId: "c1", messageId: "m1" })));
+      expect(log).toHaveBeenCalledWith("[AGO SDK]", "Failed to handle client function invocation:", failure);
+    } finally {
+      client.destroy();
+      log.mockRestore();
+    }
+  });
+});
+
 describe("approval gate: holds a gated call until approved", () => {
+  it.each([false, true])("does not run or retain an invocation when the policy logs out (gated: %s)", async (gated) => {
+    const { fn, calls } = gatedRoutes();
+    vi.stubGlobal("fetch", fn);
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    let client!: AgoClient;
+    const policy = vi.fn(() => { client.updateConfig({ userJwt: null }); return gated; });
+    client = new AgoClient({ baseUrl: "https://x.example.com", userJwt: "old", approvalPolicy: policy });
+    const handler = vi.fn(() => ({ ok: true }));
+    client.registerFunction({ name: "setPageState", description: "Set page state", parameters: { type: "object", properties: {} }, handler });
+    const awaiting = vi.fn();
+    client.on("function:awaiting-approval", awaiting);
+    await client.sendMessage("go").catch(() => {});
+    await vi.waitFor(() => expect(policy).toHaveBeenCalled());
+    await client.approveFunction("bag1");
+    expect(handler).not.toHaveBeenCalled();
+    expect(awaiting).not.toHaveBeenCalled();
+    expect(calls.some((call) => call.url.includes("/tool-calls/"))).toBe(false);
+    expect(log).not.toHaveBeenCalled();
+    client.destroy();
+    log.mockRestore();
+  });
+
   it("does not run or submit the function until approveFunction is called", async () => {
     const { fn, calls } = gatedRoutes();
     vi.stubGlobal("fetch", fn);

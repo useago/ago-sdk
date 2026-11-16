@@ -230,7 +230,7 @@ await ago.submitFeedback(messageId, "negative", {
 // "this conversation doesn't work": attached to its last answer
 await ago.submitConversationFeedback(conversationId, "negative");
 // or let the widget render the thumbs: mountChatWidget(el, { ..., feedback: true })
-ago.updateConfig({ userJwt: token });   // e.g. after login
+ago.updateConfig({ userJwt: token });   // e.g. after login, keeps the current session
 ago.destroy();                           // clean up listeners, functions, context
 ```
 
@@ -268,3 +268,5 @@ All types are exported from `@useago/sdk`.
    returns serializable data.
 4. `ago.destroy()` runs when the client is no longer needed.
 5. Run the project's typecheck and lint.
+
+Before switching accounts, reset with `ago.updateConfig({ userJwt: null })` or destroy and recreate the client. Token updates do not trigger verification requests.
