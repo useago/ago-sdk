@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { SSEHandler } from "../src/streaming/SSEHandler";
+import { createFallbackDecoder, createStreamDecoder } from "../src/streaming/utf8";
 
 // Helper to create a mock ReadableStream from SSE data
 function createMockSSEStream(chunks: string[]): Response {
@@ -20,7 +21,77 @@ function createMockSSEStream(chunks: string[]): Response {
   return new Response(stream);
 }
 
+
+function chunked(text: string): Response {
+  const bytes = new TextEncoder().encode(text);
+  let offset = 0;
+  return new Response(new ReadableStream({
+    pull(controller) {
+      if (offset === bytes.length) return controller.close();
+      controller.enqueue(bytes.slice(offset, ++offset));
+    },
+  }));
+}
+
 describe("SSEHandler", () => {
+  it.each([createStreamDecoder, createFallbackDecoder])(
+    "flushes incomplete UTF-8 as a replacement character",
+    (makeDecoder) => {
+      const decoder = makeDecoder();
+      expect(decoder.decode(new Uint8Array([0xc3]))).toBe("");
+      expect(decoder.flush()).toBe("\ufffd");
+      expect(decoder.flush()).toBe("");
+    },
+  );
+
+  it("parses CRLF, multiline data and split UTF-8", async () => {
+    const response = chunked(
+      ': heartbeat\r\nevent: extension\r\ndata: ignore\r\n\r\ndata: {"content":\r\ndata: "café", "status":"DONE"}\r\n\r\n',
+    );
+    expect((await new SSEHandler({}).processStream(response)).content).toBe(
+      "café",
+    );
+  });
+
+  it.each([false, true])(
+    "propagates malformed records and callback errors (buffered=%s)",
+    async (buffered) => {
+      const response = (body: string) =>
+        buffered
+          ? ({ body: null, text: async () => body } as Response)
+          : chunked(body);
+      await expect(
+        new SSEHandler({}).processStream(response("data: {bad}\n\n")),
+      ).rejects.toThrow();
+      await expect(
+        new SSEHandler({
+          onRawChunk: () => {
+            throw new Error("callback");
+          },
+        }).processStream(response("data: {}\n\n")),
+      ).rejects.toThrow("callback");
+    },
+  );
+
+  it.each([false, true])(
+    "checks authority between callbacks in a frame (buffered=%s)",
+    async (buffered) => {
+      const body = 'data: {"message_id":"m", "thread":{"id":"c"}, "content":"hello"}\n\n';
+      const response = buffered
+        ? ({ body: null, text: async () => body } as Response)
+        : createMockSSEStream([body]);
+      let allowed = true;
+      const onChunk = vi.fn();
+      const handler = new SSEHandler(
+        { onRawChunk: () => { allowed = false; }, onChunk },
+        { beforeProcess: () => { if (!allowed) throw new Error("detached"); } },
+      );
+
+      await expect(handler.processStream(response)).rejects.toThrow("detached");
+      expect(onChunk).not.toHaveBeenCalled();
+    },
+  );
+
   describe("processStream", () => {
     it("should parse basic SSE message with content", async () => {
       const onChunk = vi.fn();

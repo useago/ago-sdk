@@ -84,7 +84,11 @@ describe("stop(): interrupting a streaming turn", () => {
     client.on("message:stopped", () => events.push("stopped"));
     client.on("message:error", () => events.push("error"));
 
-    const chunked = client.waitFor("message:chunk");
+    const chunked = new Promise<void>((resolve) => {
+      client.on("message:chunk", (chunk) => {
+        if (chunk.content === "lo") resolve();
+      });
+    });
     const sent = client.sendMessage("hi");
     await chunked;
 
@@ -156,7 +160,11 @@ describe("stop(): interrupting a streaming turn", () => {
     vi.stubGlobal("fetch", fn);
     const client = makeClient();
 
-    const chunked = client.waitFor("message:chunk");
+    const chunked = new Promise<void>((resolve) => {
+      client.on("message:chunk", (chunk) => {
+        if (chunk.content === "lo") resolve();
+      });
+    });
     const sent = client.sendMessage("hi");
     await chunked;
 

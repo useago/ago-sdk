@@ -10,6 +10,7 @@ import type {
 } from "../proactive/types";
 import type { ContextSnapshot } from "../state/ClientContextRegistry";
 import type { StorageLike } from "../state/createStore";
+import type { AgoError } from "./errors";
 
 /**
  * A file referenced by URI, the shape React Native pickers return
@@ -71,7 +72,7 @@ export interface AgoConfig {
   /** User email for identification */
   userEmail?: string;
   /** JWT token for authenticated users */
-  userJwt?: string;
+  userJwt?: string | null;
   /** User metadata sent with messages. Use null to stop sending defaults. Not an authentication credential. */
   metadata?: Record<string, unknown> | null;
   /** Enable debug logging */
@@ -215,9 +216,30 @@ export interface AgoAttachment {
   isSafeImage: boolean;
 }
 
-/**
- * Message from AGO
- */
+export type MessageOutcome = "completed" | "incomplete" | "failed";
+export interface MessageProgress {
+  steps: Array<{
+    name: string;
+    status:
+      "pending" | "in_progress" | "completed" | "failed" | "not_completed";
+    reason: string | null;
+  }> | null;
+  activity: Array<{ text: string; timestamp: string | null }>;
+  truncated: boolean;
+}
+export interface MessageApproval {
+  id: string;
+  status: "pending" | "approved" | "rejected" | "expired";
+  actions: Array<{ name: string; arguments: Record<string, unknown> }>;
+  allowedDecisions: Array<"approve" | "reject">;
+  expiresAt: string | null;
+}
+export interface ConversationInteraction {
+  canSendMessage: boolean;
+  blockingMessageId: string | null;
+}
+
+/** Message from AGO. */
 export interface AgoMessage {
   id: string;
   conversationId: string;
@@ -243,6 +265,10 @@ export interface AgoMessage {
    */
   functionCalls?: FunctionCallState[];
   createdAt: Date;
+  progress?: MessageProgress | null;
+  approval?: MessageApproval | null;
+  outcome?: MessageOutcome | null;
+  canStop?: boolean;
 }
 
 /** Where a client-function call of a turn stands. */
@@ -279,7 +305,9 @@ export type MessageStatus =
    * every waiting call to be submitted, then the turn resumes via
    * `continueMessage`. Not a final state.
    */
-  | "WAITING_CLIENT";
+  | "WAITING_CLIENT"
+  | "WAITING_APPROVAL"
+  | "PAUSED";
 
 /**
  * Response of `POST /tool-calls/{id}/submit`. `resume` is only present when the
@@ -533,6 +561,7 @@ export interface Conversation {
   title: string;
   lastMessageDate: Date;
   messages?: AgoMessage[];
+  interaction?: ConversationInteraction;
 }
 
 /**
@@ -707,6 +736,10 @@ export interface SSEChunkData {
  * SDK Events
  */
 export interface AgoClientEvents {
+  "message:update": AgoMessage;
+  "conversation:update":
+    | { conversationId: string; interaction: ConversationInteraction }
+    | { conversationId: null; interaction: null };
   "config:changed": { language: string | null };
   /**
    * The client-side context changed: a context entry or dynamic provider was
@@ -847,6 +880,8 @@ export interface AgoClientEvents {
   };
   "connection:status": {
     connected: boolean;
+    conversationId?: string;
+    error?: AgoError;
   };
   /**
    * A proactive nudge passed every governor gate and is ready to display.

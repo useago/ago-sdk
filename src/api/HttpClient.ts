@@ -115,6 +115,7 @@ export class HttpClient {
   private headers: Record<string, string>;
   /** `config.fetch`, or `undefined` to use the global `fetch` at call time. */
   private customFetch: AgoFetch | undefined;
+  private pendingRequests = new Set<AbortController>();
 
   constructor(config: AgoConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, "");
@@ -141,7 +142,8 @@ export class HttpClient {
   }
 
   /**
-   * Update configuration (e.g., JWT token)
+   * Update request configuration. Set `userJwt` to null to clear the
+   * authorization header; omitting it or passing undefined retains it.
    */
   updateConfig(config: Partial<AgoConfig>): void {
     const language = normalizeLanguage(config.language);
@@ -157,7 +159,9 @@ export class HttpClient {
     if (config.userEmail) {
       this.headers["X-User-Email"] = config.userEmail;
     }
-    if (config.userJwt) {
+    if (config.userJwt === null) {
+      delete this.headers["Authorization"];
+    } else if (config.userJwt) {
       this.headers["Authorization"] = `Bearer ${config.userJwt}`;
     }
     if (config.permission !== undefined) {
@@ -183,8 +187,37 @@ export class HttpClient {
     return this.request<T>("GET", path);
   }
 
+  /** Abort pending JSON requests. Stream responses remain owned by their callers. */
+  abortPendingRequests(): void {
+    for (const controller of this.pendingRequests) controller.abort();
+  }
+
   /**
-   * Make a POST request with JSON body.
+   * Open a GET response for streaming with the configured credentials. The caller
+   * owns the response body; API errors and aborts propagate, and network failures
+   * become AgoNetworkError.
+   */
+  async getStream(path: string, signal?: AbortSignal): Promise<Response> {
+    try {
+      const response = await this.doFetch(`${this.baseUrl}${path}`, {
+        method: "GET",
+        headers: { ...this.headers },
+        signal,
+      });
+      if (!response.ok) await this.handleErrorResponse(response);
+      return response;
+    } catch (error) {
+      if (error instanceof AgoApiError || isAbortError(error)) throw error;
+      throw new AgoNetworkError(
+        "Network error while observing the conversation.",
+        error instanceof Error ? error : undefined,
+      );
+    }
+  }
+
+  /**
+   * Post JSON and return the parsed response, or undefined for a 204 response.
+   * API errors and aborts propagate; other failures become AgoNetworkError.
    *
    * `keepalive: true` lets the request survive a page unload (used by the
    * proactive event tracker's flush-on-hide — sendBeacon can't carry the auth
@@ -193,7 +226,7 @@ export class HttpClient {
   async post<T>(
     path: string,
     body?: unknown,
-    options?: { keepalive?: boolean }
+    options?: { keepalive?: boolean; signal?: AbortSignal }
   ): Promise<T> {
     return this.request<T>("POST", path, body, options);
   }
@@ -293,10 +326,16 @@ export class HttpClient {
     method: string,
     path: string,
     body?: unknown,
-    options?: { keepalive?: boolean }
+    options?: { keepalive?: boolean; signal?: AbortSignal }
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     logger.debug(method, url, body);
+    const controller = new AbortController();
+    const signal = options?.signal;
+    const onAbort = () => controller.abort();
+    if (signal?.aborted) controller.abort();
+    else signal?.addEventListener("abort", onAbort);
+    this.pendingRequests.add(controller);
 
     try {
       const response = await this.doFetch(url, {
@@ -307,6 +346,7 @@ export class HttpClient {
         },
         body: body ? JSON.stringify(body) : undefined,
         ...(options?.keepalive ? { keepalive: true } : {}),
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -318,9 +358,9 @@ export class HttpClient {
         return undefined as T;
       }
 
-      return response.json();
+      return await response.json();
     } catch (error) {
-      if (error instanceof AgoApiError) {
+      if (error instanceof AgoApiError || isAbortError(error)) {
         throw error;
       }
       throw new AgoNetworkError(
@@ -328,6 +368,9 @@ export class HttpClient {
           "Check that `baseUrl` is reachable and includes the protocol (https://).",
         error instanceof Error ? error : undefined
       );
+    } finally {
+      this.pendingRequests.delete(controller);
+      signal?.removeEventListener("abort", onAbort);
     }
   }
 
@@ -347,7 +390,8 @@ export class HttpClient {
 
     try {
       errorData = await response.json();
-    } catch {
+    } catch (error) {
+      if (isAbortError(error)) throw error;
       // Response is not JSON
     }
 

@@ -17,6 +17,25 @@ afterEach(() => {
 });
 
 describe("error sites carry problem + cause + fix + stable code", () => {
+  it("forwards the POST signal and preserves abort errors", async () => {
+    const controller = new AbortController();
+    const abort = new DOMException("Canceled", "AbortError");
+    const fetcher = vi.fn(async (_url: string, init: RequestInit) => {
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+      throw abort;
+    });
+    const http = new HttpClient({ baseUrl: "https://x.example.com", fetch: fetcher });
+
+    await expect(http.post("/decision", {}, { signal: controller.signal })).rejects.toBe(abort);
+  });
+
+  it("retains keepalive on JSON POST requests", async () => {
+    const fetcher = vi.fn(async (_url: string, _init: RequestInit) => new Response(null, { status: 204 }));
+    const http = new HttpClient({ baseUrl: "https://x.example.com", fetch: fetcher });
+    await expect(http.post<void>("/events", {}, { keepalive: true })).resolves.toBeUndefined();
+    expect(fetcher.mock.calls[0][1].keepalive).toBe(true);
+  });
+
   it("network failure: AgoNetworkError with protocol/reachability hint", async () => {
     vi.stubGlobal(
       "fetch",
