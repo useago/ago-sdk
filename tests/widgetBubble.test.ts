@@ -38,7 +38,11 @@ function fakeStorage(): StorageLike & { raw: Map<string, string> } {
 
 const HOUR = 60 * 60 * 1000;
 
-function thread(id: string, agoMs: number, title = `Thread ${id}`): Conversation {
+function thread(
+  id: string,
+  agoMs: number,
+  title = `Thread ${id}`,
+): Conversation {
   return { id, title, lastMessageDate: new Date(Date.now() - agoMs) };
 }
 
@@ -70,25 +74,39 @@ function mountBubble(
   const client = new AgoClient({ baseUrl: "https://example.test" });
   const listSpy = vi
     .spyOn(client, "getConversations")
-    .mockResolvedValue({ data: threads, hasMore: false, total: threads.length });
-  const getSpy = vi.spyOn(client, "getConversation").mockImplementation(
-    async (id) => ({
-      id,
-      title: `Thread ${id}`,
-      lastMessageDate: new Date(),
-      messages: [
-        {
-          id: `u-${id}`,
-          conversationId: id,
-          content: "earlier question",
-          role: "user",
-          status: "DONE",
-          createdAt: new Date(0),
-        },
-        assistant({ id: `a-${id}`, conversationId: id, content: "earlier answer" }),
-      ],
-    }),
+    .mockResolvedValue({
+      data: threads,
+      hasMore: false,
+      total: threads.length,
+    });
+  const historySpy = vi.fn(async (id: string) =>
+    ({
+            id,
+            title: `Thread ${id}`,
+            lastMessageDate: new Date(),
+            messages: [
+              {
+                id: `u-${id}`,
+                conversationId: id,
+                content: "earlier question",
+                role: "user",
+                status: "DONE",
+                createdAt: new Date(0),
+              },
+              assistant({
+                id: `a-${id}`,
+                conversationId: id,
+                content: "earlier answer",
+              }),
+            ],
+          }),
   );
+  const getConversation = client.conversation.bind(client);
+  vi.spyOn(client, "conversation").mockImplementation((id) => {
+    const conversation = getConversation(id);
+    if (id) vi.spyOn(conversation, "load").mockImplementation(() => historySpy(id));
+    return conversation;
+  });
   const storage = fakeStorage();
   setup?.(client);
   const widget = mountChatWidget(document.body, {
@@ -104,7 +122,7 @@ function mountBubble(
     root,
     storage,
     listSpy,
-    getSpy,
+    historySpy,
     launcher: () =>
       root.querySelector<HTMLButtonElement>(".ago-chat-widget-launcher")!,
     panel: () => root.querySelector<HTMLElement>(".ago-chat-widget-bubble")!,
@@ -123,7 +141,9 @@ describe("placement: bubble (launcher, teaser, panel)", () => {
     expect(launcher).not.toBeNull();
     expect(launcher.style.width).toBe("54px");
     expect(launcher.style.height).toBe("54px");
-    expect(launcher.style.backgroundColor).toContain("--ago-launcher-background");
+    expect(launcher.style.backgroundColor).toContain(
+      "--ago-launcher-background",
+    );
     expect(launcher.getAttribute("aria-expanded")).toBe("false");
     expect(b.panel().style.display).toBe("none");
     expect(b.panel().getAttribute("aria-hidden")).toBe("true");
@@ -141,7 +161,9 @@ describe("placement: bubble (launcher, teaser, panel)", () => {
     expect(teaser).not.toBeNull();
     expect(teaser!.textContent).toContain("Need a hand?");
 
-    teaser!.querySelector<HTMLElement>(".ago-chat-widget-teaser__text")!.click();
+    teaser!
+      .querySelector<HTMLElement>(".ago-chat-widget-teaser__text")!
+      .click();
     expect(b.panel().style.display).toBe("block");
     expect(b.teaser()).toBeNull();
     expect(onOpen).toHaveBeenCalledTimes(1);
@@ -152,7 +174,9 @@ describe("placement: bubble (launcher, teaser, panel)", () => {
     vi.useFakeTimers();
     const b = mountBubble();
     vi.advanceTimersByTime(1000);
-    b.teaser()!.querySelector<HTMLButtonElement>(".ago-chat-widget-teaser__close")!.click();
+    b.teaser()!
+      .querySelector<HTMLButtonElement>(".ago-chat-widget-teaser__close")!
+      .click();
     expect(b.teaser()).toBeNull();
     expect(b.panel().style.display).toBe("none");
     b.cleanup();
@@ -178,7 +202,9 @@ describe("placement: bubble (launcher, teaser, panel)", () => {
     // Desktop: the launcher stays visible while open and toggles.
     expect(b.launcher().style.display).toBe("flex");
 
-    b.panel().querySelector<HTMLButtonElement>(".ago-chat-widget__close")!.click();
+    b.panel()
+      .querySelector<HTMLButtonElement>(".ago-chat-widget__close")!
+      .click();
     expect(b.panel().style.display).toBe("none");
     expect(onClose).toHaveBeenCalledTimes(1);
 
@@ -203,9 +229,9 @@ describe("placement: bubble (launcher, teaser, panel)", () => {
 
   it("shows the default title and a two-tab footer, Home active", () => {
     const b = mountBubble();
-    expect(b.panel().querySelector(".ago-chat-widget__title")!.textContent).toBe(
-      "AGO Chatbot",
-    );
+    expect(
+      b.panel().querySelector(".ago-chat-widget__title")!.textContent,
+    ).toBe("AGO Chatbot");
     const tabs = b.panel().querySelectorAll(".ago-chat-widget__tab");
     expect(tabs).toHaveLength(2);
     expect(tabs[0].getAttribute("aria-current")).toBe("page");
@@ -234,17 +260,21 @@ describe("placement: bubble (launcher, teaser, panel)", () => {
 
   it("derives the header text color from the header background", () => {
     const light = mountBubble({ theme: { headerBg: "#ffffff" } });
-    const container = light.panel().querySelector<HTMLElement>(".ago-chat-widget")!;
+    const container = light
+      .panel()
+      .querySelector<HTMLElement>(".ago-chat-widget")!;
     expect(container.style.getPropertyValue("--ago-header-text-color")).toBe(
       "#000000",
     );
     light.cleanup();
 
     const dark = mountBubble();
-    const darkContainer = dark.panel().querySelector<HTMLElement>(".ago-chat-widget")!;
-    expect(darkContainer.style.getPropertyValue("--ago-header-text-color")).toBe(
-      "#FFFFFF",
-    );
+    const darkContainer = dark
+      .panel()
+      .querySelector<HTMLElement>(".ago-chat-widget")!;
+    expect(
+      darkContainer.style.getPropertyValue("--ago-header-text-color"),
+    ).toBe("#FFFFFF");
     dark.cleanup();
   });
 
@@ -257,16 +287,26 @@ describe("placement: bubble (launcher, teaser, panel)", () => {
       },
     });
     const panel = b.panel();
-    expect(panel.style.getPropertyValue("--ago-launcher-background")).toBe("#ff0000");
-    expect(panel.style.getPropertyValue("--ago-send-button-background")).toBe("#ff0000");
+    expect(panel.style.getPropertyValue("--ago-launcher-background")).toBe(
+      "#ff0000",
+    );
+    expect(panel.style.getPropertyValue("--ago-send-button-background")).toBe(
+      "#ff0000",
+    );
     expect(panel.style.getPropertyValue("--ago-header-background")).toContain(
       "linear-gradient",
     );
-    expect(panel.style.getPropertyValue("--ago-panel-background")).toBe("#f0f0f0");
-    const header = panel.querySelector<HTMLElement>(".ago-chat-widget__header")!;
+    expect(panel.style.getPropertyValue("--ago-panel-background")).toBe(
+      "#f0f0f0",
+    );
+    const header = panel.querySelector<HTMLElement>(
+      ".ago-chat-widget__header",
+    )!;
     expect(header.style.background).toContain("--ago-header-background");
     // The launcher sits outside the panel, so it carries the token itself.
-    expect(b.launcher().style.getPropertyValue("--ago-launcher-background")).toBe("#ff0000");
+    expect(
+      b.launcher().style.getPropertyValue("--ago-launcher-background"),
+    ).toBe("#ff0000");
     b.cleanup();
   });
 
@@ -292,10 +332,12 @@ describe("placement: bubble (screens)", () => {
     await flush();
     b.widget.showScreen!("history");
     expect(b.widget.screen).toBe("history");
-    expect(b.panel().querySelector(".ago-chat-widget__title")!.textContent).toBe(
-      "History",
-    );
-    const rows = b.panel().querySelectorAll<HTMLElement>(".ago-chat-widget__thread");
+    expect(
+      b.panel().querySelector(".ago-chat-widget__title")!.textContent,
+    ).toBe("History");
+    const rows = b
+      .panel()
+      .querySelectorAll<HTMLElement>(".ago-chat-widget__thread");
     expect(rows).toHaveLength(2);
     expect(rows[0].querySelector("h3")!.textContent).toBe("Newer");
     expect(rows[0].textContent).toContain("5h ago");
@@ -304,14 +346,17 @@ describe("placement: bubble (screens)", () => {
 
     rows[0].click();
     await flush();
-    expect(b.getSpy).toHaveBeenCalledWith("new");
+    expect(b.client.getActiveConversation()).toBe("new");
     expect(b.widget.screen).toBe("chat");
     expect(b.panel().textContent).toContain("earlier answer");
     // Drill-in chrome: back chevron shown, footer hidden.
-    const back = b.panel().querySelector<HTMLElement>(".ago-chat-widget__back")!;
+    const back = b
+      .panel()
+      .querySelector<HTMLElement>(".ago-chat-widget__back")!;
     expect(back.style.display).toBe("flex");
     expect(
-      b.panel().querySelector<HTMLElement>(".ago-chat-widget__footer")!.style.display,
+      b.panel().querySelector<HTMLElement>(".ago-chat-widget__footer")!.style
+        .display,
     ).toBe("none");
 
     back.click();
@@ -346,7 +391,7 @@ describe("placement: bubble (screens)", () => {
       .mockResolvedValue(assistant({ conversationId: "conv-9" }));
     await b.widget.sendMessage("hello");
     expect(sendSpy).toHaveBeenCalledWith("hello", {
-      conversationId: undefined,
+      conversationId: expect.stringMatching(/^draft-/),
       files: undefined,
     });
     expect(b.widget.screen).toBe("chat");
@@ -358,16 +403,20 @@ describe("placement: bubble (screens)", () => {
     vi.spyOn(b.client, "sendMessage").mockResolvedValue(assistant());
     expect(b.widget.screen).toBe("home");
     // The composer lives on the home screen while it is shown.
-    expect(b.panel().querySelector(".ago-chat-widget__home textarea")).not.toBeNull();
+    expect(
+      b.panel().querySelector(".ago-chat-widget__home textarea"),
+    ).not.toBeNull();
     await b.widget.sendMessage("hello");
     expect(b.widget.screen).toBe("chat");
-    expect(b.panel().querySelector(".ago-chat-widget__chat textarea")).not.toBeNull();
-    expect(b.panel().querySelector(".ago-message--user")!.textContent).toContain(
-      "hello",
-    );
-    expect(b.panel().querySelector(".ago-message--assistant")!.textContent).toContain(
-      "Hi there!",
-    );
+    expect(
+      b.panel().querySelector(".ago-chat-widget__chat textarea"),
+    ).not.toBeNull();
+    expect(
+      b.panel().querySelector(".ago-message--user")!.textContent,
+    ).toContain("hello");
+    expect(
+      b.panel().querySelector(".ago-message--assistant")!.textContent,
+    ).toContain("Hi there!");
     b.cleanup();
   });
 
@@ -380,13 +429,21 @@ describe("placement: bubble (screens)", () => {
         { label: "Support" },
       ],
     });
-    const sendSpy = vi.spyOn(b.client, "sendMessage").mockResolvedValue(assistant());
-    const home = b.panel().querySelector<HTMLElement>(".ago-chat-widget__home")!;
-    expect(home.querySelectorAll(".ago-chat-widget__home-title > div")).toHaveLength(2);
-    expect(home.querySelector(".ago-chat-widget__home-subtitle strong")!.textContent).toBe(
-      "anything",
+    const sendSpy = vi
+      .spyOn(b.client, "sendMessage")
+      .mockResolvedValue(assistant());
+    const home = b
+      .panel()
+      .querySelector<HTMLElement>(".ago-chat-widget__home")!;
+    expect(
+      home.querySelectorAll(".ago-chat-widget__home-title > div"),
+    ).toHaveLength(2);
+    expect(
+      home.querySelector(".ago-chat-widget__home-subtitle strong")!.textContent,
+    ).toBe("anything");
+    const cards = home.querySelectorAll<HTMLButtonElement>(
+      ".ago-chat-widget__starter",
     );
-    const cards = home.querySelectorAll<HTMLButtonElement>(".ago-chat-widget__starter");
     expect(cards).toHaveLength(2);
     cards[0].click();
     await flush();
@@ -403,7 +460,7 @@ describe("placement: bubble (auto-resume)", () => {
   it("reopens a thread whose last message is under two hours old", async () => {
     const b = mountBubble({}, [thread("fresh", HOUR)]);
     await flush();
-    expect(b.getSpy).toHaveBeenCalledWith("fresh");
+    expect(b.client.getActiveConversation()).toBe("fresh");
     expect(b.widget.screen).toBe("chat");
     b.cleanup();
   });
@@ -411,7 +468,7 @@ describe("placement: bubble (auto-resume)", () => {
   it("stays home when the newest thread is stale", async () => {
     const b = mountBubble({}, [thread("stale", 3 * HOUR)]);
     await flush();
-    expect(b.getSpy).not.toHaveBeenCalled();
+    expect(b.client.getActiveConversation()).toBeNull();
     expect(b.widget.screen).toBe("home");
     b.cleanup();
   });
@@ -419,7 +476,7 @@ describe("placement: bubble (auto-resume)", () => {
   it("stays home with autoResume: false", async () => {
     const b = mountBubble({ autoResume: false }, [thread("fresh", HOUR)]);
     await flush();
-    expect(b.getSpy).not.toHaveBeenCalled();
+    expect(b.client.getActiveConversation()).toBeNull();
     expect(b.widget.screen).toBe("home");
     b.cleanup();
   });
@@ -428,7 +485,7 @@ describe("placement: bubble (auto-resume)", () => {
     const b = mountBubble({}, [thread("fresh", HOUR)]);
     b.widget.showScreen!("history");
     await flush();
-    expect(b.getSpy).not.toHaveBeenCalled();
+    expect(b.client.getActiveConversation()).toBeNull();
     expect(b.widget.screen).toBe("history");
     b.cleanup();
   });
@@ -443,15 +500,14 @@ describe("placement: bubble (auto-resume)", () => {
     const b = mountBubble({ persistConversation: { storage } });
     expect(b.widget.screen).toBe("chat");
     await flush();
-    expect(b.getSpy).toHaveBeenCalledWith("cached");
+    expect(b.client.getActiveConversation()).toBe("cached");
     b.cleanup();
   });
 
   it("opens an explicit conversationId directly", async () => {
     const b = mountBubble({ conversationId: "given" }, [thread("fresh", HOUR)]);
     await flush();
-    expect(b.getSpy).toHaveBeenCalledWith("given");
-    expect(b.getSpy).not.toHaveBeenCalledWith("fresh");
+    expect(b.client.getActiveConversation()).toBe("given");
     expect(b.widget.screen).toBe("chat");
     b.cleanup();
   });
@@ -463,7 +519,7 @@ describe("placement: bubble (auto-resume)", () => {
     first.cleanup();
 
     const b = mountBubble({ persistConversation: { storage } });
-    b.getSpy.mockRejectedValue(new Error("404"));
+    b.historySpy.mockRejectedValue(new Error("404"));
     // The mount already kicked off the load with the earlier mock; wait for it.
     await flush();
     // Re-open to exercise the failure path explicitly.
@@ -564,22 +620,28 @@ describe("placement: bubble (loadHomeConfig)", () => {
       [],
       stubConfig(homePage),
     );
-    const sendSpy = vi.spyOn(b.client, "sendMessage").mockResolvedValue(assistant());
+    const sendSpy = vi
+      .spyOn(b.client, "sendMessage")
+      .mockResolvedValue(assistant());
     await flush();
 
-    const home = b.panel().querySelector<HTMLElement>(".ago-chat-widget__home")!;
-    expect(home.querySelector(".ago-chat-widget__home-title")!.textContent).toBe(
-      "How can we help?",
-    );
-    expect(home.querySelector(".ago-chat-widget__home-subtitle strong")!.textContent).toBe(
-      "docs",
-    );
+    const home = b
+      .panel()
+      .querySelector<HTMLElement>(".ago-chat-widget__home")!;
+    expect(
+      home.querySelector(".ago-chat-widget__home-title")!.textContent,
+    ).toBe("How can we help?");
+    expect(
+      home.querySelector(".ago-chat-widget__home-subtitle strong")!.textContent,
+    ).toBe("docs");
     // The header keeps the option's title, as in the hosted widget.
-    expect(b.panel().querySelector(".ago-chat-widget__header")!.textContent).toContain(
-      "Ask AGO",
-    );
+    expect(
+      b.panel().querySelector(".ago-chat-widget__header")!.textContent,
+    ).toContain("Ask AGO");
 
-    const cards = home.querySelectorAll<HTMLButtonElement>(".ago-chat-widget__starter");
+    const cards = home.querySelectorAll<HTMLButtonElement>(
+      ".ago-chat-widget__starter",
+    );
     expect(cards).toHaveLength(1);
     expect(cards[0].textContent).toContain("How much does it cost?");
     cards[0].click();
@@ -603,17 +665,27 @@ describe("placement: bubble (loadHomeConfig)", () => {
       stubConfig({ starters: [] }),
     );
     await flush();
-    const home = b.panel().querySelector<HTMLElement>(".ago-chat-widget__home")!;
-    expect(home.querySelector(".ago-chat-widget__home-title")!.textContent).toBe("Ask AGO");
-    expect(home.querySelector(".ago-chat-widget__home-subtitle")!.textContent).toBe("kept");
+    const home = b
+      .panel()
+      .querySelector<HTMLElement>(".ago-chat-widget__home")!;
+    expect(
+      home.querySelector(".ago-chat-widget__home-title")!.textContent,
+    ).toBe("Ask AGO");
+    expect(
+      home.querySelector(".ago-chat-widget__home-subtitle")!.textContent,
+    ).toBe("kept");
     expect(home.querySelectorAll(".ago-chat-widget__starter")).toHaveLength(1);
     b.cleanup();
   });
 
   it("keeps the home screen when the config request fails", async () => {
-    const b = mountBubble({ loadHomeConfig: true, title: "Ask AGO" }, [], (client) => {
-      vi.spyOn(client, "getConfig").mockRejectedValue(new Error("offline"));
-    });
+    const b = mountBubble(
+      { loadHomeConfig: true, title: "Ask AGO" },
+      [],
+      (client) => {
+        vi.spyOn(client, "getConfig").mockRejectedValue(new Error("offline"));
+      },
+    );
     await flush();
     expect(
       b.panel().querySelector(".ago-chat-widget__home-title")!.textContent,
@@ -630,7 +702,9 @@ describe("placement: bubble (loadHomeConfig)", () => {
         widgetStarter: { id: "ws1", message: "Hi! Anything I can look up?" },
       }),
     );
-    const sendSpy = vi.spyOn(b.client, "sendMessage").mockResolvedValue(assistant());
+    const sendSpy = vi
+      .spyOn(b.client, "sendMessage")
+      .mockResolvedValue(assistant());
     await flush();
     await flush();
     // Nothing is spent on a visitor who never clicks the launcher.
@@ -655,12 +729,14 @@ describe("placement: bubble (loadHomeConfig)", () => {
         widgetStarter: { id: "ws1", message: "Hi! Anything I can look up?" },
       }),
     );
-    const sendSpy = vi.spyOn(b.client, "sendMessage").mockResolvedValue(assistant());
+    const sendSpy = vi
+      .spyOn(b.client, "sendMessage")
+      .mockResolvedValue(assistant());
     await flush();
     await flush();
     b.launcher().click();
     await flush();
-    expect(b.getSpy).toHaveBeenCalledWith("fresh");
+    expect(b.client.getActiveConversation()).toBe("fresh");
     expect(sendSpy).not.toHaveBeenCalled();
     b.cleanup();
   });

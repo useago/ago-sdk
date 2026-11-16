@@ -3,7 +3,7 @@ import { AgoClient } from "../src/client/AgoClient";
 import type { AgoMessage, Conversation } from "../src/client/types";
 import type { CreateFormCollectorOptions } from "../src/forms/createFormCollector";
 import type { StorageLike } from "../src/state/createStore";
-import { createMockClient } from "../src/testing/createMockClient";
+import { createMockClient } from "./widgetMockClient";
 import { mountChatWidget } from "../src/widget/createChatWidget";
 
 // The widget loads the conversation list on mount (refreshThreads → getConversations).
@@ -211,7 +211,8 @@ describe("mountChatWidget", () => {
     await completeOrderForm(client);
 
     expect(onFormSubmitting).toHaveBeenCalledExactlyOnceWith({
-      name: "order", values: { product: "Widget", quantity: 2 },
+      name: "order",
+      values: { product: "Widget", quantity: 2 },
     });
     expect(onFormSubmitted).toHaveBeenCalledWith({
       name: "order",
@@ -511,7 +512,9 @@ describe("mountChatWidget", () => {
       const launcher = root.querySelector<HTMLElement>(
         ".ago-chat-widget-launcher",
       )!;
-      expect(launcher.style.getPropertyValue("--ago-brand-color")).toBe("#ff0000");
+      expect(launcher.style.getPropertyValue("--ago-brand-color")).toBe(
+        "#ff0000",
+      );
 
       widget.destroy();
       root.remove();
@@ -1098,9 +1101,7 @@ describe("mountChatWidget", () => {
       // the reply and its answer land in the full view.
       button.click();
       expect(container.style.position).toBe("fixed");
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(sent).toEqual(["hello", "Pricing"]);
+      await vi.waitFor(() => expect(sent).toEqual(["hello", "Pricing"]));
 
       widget.destroy();
       root.remove();
@@ -1162,9 +1163,7 @@ describe("mountChatWidget", () => {
 
       button.click();
       expect(container.style.position).toBe("fixed");
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(sent).toEqual(["hello", "Pricing"]);
+      await vi.waitFor(() => expect(sent).toEqual(["hello", "Pricing"]));
 
       widget.destroy();
       root.remove();
@@ -1251,7 +1250,9 @@ describe("mountChatWidget", () => {
       const widget = mountChatWidget(root, { client: mock });
       void widget.sendMessage("hello");
 
-      const pane = root.querySelector<HTMLElement>(".ago-chat-widget__messages")!;
+      const pane = root.querySelector<HTMLElement>(
+        ".ago-chat-widget__messages",
+      )!;
       const userNodeBefore = pane.querySelector(".ago-message--user");
 
       mock.__emitEvent("message:chunk", {
@@ -1284,7 +1285,9 @@ describe("mountChatWidget", () => {
       const root = document.createElement("div");
       document.body.appendChild(root);
       const widget = mountChatWidget(root, { client: mock });
-      const pane = root.querySelector<HTMLElement>(".ago-chat-widget__messages")!;
+      const pane = root.querySelector<HTMLElement>(
+        ".ago-chat-widget__messages",
+      )!;
 
       expect(pane.getAttribute("aria-busy")).toBe("false");
       void widget.sendMessage("hello");
@@ -1304,7 +1307,9 @@ describe("mountChatWidget", () => {
       const root = document.createElement("div");
       document.body.appendChild(root);
       const widget = mountChatWidget(root, { client: mock });
-      const pane = root.querySelector<HTMLElement>(".ago-chat-widget__messages")!;
+      const pane = root.querySelector<HTMLElement>(
+        ".ago-chat-widget__messages",
+      )!;
       const jump = root.querySelector<HTMLElement>(".ago-chat-widget__jump")!;
       sizePane(pane);
 
@@ -1346,7 +1351,9 @@ describe("mountChatWidget", () => {
       const root = document.createElement("div");
       document.body.appendChild(root);
       const widget = mountChatWidget(root, { client });
-      const pane = root.querySelector<HTMLElement>(".ago-chat-widget__messages")!;
+      const pane = root.querySelector<HTMLElement>(
+        ".ago-chat-widget__messages",
+      )!;
       sizePane(pane);
 
       pane.scrollTop = 0;
@@ -1427,7 +1434,9 @@ describe("mountChatWidget", () => {
       expect(attach.style.minWidth).toBe("44px");
       expect(attach.style.minHeight).toBe("44px");
 
-      const pill = root.querySelector<HTMLElement>(".ago-message__followup-btn")!;
+      const pill = root.querySelector<HTMLElement>(
+        ".ago-message__followup-btn",
+      )!;
       expect(pill.style.minHeight).toBe("44px");
 
       widget.destroy();
@@ -1439,7 +1448,10 @@ describe("mountChatWidget", () => {
   describe("compact side panel + host-safe scroll lock", () => {
     /** Same shape as the mobile-fullscreen stub, scoped to this block. */
     function stubCompact(state: { mobile: boolean }) {
-      const listeners = new Map<string, Set<(e: { matches: boolean }) => void>>();
+      const listeners = new Map<
+        string,
+        Set<(e: { matches: boolean }) => void>
+      >();
       vi.stubGlobal(
         "matchMedia",
         vi.fn((query: string) => {
@@ -1689,9 +1701,7 @@ describe("mountChatWidget", () => {
       const sendSpy = vi
         .spyOn(client, "sendMessage")
         .mockResolvedValue(makeAssistantMessage());
-      const getSpy = vi
-        .spyOn(client, "getConversation")
-        .mockResolvedValue(makeConversation("conv-restored"));
+      vi.spyOn(client.conversation("conv-restored"), "load").mockResolvedValue(makeConversation("conv-restored"));
 
       const root = document.createElement("div");
       document.body.appendChild(root);
@@ -1704,7 +1714,7 @@ describe("mountChatWidget", () => {
 
       // The resumed id comes from the front cache, and its history is loaded by id —
       // no need to look it up in the conversations list.
-      expect(getSpy).toHaveBeenCalledWith("conv-restored");
+      expect(client.getActiveConversation()).toBe("conv-restored");
       expect(sendSpy).toHaveBeenCalledWith(
         "hi",
         expect.objectContaining({ conversationId: "conv-restored" }),
@@ -1805,7 +1815,7 @@ describe("mountChatWidget", () => {
       expect(getSpy).not.toHaveBeenCalled();
       expect(sendSpy).toHaveBeenCalledWith(
         "hi",
-        expect.objectContaining({ conversationId: undefined }),
+        expect.objectContaining({ conversationId: expect.stringMatching(/^draft-/) }),
       );
 
       sendSpy.mockRestore();
@@ -1852,7 +1862,7 @@ describe("mountChatWidget", () => {
       const sendSpy = vi
         .spyOn(client, "sendMessage")
         .mockResolvedValue(makeAssistantMessage());
-      vi.spyOn(client, "getConversation").mockResolvedValue(
+      vi.spyOn(client.conversation("conv-explicit"), "load").mockResolvedValue(
         makeConversation("conv-explicit"),
       );
 
@@ -1894,7 +1904,7 @@ describe("mountChatWidget", () => {
       const storage = fakeStorage();
       seedThread(storage, "conv-restored", Date.now());
       const client = new AgoClient({ baseUrl: "https://example.test" });
-      vi.spyOn(client, "getConversation").mockResolvedValue(
+      vi.spyOn(client.conversation("conv-restored"), "load").mockResolvedValue(
         makeConversation("conv-restored", [
           {
             id: "m1",
@@ -1930,7 +1940,7 @@ describe("mountChatWidget", () => {
       const storage = fakeStorage();
       seedThread(storage, "conv-files", Date.now());
       const client = new AgoClient({ baseUrl: "https://example.test" });
-      vi.spyOn(client, "getConversation").mockResolvedValue(
+      vi.spyOn(client.conversation("conv-files"), "load").mockResolvedValue(
         makeConversation("conv-files", [
           {
             id: "m1",
@@ -2022,9 +2032,10 @@ describe("mountChatWidget", () => {
       return { client, root, widget, stopSpy };
     }
 
-    it("replaces send with an enabled Stop button while the agent answers", () => {
+    it("replaces send with an enabled Stop button while the agent answers", async () => {
       const { client, root, widget, stopSpy } = mountAnswering();
 
+      await vi.waitFor(() => expect(root.querySelector('.ago-chat-input button[aria-label="Stop generating"]')).not.toBeNull());
       const stopBtn = root.querySelector<HTMLButtonElement>(
         '.ago-chat-input button[aria-label="Stop generating"]',
       );
@@ -2045,7 +2056,9 @@ describe("mountChatWidget", () => {
       });
 
       expect(
-        root.querySelector('.ago-chat-input button[aria-label="Stop generating"]'),
+        root.querySelector(
+          '.ago-chat-input button[aria-label="Stop generating"]',
+        ),
       ).toBeNull();
       const sendBtn = root.querySelector<HTMLButtonElement>(
         '.ago-chat-input button[aria-label="Send"]',
@@ -2087,7 +2100,9 @@ describe("mountChatWidget", () => {
       expect(root.textContent).toContain("Partial");
       // The input is released: the Stop button is gone, send is back.
       expect(
-        root.querySelector('.ago-chat-input button[aria-label="Stop generating"]'),
+        root.querySelector(
+          '.ago-chat-input button[aria-label="Stop generating"]',
+        ),
       ).toBeNull();
 
       widget.destroy();
@@ -2098,7 +2113,9 @@ describe("mountChatWidget", () => {
 
 it("switches text-only widget chrome without fetching form config or losing the composer draft", () => {
   const getConfig = vi.fn();
-  const client = createMockClient({ overrides: { getConfig, getLanguage: () => "fr" } });
+  const client = createMockClient({
+    overrides: { getConfig, getLanguage: () => "fr" },
+  });
   const host = document.createElement("div");
   document.body.append(host);
   const widget = mountChatWidget(host, { client });
@@ -2111,5 +2128,688 @@ it("switches text-only widget chrome without fetching form config or losing the 
     expect(input.value).toBe("Unsent draft");
     expect(host.querySelector('button[aria-label="Senden"]')).not.toBeNull();
     expect(getConfig).not.toHaveBeenCalled();
-  } finally { widget.destroy(); host.remove(); }
+  } finally {
+    widget.destroy();
+    host.remove();
+  }
+});
+
+describe("background state", () => {
+  it("replaces privileged approval data, blocks input and submits the exact approval", async () => {
+    const client = createMockClient({
+      overrides: {
+        getConversation: async () => ({
+          id: "conv-1",
+          title: "Thread",
+          lastMessageDate: new Date(),
+          messages: [],
+        }),
+        submitApprovalDecision: async () => undefined,
+      },
+    });
+    const root = document.createElement("div");
+    document.body.append(root);
+    const widget = mountChatWidget(root, {
+      client,
+      conversationId: "conv-1",
+      welcomeMessage: "",
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    const message = makeAssistantMessage({
+      status: "WAITING_APPROVAL",
+      canStop: false,
+      content: "",
+      progress: {
+        steps: null,
+        activity: [{ text: "Working", timestamp: null }],
+        truncated: false,
+      },
+      approval: {
+        id: "approval-a",
+        status: "pending",
+        allowedDecisions: ["approve", "reject"],
+        actions: [
+          {
+            name: "publish",
+            arguments: { input: "<img src=x onerror=alert(1)>" },
+          },
+        ],
+        expiresAt: null,
+      },
+    });
+    client.__emitEvent("conversation:update", {
+      conversationId: "conv-1",
+      interaction: { canSendMessage: false, blockingMessageId: message.id },
+    });
+    client.__emitEvent("message:update", message);
+    expect(root.textContent).toContain("Working");
+    expect(root.textContent).toContain("<img src=x onerror=alert(1)>");
+    expect(root.querySelector(".ago-background-state img")).toBeNull();
+    expect(root.querySelector("textarea")?.disabled).toBe(true);
+    const approve = [
+      ...root.querySelectorAll(".ago-background-state button"),
+    ].find((b) => b.textContent === "Approve")!;
+    approve.click();
+    await Promise.resolve();
+    expect(client.__callsFor("submitApprovalDecision")[0]?.args).toEqual([
+      "approval-a",
+      "approve",
+    ]);
+    client.__emitEvent("message:update", {
+      ...message,
+      approval: { ...message.approval!, actions: [], allowedDecisions: [] },
+    });
+    expect(root.textContent).not.toContain("<img src=x");
+    expect(root.querySelectorAll(".ago-background-state button")).toHaveLength(0);
+    await widget.sendMessage("blocked");
+    expect(client.__callsFor("sendMessage")).toHaveLength(0);
+    widget.destroy();
+    root.remove();
+  });
+});
+
+describe("background response ownership", () => {
+  it("keeps a fast fork final snapshot when the initial send settles later", async () => {
+    let finish!: (message: AgoMessage) => void;
+    const client = createMockClient({
+      overrides: {
+        sendMessage: () =>
+          new Promise<AgoMessage>((resolve) => {
+            finish = resolve;
+          }),
+      },
+    });
+    const root = document.createElement("div");
+    document.body.append(root);
+    const widget = mountChatWidget(root, { client, welcomeMessage: "" });
+    const sent = widget.sendMessage("hello");
+    client.__emitEvent(
+      "message:update",
+      makeAssistantMessage({
+        id: "fork-answer",
+        conversationId: "fork",
+        content: "Final report",
+        status: "DONE",
+        canStop: false,
+      }),
+    );
+    client.__emitEvent("conversation:update", {
+      conversationId: "fork",
+      interaction: { canSendMessage: true, blockingMessageId: null },
+    });
+    finish(
+      makeAssistantMessage({
+        id: "fork-answer",
+        conversationId: "fork",
+        content: "Old running state",
+        status: "IN_PROGRESS",
+        canStop: false,
+      }),
+    );
+    await sent;
+    expect(root.textContent).toContain("Final report");
+    expect(root.textContent).not.toContain("Old running state");
+    widget.destroy();
+    root.remove();
+  });
+
+  it("suspends a hidden server-owned response and reopens without Stop", async () => {
+    const waiting = makeAssistantMessage({
+      id: "job",
+      content: "Waiting",
+      status: "WAITING_APPROVAL",
+      canStop: false,
+    });
+    const client = createMockClient({
+      overrides: {
+        getConversation: async () => ({
+          id: "conv-1",
+          title: "Thread",
+          lastMessageDate: new Date(),
+          messages: [waiting],
+          interaction: { canSendMessage: false, blockingMessageId: "job" },
+        }),
+      },
+    });
+    const activate = vi.spyOn(client, "setActiveConversation");
+    const root = document.createElement("div");
+    document.body.append(root);
+    const widget = mountChatWidget(root, {
+      client,
+      placement: "right",
+      defaultOpen: true,
+      conversationId: "conv-1",
+    });
+    await vi.waitFor(() => expect(root.textContent).toContain("Waiting"));
+    widget.close?.();
+    expect(activate).not.toHaveBeenCalledWith(null);
+    expect(client.getActiveConversation()).toBe("conv-1");
+    expect(client.__callsFor("stop")).toHaveLength(0);
+    widget.open?.();
+    await vi.waitFor(() =>
+      expect(
+        activate.mock.calls.filter(([id]) => id === "conv-1"),
+      ).toHaveLength(1),
+    );
+    widget.destroy();
+    root.remove();
+  });
+
+  it("clears drafts and prevents a late old send from repopulating after a session reset", async () => {
+    let finish!: (message: AgoMessage) => void;
+    const client = createMockClient({
+      overrides: {
+        sendMessage: () =>
+          new Promise<AgoMessage>((resolve) => {
+            finish = resolve;
+          }),
+      },
+    });
+    const root = document.createElement("div");
+    document.body.append(root);
+    const widget = mountChatWidget(root, { client, welcomeMessage: "" });
+    const sent = widget.sendMessage("old secret");
+    client.__emitEvent("conversation:update", {
+      conversationId: null,
+      interaction: null,
+    });
+    finish(makeAssistantMessage({ content: "old private response" }));
+    await sent;
+    expect(root.textContent).not.toContain("old secret");
+    expect(root.textContent).not.toContain("old private response");
+    expect(root.querySelector("textarea")?.value).toBe("");
+    widget.destroy();
+    root.remove();
+  });
+});
+
+describe("session-bound forms", () => {
+  it("does not restore a form notice after a pending submission crosses logout", async () => {
+    let finish!: (value: { message: string }) => void;
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const root = document.createElement("div");
+    document.body.append(root);
+    const widget = mountChatWidget(root, {
+      client,
+      forms: [
+        {
+          ...orderForm,
+          submit: {
+            via: "client",
+            handler: () =>
+              new Promise((resolve) => {
+                finish = resolve;
+              }),
+          },
+        },
+      ],
+    });
+    const registry = (
+      client as unknown as {
+        functionRegistry: {
+          execute(
+            name: string,
+            args: Record<string, unknown>,
+          ): Promise<unknown>;
+        };
+      }
+    ).functionRegistry;
+    const pending = registry.execute("update_order", {
+      product: "item",
+      quantity: 1,
+    });
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    client.updateConfig({ userJwt: null });
+    finish({ message: "private old form result" });
+    await pending;
+    expect(root.textContent).not.toContain("private old form result");
+    widget.destroy();
+    client.destroy();
+    root.remove();
+  });
+});
+
+describe("preparation policy", () => {
+  it("blocks the composer and programmatic send before an assistant message exists", async () => {
+    const client = createMockClient({
+      overrides: {
+        getConversation: async () => ({
+          id: "conv-1",
+          title: "Thread",
+          lastMessageDate: new Date(),
+          messages: [],
+          interaction: { canSendMessage: false, blockingMessageId: null },
+        }),
+      },
+    });
+    const root = document.createElement("div");
+    document.body.append(root);
+    const widget = mountChatWidget(root, {
+      client,
+      conversationId: "conv-1",
+      welcomeMessage: "",
+    });
+    await vi.waitFor(() =>
+      expect(root.querySelector("textarea")?.disabled).toBe(true),
+    );
+    await widget.sendMessage("should not send");
+    expect(client.__callsFor("sendMessage")).toHaveLength(0);
+    widget.destroy();
+    root.remove();
+  });
+});
+
+describe("send ownership", () => {
+  it("does not send after the onMessageSent callback resets the session", async () => {
+    const client = new AgoClient({
+      baseUrl: "https://example.test",
+      userJwt: "old",
+    });
+    const send = vi.spyOn(client, "sendMessage");
+    const root = document.createElement("div");
+    document.body.append(root);
+    const widget = mountChatWidget(root, {
+      client,
+      onMessageSent: () => client.updateConfig({ userJwt: null }),
+    });
+    await widget.sendMessage("secret");
+    expect(send).not.toHaveBeenCalled();
+    widget.destroy();
+    client.destroy();
+    root.remove();
+  });
+});
+
+describe("navigation cancellation", () => {
+  it.each(["open", "new"] as const)(
+    "keeps ordinary automatic Stop when navigating to %s",
+    async (destination) => {
+      const client = createMockClient({
+        overrides: {
+          sendMessage: () => new Promise(() => {}),
+          getConversation: async (id: string) => ({
+            id,
+            title: "Thread",
+            lastMessageDate: new Date(),
+            messages: [],
+          }),
+        },
+      });
+      const root = document.createElement("div");
+      document.body.append(root);
+      const widget = mountChatWidget(root, {
+        client,
+        placement: "bubble",
+        defaultOpen: true,
+        autoResume: false,
+        loadThreads: false,
+      });
+      void widget.sendMessage("ordinary");
+      client.__emitEvent(
+        "message:update",
+        makeAssistantMessage({
+          conversationId: "conv-1",
+          status: "IN_PROGRESS",
+          canStop: undefined,
+        }),
+      );
+      if (destination === "open") await widget.openConversation!("other");
+      else widget.newConversation();
+      expect(client.__callsFor("stop")).toHaveLength(1);
+      widget.destroy();
+      root.remove();
+    },
+  );
+
+  it.each(["open", "new"] as const)(
+    "does not Stop a response with canStop false when navigating to %s",
+    async (destination) => {
+      const client = createMockClient({
+        overrides: {
+          sendMessage: () => new Promise(() => {}),
+          getConversation: async (id: string) => ({
+            id,
+            title: "Thread",
+            lastMessageDate: new Date(),
+            messages: [],
+          }),
+        },
+      });
+      const root = document.createElement("div");
+      document.body.append(root);
+      const widget = mountChatWidget(root, {
+        client,
+        placement: "bubble",
+        defaultOpen: true,
+        autoResume: false,
+        loadThreads: false,
+      });
+      void widget.sendMessage("background");
+      client.__emitEvent(
+        "message:update",
+        makeAssistantMessage({
+          conversationId: "conv-1",
+          status: "IN_PROGRESS",
+          canStop: false,
+        }),
+      );
+      if (destination === "open") await widget.openConversation!("other");
+      else widget.newConversation();
+      expect(client.__callsFor("stop")).toHaveLength(0);
+      widget.destroy();
+      root.remove();
+    },
+  );
+});
+
+describe("send callback reentry", () => {
+  it("does not send after the host imperatively changes the active view", async () => {
+    const client = new AgoClient({ baseUrl: "https://example.test" });
+    const send = vi.spyOn(client, "sendMessage");
+    const root = document.createElement("div");
+    document.body.append(root);
+    const widget = mountChatWidget(root, {
+      client,
+      onMessageSent: () => {
+        client.setActiveConversation(null);
+      },
+    });
+    await widget.sendMessage("secret");
+    expect(send).not.toHaveBeenCalled();
+    widget.destroy();
+    client.destroy();
+    root.remove();
+  });
+});
+
+describe("ordinary hidden streaming", () => {
+  it("keeps processing an ordinary stream while the panel is closed", async () => {
+    const client = createMockClient({
+      overrides: { sendMessage: () => new Promise(() => {}) },
+    });
+    const root = document.createElement("div");
+    document.body.append(root);
+    const widget = mountChatWidget(root, {
+      client,
+      placement: "right",
+      defaultOpen: true,
+    });
+    void widget.sendMessage("hello");
+    client.__emitEvent("message:start", { conversationId: "conv-1" });
+    widget.close?.();
+    client.__emitEvent("message:chunk", { content: "continued while hidden" });
+    widget.open?.();
+    expect(root.textContent).toContain("continued while hidden");
+    expect(client.__callsFor("stop")).toHaveLength(0);
+    widget.destroy();
+    root.remove();
+  });
+});
+
+describe("response outcomes", () => {
+  it.each(["inline", "bubble"] as const)("shows %s progress before the final answer and files", async (placement) => {
+    const client = createMockClient({ overrides: { getConversation: async () => ({ id: "conv-1", title: "Thread", lastMessageDate: new Date(), messages: [] }) } });
+    const root = document.createElement("div"); document.body.append(root);
+    const widget = mountChatWidget(root, { client, conversationId: "conv-1", placement, defaultOpen: true, welcomeMessage: "", loadThreads: false, feedback: true });
+    await Promise.resolve(); await Promise.resolve();
+    client.__emitEvent("message:update", makeAssistantMessage({
+      content: "Final report", status: "DONE", outcome: "incomplete",
+      progress: { steps: [{ name: "Prepare report", status: "completed", reason: null }], activity: [], truncated: false },
+      attachments: [{ id: "file", name: "report.csv", url: "https://example.test/report.csv", isSafeImage: false }],
+    }));
+    const state = root.querySelector(".ago-background-state")!;
+    expect(state.textContent).toContain("Incomplete");
+    expect(state.compareDocumentPosition(root.querySelector(".ago-message__content")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(state.compareDocumentPosition(root.querySelector(".ago-message__attachments")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(state.compareDocumentPosition(root.querySelector(".ago-feedback")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    widget.destroy(); root.remove();
+  });
+  it.each([
+    ["PAUSED", null, "Paused"],
+    ["DONE", "incomplete", "Incomplete"],
+    ["ERROR", "failed", "Failed"],
+  ] as const)(
+    "shows %s / %s on its response",
+    async (status, outcome, label) => {
+      const client = createMockClient({
+        overrides: {
+          getConversation: async () => ({
+            id: "conv-1",
+            title: "Thread",
+            lastMessageDate: new Date(),
+            messages: [],
+          }),
+        },
+      });
+      const root = document.createElement("div");
+      document.body.append(root);
+      const widget = mountChatWidget(root, {
+        client,
+        conversationId: "conv-1",
+        welcomeMessage: "",
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      client.__emitEvent(
+        "message:update",
+        makeAssistantMessage({ content: "", status, outcome, canStop: false }),
+      );
+      expect(root.querySelector(".ago-background-state")?.textContent).toContain(
+        label,
+      );
+      widget.destroy();
+      root.remove();
+    },
+  );
+});
+
+it("blocks reentrant sends while the host send callback is running", async () => {
+  const client = createMockClient();
+  const root = document.createElement("div"); document.body.append(root);
+  let widget!: ReturnType<typeof mountChatWidget>;
+  widget = mountChatWidget(root, { client, onMessageSent: () => { void widget.sendMessage("duplicate"); } });
+  await widget.sendMessage("original");
+  expect(client.__callsFor("sendMessage")).toHaveLength(1);
+  expect(client.__callsFor("sendMessage")[0].args[0]).toBe("original");
+  widget.destroy(); root.remove();
+});
+
+describe("authoritative widget history and visibility", () => {
+  it("does not resurrect a hidden terminal response on completion or delayed initial settlement", async () => {
+    let finish!: (message: AgoMessage) => void;
+    const client = createMockClient({ overrides: { sendMessage: () => new Promise<AgoMessage>((resolve) => { finish = resolve; }) } });
+    const received = vi.fn();
+    const root = document.createElement("div"); document.body.append(root);
+    const widget = mountChatWidget(root, { client, welcomeMessage: "", onMessageReceived: received });
+    const pending = widget.sendMessage("request");
+    const hidden = makeAssistantMessage({ id: "hidden-answer", conversationId: "conv-1", content: "private hidden body", status: "DONE", hidden: true });
+    client.__emitEvent("message:update", hidden);
+    client.__emitEvent("message:complete", hidden);
+    finish({ ...hidden, hidden: false, content: "old initial body" });
+    await pending;
+    expect(root.textContent).not.toContain("private hidden body");
+    expect(root.textContent).not.toContain("old initial body");
+    expect(received).not.toHaveBeenCalled();
+    client.__emitEvent("message:update", { ...hidden, hidden: false, content: "visible again" });
+    expect(root.textContent).toContain("visible again");
+    widget.destroy(); root.remove();
+  });
+
+  it.each([false, true])("replaces reopened history and preserves a fast newer follow (fast: %s)", async (fast) => {
+    const { readFileSync } = await import("node:fs");
+    const id = "11111111-1111-4111-8111-111111111111";
+    const source = JSON.parse(readFileSync("tests/fixtures/background-sdk/history-running.json", "utf8"));
+    const first = structuredClone(source);
+    const firstAssistant = first.messages.find((message: { role: string }) => message.role === "assistant");
+    firstAssistant.id = "old-id";
+    firstAssistant.content = "old private response";
+    firstAssistant.attachments = [{ id: "old-file", name: "old-private.csv", content_type: "text/csv", file_size: 10, file_url: "https://example.test/old.csv", is_safe_image: false }];
+    first.interaction.blocking_message_id = "old-id";
+    const reopened = structuredClone(source);
+    if (!fast) {
+      reopened.messages = [];
+      reopened.interaction = { can_send_message: true, blocking_message_id: null };
+    }
+    const never = new Promise<Response>(() => {});
+    const final = readFileSync("tests/fixtures/background-sdk/follow-to-final.sse", "utf8");
+    let histories = 0;
+    const fetcher = vi.fn(async (url: string | URL | Request) => {
+      const path = String(url);
+      if (path.includes("/conversations/")) return new Response(JSON.stringify(++histories === 1 ? first : reopened));
+      if (path.includes("/messages/old-id/")) return never;
+      if (path.endsWith("/events")) return new Response(final, { headers: { "Content-Type": "text/event-stream" } });
+      throw new Error(`unexpected ${path}`);
+    });
+    const client = new AgoClient({ baseUrl: "https://example.test", userJwt: "viewer", fetch: fetcher as typeof fetch });
+    const root = document.createElement("div"); document.body.append(root);
+    const widget = mountChatWidget(root, { client, placement: "right", defaultOpen: true, conversationId: id });
+    await vi.waitFor(() => expect(root.textContent).toContain("old private response"));
+    expect(root.textContent).toContain("old-private.csv");
+    widget.close?.(); widget.open?.();
+    await vi.waitFor(() => expect(histories).toBe(2));
+    await vi.waitFor(() => expect(root.textContent).not.toContain("old private response"));
+    expect(root.textContent).not.toContain("old-private.csv");
+    if (fast) await vi.waitFor(() => expect(root.textContent).toContain("The report is complete"));
+    widget.destroy(); client.destroy(); root.remove();
+  });
+});
+
+describe("history advancement during activation", () => {
+  it("keeps a newer message snapshot if history arrives afterward", async () => {
+    let release!: (value: Conversation) => void;
+    const client = createMockClient({ overrides: { getConversation: () => new Promise<Conversation>((resolve) => { release = resolve; }) } });
+    const root = document.createElement("div"); document.body.append(root);
+    const widget = mountChatWidget(root, { client, conversationId: "conv-1", welcomeMessage: "" });
+    const old = makeAssistantMessage({ id: "answer", content: "old snapshot", status: "IN_PROGRESS" });
+    const newer = { ...old, content: "new final", status: "DONE" as const };
+    client.__emitEvent("message:update", newer);
+    const history = makeConversation("conv-1", [old]);
+    client.__emitEvent("conversation:loaded", history);
+    release(history);
+    await Promise.resolve(); await Promise.resolve();
+    expect(root.textContent).toContain("new final");
+    expect(root.textContent).not.toContain("old snapshot");
+    widget.destroy(); root.remove();
+  });
+
+  it("filters hidden messages from the initial history", async () => {
+    const client = createMockClient({ overrides: { getConversation: async () => makeConversation("conv-1", [makeAssistantMessage({ content: "hidden history", hidden: true })]) } });
+    const root = document.createElement("div"); document.body.append(root);
+    const widget = mountChatWidget(root, { client, conversationId: "conv-1", welcomeMessage: "" });
+    await vi.waitFor(() => expect(client.__callsFor("getConversation")).toHaveLength(1));
+    await Promise.resolve();
+    expect(root.textContent).not.toContain("hidden history");
+    widget.destroy(); root.remove();
+  });
+});
+
+describe("authoritative message visibility", () => {
+  it("keeps a hidden response hidden when later snapshots omit visibility", async () => {
+    let finish!: (message: AgoMessage) => void;
+    const client = createMockClient({ overrides: { sendMessage: () => new Promise<AgoMessage>((resolve) => { finish = resolve; }) } });
+    const received = vi.fn();
+    const root = document.createElement("div"); document.body.append(root);
+    const widget = mountChatWidget(root, { client, welcomeMessage: "", onMessageReceived: received });
+    const pending = widget.sendMessage("request");
+    const hidden = makeAssistantMessage({ id: "answer", content: "secret", hidden: true, status: "DONE" });
+    client.__emitEvent("message:update", hidden);
+    const omitted = { ...hidden, content: "must remain hidden" }; delete omitted.hidden;
+    client.__emitEvent("message:update", omitted);
+    client.__emitEvent("message:answer-complete", omitted);
+    client.__emitEvent("message:complete", omitted);
+    finish(omitted); await pending;
+    expect(root.textContent).not.toContain("must remain hidden");
+    expect(received).not.toHaveBeenCalled();
+    client.__emitEvent("message:update", { ...hidden, hidden: false, content: "explicitly visible" });
+    expect(root.textContent).toContain("explicitly visible");
+    widget.destroy(); root.remove();
+  });
+
+  it("keeps a previously unknown legacy message visible when visibility is omitted", async () => {
+    const client = createMockClient({ overrides: { getConversation: async () => makeConversation("conv-1", []) } });
+    const root = document.createElement("div"); document.body.append(root);
+    const widget = mountChatWidget(root, { client, conversationId: "conv-1", welcomeMessage: "" });
+    await Promise.resolve(); await Promise.resolve();
+    const legacy = makeAssistantMessage({ content: "legacy visible" });
+    delete legacy.hidden;
+    client.__emitEvent("message:update", legacy);
+    expect(root.textContent).toContain("legacy visible");
+    widget.destroy(); root.remove();
+  });
+
+  it("does not let an older hidden completion override a reentrant visible update", async () => {
+    let finish!: (message: AgoMessage) => void;
+    const client = createMockClient({ overrides: { sendMessage: () => new Promise<AgoMessage>((resolve) => { finish = resolve; }) } });
+    const hidden = makeAssistantMessage({ id: "answer", content: "old hidden content", hidden: true, status: "DONE" });
+    client.on("message:complete", () => client.__emitEvent("message:update", { ...hidden, hidden: false, content: "new visible content" }));
+    const received = vi.fn();
+    const root = document.createElement("div"); document.body.append(root);
+    const widget = mountChatWidget(root, { client, welcomeMessage: "", onMessageReceived: received });
+    const pending = widget.sendMessage("request");
+    client.__emitEvent("message:update", hidden);
+    client.__emitEvent("message:complete", hidden);
+    client.__emitEvent("message:answer-complete", hidden);
+    finish(hidden); await pending;
+    expect(root.textContent).toContain("new visible content");
+    expect(root.textContent).not.toContain("old hidden content");
+    expect(received).not.toHaveBeenCalled();
+    widget.destroy(); root.remove();
+  });
+});
+
+describe("vanilla approval decision scope", () => {
+  it("keeps a successful decision locked until its approval snapshot changes", async () => {
+    const client = createMockClient({ overrides: { submitApprovalDecision: async () => undefined } });
+    const root = document.createElement("div");
+    const widget = mountChatWidget(root, { client, conversationId: "conv-1", welcomeMessage: "" });
+    await Promise.resolve();
+    await Promise.resolve();
+    const message = makeAssistantMessage({ status: "WAITING_APPROVAL", approval: { id: "review", status: "pending", actions: [], allowedDecisions: ["approve", "reject"], expiresAt: null } });
+    client.__emitEvent("message:start", { conversationId: "conv-1", messageId: message.id });
+    client.__emitEvent("message:update", message);
+    const button = () => root.querySelector<HTMLButtonElement>(".ago-background-state button")!;
+    button().click();
+    await Promise.resolve();
+    client.__emitEvent("message:update", { ...message, content: "Unrelated text update" });
+    expect(button().disabled).toBe(true);
+    button().click();
+    expect(client.__callsFor("submitApprovalDecision")).toHaveLength(1);
+    client.__emitEvent("message:update", { ...message, approval: { ...message.approval!, allowedDecisions: ["reject"] } });
+    expect(button().disabled).toBe(false);
+    widget.destroy();
+  });
+
+  it.each(["approved", "expired", "redacted"] as const)("ignores a late failure after the same approval becomes %s", async (change) => {
+    let reject!: (error: Error) => void;
+    const client = createMockClient({ overrides: { submitApprovalDecision: () => new Promise<void>((_resolve, fail) => { reject = fail; }) } });
+    const root = document.createElement("div");
+    const widget = mountChatWidget(root, { client, conversationId: "conv-1", welcomeMessage: "" });
+    await Promise.resolve();
+    await Promise.resolve();
+    const message = makeAssistantMessage({ status: "WAITING_APPROVAL", approval: { id: "review", status: "pending", actions: [], allowedDecisions: ["approve"], expiresAt: null } });
+    client.__emitEvent("message:start", { conversationId: "conv-1", messageId: message.id });
+    client.__emitEvent("message:update", message);
+    root.querySelector<HTMLButtonElement>(".ago-background-state button")!.click();
+    client.__emitEvent("message:update", { ...message, approval: { ...message.approval!, status: change === "redacted" ? "pending" : change, allowedDecisions: [] } });
+    reject(new Error("Old request failed"));
+    await Promise.resolve();
+    expect(root.textContent).not.toContain("Could not submit");
+    expect(root.querySelector('.ago-background-state [role="alert"]')).toBeNull();
+    widget.destroy();
+  });
+
+  it("renders status-only waiting without approval details", async () => {
+    const client = createMockClient();
+    const root = document.createElement("div");
+    const widget = mountChatWidget(root, { client, conversationId: "conv-1", welcomeMessage: "" });
+    await Promise.resolve();
+    await Promise.resolve();
+    const message = makeAssistantMessage({ status: "WAITING_APPROVAL", content: "" });
+    client.__emitEvent("message:start", { conversationId: "conv-1", messageId: message.id });
+    client.__emitEvent("message:update", message);
+    expect(root.querySelector(".ago-background-state")?.textContent).toContain("Waiting for approval");
+    expect(root.querySelector(".ago-background-state button")).toBeNull();
+    widget.destroy();
+  });
 });

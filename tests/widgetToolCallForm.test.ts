@@ -5,7 +5,7 @@ import type {
   TicketForm,
   ToolCallData,
 } from "../src/client/types";
-import { createMockClient } from "../src/testing/createMockClient";
+import { createMockClient } from "./widgetMockClient";
 import { mountChatWidget } from "../src/widget/createChatWidget";
 
 beforeEach(() => {
