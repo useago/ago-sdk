@@ -1,8 +1,12 @@
+import { createDrivableClient } from "./reactWidgetMockClient";
 import { describe, it, expect, vi } from "vitest";
-import React, { act } from "react";
+import { readFileSync } from "node:fs";
+import React, { act, startTransition, Suspense } from "react";
 import { createRoot } from "react-dom/client";
+import { flushSync } from "react-dom";
 import { AgoClient } from "../src/client/AgoClient";
 import { AgoProvider } from "../src/react/context/AgoContext";
+import { useMessages, useMessagesInternal } from "../src/react/hooks/useMessages";
 import {
   ChatWidget,
   type ChatWidgetHandle,
@@ -92,34 +96,7 @@ describe("ChatWidget forms integration", () => {
 // A minimal AgoClient stand-in: lets the test drive message events and control
 // when the streaming send promise resolves, so we can observe the input state at
 // each phase of a turn.
-function createDrivableClient() {
-  const handlers: Record<string, Array<(data: unknown) => void>> = {};
-  const emit = (event: string, data: unknown) =>
-    (handlers[event] ?? []).forEach((h) => h(data));
-  let resolveSend: (m: AgoMessage) => void = () => {};
-  const sendMessage = vi.fn(
-    () => new Promise<AgoMessage>((resolve) => (resolveSend = resolve)),
-  );
-  const stop = vi.fn(async () => null);
-  const client = {
-    on: (e: string, h: (data: unknown) => void) => {
-      (handlers[e] ??= []).push(h);
-    },
-    off: (e: string, h: (data: unknown) => void) => {
-      handlers[e] = (handlers[e] ?? []).filter((x) => x !== h);
-    },
-    sendMessage,
-    stop,
-    getMessages: vi.fn(async () => []),
-  } as unknown as AgoClient;
-  return {
-    client,
-    emit,
-    sendMessage,
-    stop,
-    resolveSend: (m: AgoMessage) => resolveSend(m),
-  };
-}
+
 
 function setTextareaValue(textarea: HTMLTextAreaElement, value: string) {
   const setter = Object.getOwnPropertyDescriptor(
@@ -476,8 +453,7 @@ describe("ChatWidget streaming + follow-the-bottom (React parity)", () => {
   }
 
   it("puts the user's text back in the composer when the send fails", async () => {
-    const client = new AgoClient({ baseUrl: "https://example.test" });
-    vi.spyOn(client, "sendMessage").mockRejectedValue(new Error("offline"));
+    const client = new AgoClient({ baseUrl: "https://example.test", fetch: (async () => { throw new Error("offline"); }) as typeof fetch });
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root = createRoot(container);
@@ -651,6 +627,30 @@ describe("ChatWidget sheet", () => {
     client.destroy();
   });
 
+  it("shows the known approval status in peek and opens its details", async () => {
+    stubCompact(true);
+    const { client, emit, sendMessage } = createDrivableClient();
+    const { container, unmount } = await mount(<ChatWidget client={client} sheet={{}} />);
+    const message: AgoMessage = {
+      id: "m", conversationId: "c", role: "assistant", status: "WAITING_APPROVAL",
+      content: "Processing your request", createdAt: new Date(),
+      approval: { id: "a", status: "pending", actions: [{ name: "publish", arguments: {} }], allowedDecisions: ["approve"], expiresAt: null },
+    };
+    await act(async () => {
+      emit("message:start", { conversationId: "c", messageId: "m" });
+      emit("message:update", message);
+    });
+    const peek = container.querySelector<HTMLButtonElement>(".ago-chat-widget__peek")!;
+    expect(peek.textContent).toContain("Background work status: Waiting for approval");
+    expect(peek.textContent).toContain("Open the conversation");
+    expect(peek.getAttribute("aria-label")).toContain("Background work status: Waiting for approval");
+    await act(async () => peek.click());
+    expect(container.querySelector<HTMLElement>(".ago-chat-widget")!.dataset.agoSheetState).toBe("full");
+    expect(container.querySelector(".ago-background-state")!.textContent).toContain("publish");
+    expect(sendMessage).not.toHaveBeenCalled();
+    await unmount();
+  });
+
   it("collapses on Escape and releases the host page", async () => {
     stubCompact(true);
     const client = new AgoClient({ baseUrl: "https://example.test" });
@@ -780,11 +780,8 @@ describe("ChatWidget sheet", () => {
 
   it("shows a thinking state in peek instead of stale text", async () => {
     stubCompact(true);
-    const client = new AgoClient({ baseUrl: "https://example.test" });
     // Never settles: the widget stays in its answering state.
-    vi.spyOn(client, "sendMessage").mockReturnValue(
-      new Promise<AgoMessage>(() => {}),
-    );
+    const client = new AgoClient({ baseUrl: "https://example.test", fetch: (() => new Promise<Response>(() => {})) as typeof fetch });
     const { container, unmount } = await mount(
       <AgoProvider client={client}>
         <ChatWidget sheet={{}} welcomeMessage="Bonjour" thinkingLabel="Reflexion..." />
@@ -793,6 +790,7 @@ describe("ChatWidget sheet", () => {
 
     const peek = container.querySelector<HTMLElement>(".ago-chat-widget__peek")!;
     expect(peek.textContent).toContain("Bonjour");
+    expect(peek.textContent).not.toContain("Background work status:");
 
     const textarea = container.querySelector<HTMLTextAreaElement>("textarea")!;
     const setter = Object.getOwnPropertyDescriptor(
@@ -951,4 +949,505 @@ describe("ChatWidget sheet", () => {
     await unmount();
     client.destroy();
   });
+});
+
+
+describe("ChatWidget background state", () => {
+  it("renders replacement progress and approval, blocks input and sends the exact decision", async () => {
+    const { client, emit, sendMessage } = createDrivableClient();
+    const decision = vi.spyOn(client, "submitApprovalDecision").mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce();
+    const container = document.createElement("div"); const root = createRoot(container);
+    await act(async () => root.render(<ChatWidget client={client} />));
+    const message: AgoMessage = { id: "m", conversationId: "c", role: "assistant", status: "WAITING_APPROVAL", content: "Report", createdAt: new Date(), canStop: false,
+      progress: { steps: [{ name: "Read", status: "completed", reason: null }], activity: [{ text: "Searching", timestamp: null }], truncated: true },
+      approval: { id: "approval-42", status: "pending", actions: [{ name: "publish", arguments: { value: "secret" } }], allowedDecisions: ["approve", "reject"], expiresAt: null }, followUpReplies: ["Again"] };
+    await act(async () => { emit("message:start", { conversationId: "c", messageId: "m" }); emit("message:update", message); emit("conversation:update", { conversationId: "c", interaction: { canSendMessage: false, blockingMessageId: "m" } }); });
+    expect(container.textContent).toContain("Searching");
+    expect(container.textContent).toContain("secret");
+    expect(container.querySelector("textarea")!.disabled).toBe(true);
+    expect(container.querySelector('button[aria-label="Stop generating"]')).toBeNull();
+    expect(container.querySelector<HTMLButtonElement>(".ago-message__followup-btn")!.disabled).toBe(true);
+    await act(async () => container.querySelector<HTMLButtonElement>(".ago-message__followup-btn")!.click());
+    expect(sendMessage).not.toHaveBeenCalled();
+    const button = () => Array.from(container.querySelectorAll("button")).find((el) => el.textContent === "Approve")!;
+    await act(async () => button().click());
+    expect(container.textContent).toContain("Could not submit decision");
+    await act(async () => button().click());
+    expect(decision).toHaveBeenNthCalledWith(1, "approval-42", "approve");
+    expect(decision).toHaveBeenNthCalledWith(2, "approval-42", "approve");
+    await act(async () => { emit("message:update", { ...message, approval: { ...message.approval!, actions: [], allowedDecisions: [] }, progress: { steps: [], activity: [], truncated: false } }); });
+    expect(container.textContent).not.toContain("secret");
+    expect(container.textContent).not.toContain("Searching");
+    expect(container.textContent).toContain("Waiting for approval");
+    expect(container.querySelectorAll(".ago-message--assistant")).toHaveLength(1);
+    await act(async () => root.unmount());
+  });
+
+  it("clears an session-bound draft and keeps an ordinary failed draft", async () => {
+    const { client, emit } = createDrivableClient();
+    const container = document.createElement("div"); const root = createRoot(container);
+    await act(async () => root.render(<ChatWidget client={client} />));
+    await act(async () => setTextareaValue(container.querySelector("textarea")!, "private draft"));
+    await act(async () => emit("conversation:update", { conversationId: null, interaction: null }));
+    expect(container.querySelector("textarea")!.value).toBe("");
+    await act(async () => root.unmount());
+  });
+});
+
+it("suspends and restores a server-owned response without losing a draft", async () => {
+  vi.stubGlobal("matchMedia", vi.fn((query: string) => ({ matches: !query.includes("prefers-reduced-motion"), media: query, addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => true })));
+  const fixture = (name: string) => readFileSync(`tests/fixtures/background-sdk/${name}`, "utf8");
+  const id = "11111111-1111-4111-8111-111111111111";
+  let historyReads = 0; let aborted = false;
+  const fetcher = vi.fn(async (url: string | URL | Request, options?: RequestInit) => {
+    const path = String(url);
+    if (path.endsWith(`/conversations/${id}`)) return new Response(fixture(historyReads++ ? "history-final.json" : "history-running.json"), { headers: { "Content-Type": "application/json" } });
+    if (path.endsWith("/events")) return new Promise<Response>((_resolve, reject) => options?.signal?.addEventListener("abort", () => { aborted = true; reject(new DOMException("Aborted", "AbortError")); }));
+    throw new Error(`Unexpected request: ${path}`);
+  });
+  const client = new AgoClient({ baseUrl: "https://example.test", fetch: fetcher as typeof fetch });
+  const ref = createRef<ChatWidgetHandle>();
+  const received = vi.fn();
+  const container = document.createElement("div"); const root = createRoot(container);
+  await act(async () => { root.render(<ChatWidget ref={ref} client={client} conversationId={id} onMessageReceived={received} sheet={{ initialState: "full" }} />); await new Promise((r) => setTimeout(r, 10)); });
+  await act(async () => setTextareaValue(container.querySelector("textarea")!, "draft survives"));
+  await act(async () => { ref.current!.collapse(); await new Promise((r) => setTimeout(r, 0)); });
+  expect(aborted).toBe(true);
+  expect(client.getActiveConversation()).toBe(id);
+  await act(async () => { ref.current!.expand(); await new Promise((r) => setTimeout(r, 10)); });
+  expect(historyReads).toBe(2);
+  expect(container.querySelector("textarea")!.value).toBe("draft survives");
+  expect(container.querySelector("textarea")!.disabled).toBe(false);
+  expect(received).not.toHaveBeenCalled();
+  expect(fetcher.mock.calls.every(([url]) => !String(url).includes("/stop"))).toBe(true);
+  await act(async () => ref.current!.collapse());
+  client.setActiveConversation("host-selected-conversation");
+  await act(async () => ref.current!.expand());
+  expect(client.getActiveConversation()).toBe("host-selected-conversation");
+  expect(historyReads).toBe(2);
+  await act(async () => root.unmount()); client.destroy(); vi.unstubAllGlobals();
+});
+
+
+it("renders outcomes and safe downloadable result files", async () => {
+  const { client, emit } = createDrivableClient();
+  const container = document.createElement("div"); const root = createRoot(container);
+  await act(async () => root.render(<ChatWidget client={client} feedback />));
+  const response: AgoMessage = { id: "m", conversationId: "c", role: "assistant", status: "DONE", content: "Report", createdAt: new Date(), outcome: "incomplete", progress: { steps: [{ name: "Prepare report", status: "completed", reason: null }], activity: [], truncated: false }, attachments: [{ id: "file", name: "report.csv", url: "https://example.test/report.csv", isSafeImage: false }] };
+  await act(async () => { emit("message:start", { conversationId: "c", messageId: "m" }); emit("message:update", response); });
+  expect(container.textContent).toContain("Incomplete");
+  expect(container.querySelector('a[href="https://example.test/report.csv"]')).not.toBeNull();
+  const state = container.querySelector(".ago-background-state")!;
+  expect(state.compareDocumentPosition(container.querySelector(".ago-message__content")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(state.compareDocumentPosition(container.querySelector(".ago-message__attachments")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(state.compareDocumentPosition(container.querySelector(".ago-feedback")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  await act(async () => emit("message:update", { ...response, outcome: "failed", attachments: [] }));
+  expect(container.textContent).toContain("Failed");
+  expect(container.textContent).not.toContain("report.csv");
+  await act(async () => emit("message:update", { ...response, status: "PAUSED", outcome: null, attachments: [] }));
+  expect(container.textContent).toContain("Paused");
+  await act(async () => root.unmount());
+});
+
+it("clears the old transcript and draft when the widget client changes", async () => {
+  const first = createDrivableClient(); const second = createDrivableClient();
+  const container = document.createElement("div"); const root = createRoot(container);
+  await act(async () => root.render(<ChatWidget client={first.client} />));
+  await act(async () => {
+    first.emit("message:start", { conversationId: "a", messageId: "m" });
+    first.emit("message:complete", { id: "m", conversationId: "a", role: "assistant", status: "DONE", content: "private answer", createdAt: new Date() });
+  });
+  await act(async () => setTextareaValue(container.querySelector("textarea")!, "private draft"));
+  await act(async () => root.render(<ChatWidget client={second.client} />));
+  expect(container.textContent).not.toContain("private answer");
+  expect(container.querySelector("textarea")!.value).toBe("");
+  await act(async () => root.unmount());
+});
+
+it("ignores an old pending send when the client and initial conversation change", async () => {
+  const first = createDrivableClient(); const second = createDrivableClient();
+  const container = document.createElement("div"); const root = createRoot(container);
+  await act(async () => root.render(<ChatWidget client={first.client} conversationId="a" />));
+  await act(async () => setTextareaValue(container.querySelector("textarea")!, "private draft"));
+  await act(async () => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  await act(async () => root.render(<ChatWidget client={second.client} conversationId="b" />));
+  await act(async () => first.resolveSend({ id: "old", conversationId: "a", role: "assistant", status: "DONE", content: "private answer", createdAt: new Date() }));
+  expect(container.textContent).not.toContain("private answer");
+  expect(container.querySelector("textarea")!.value).toBe("");
+  await act(async () => root.unmount());
+});
+
+it("ignores a late approval failure after an authentication reset", async () => {
+  const { client, emit } = createDrivableClient();
+  let reject!: (error: Error) => void;
+  vi.spyOn(client, "submitApprovalDecision").mockImplementation(() => new Promise((_resolve, fail) => { reject = fail; }));
+  const container = document.createElement("div"); const root = createRoot(container);
+  await act(async () => root.render(<ChatWidget client={client} />));
+  const message: AgoMessage = { id: "m", conversationId: "c", role: "assistant", status: "WAITING_APPROVAL", content: "Report", createdAt: new Date(), approval: { id: "a", status: "pending", actions: [], allowedDecisions: ["approve"], expiresAt: null } };
+  await act(async () => { emit("message:start", { conversationId: "c", messageId: "m" }); emit("message:update", message); });
+  await act(async () => Array.from(container.querySelectorAll("button")).find((el) => el.textContent === "Approve")!.click());
+  await act(async () => emit("conversation:update", { conversationId: null, interaction: null }));
+  await act(async () => reject(new Error("offline")));
+  expect(container.textContent).not.toContain("Could not submit decision");
+  expect(container.textContent).not.toContain("Report");
+  await act(async () => root.unmount());
+});
+
+it("blocks button and Enter during pre-message preparation", async () => {
+  const { client, emit, sendMessage } = createDrivableClient();
+  const container = document.createElement("div"); const root = createRoot(container);
+  await act(async () => root.render(<ChatWidget client={client} conversationId="c" />));
+  await act(async () => setTextareaValue(container.querySelector("textarea")!, "draft"));
+  await act(async () => emit("conversation:update", { conversationId: "c", interaction: { canSendMessage: false, blockingMessageId: null } }));
+  const textarea = container.querySelector("textarea")!;
+  expect(textarea.disabled).toBe(true);
+  await act(async () => { textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+  expect(sendMessage).not.toHaveBeenCalled();
+  await act(async () => root.unmount());
+});
+
+it("does not restore a failed send's draft or files after authentication reset", async () => {
+  const { client, emit } = createDrivableClient();
+  let reject!: (error: Error) => void;
+  vi.spyOn(client, "sendMessage").mockImplementation(() => new Promise((_resolve, fail) => { reject = fail; }));
+  const container = document.createElement("div"); const root = createRoot(container);
+  await act(async () => root.render(<ChatWidget client={client} allowFiles />));
+  const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+  await act(async () => { Object.defineProperty(input, "files", { value: [new File(["private"], "private.txt")], configurable: true }); input.dispatchEvent(new Event("change", { bubbles: true })); });
+  await act(async () => setTextareaValue(container.querySelector("textarea")!, "private draft"));
+  await act(async () => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  await act(async () => emit("conversation:update", { conversationId: null, interaction: null }));
+  await act(async () => reject(new Error("offline")));
+  expect(container.querySelector("textarea")!.value).toBe("");
+  expect(container.textContent).not.toContain("private.txt");
+  await act(async () => root.unmount());
+});
+
+it("suspends pre-message preparation while the sheet is hidden", async () => {
+  vi.stubGlobal("matchMedia", vi.fn((query: string) => ({ matches: !query.includes("prefers-reduced-motion"), media: query, addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => true })));
+  const fixture = readFileSync("tests/fixtures/background-sdk/history-preparing.json", "utf8");
+  const client = new AgoClient({ baseUrl: "https://example.test", fetch: (async () => new Response(fixture, { headers: { "Content-Type": "application/json" } })) as typeof fetch });
+  const ref = createRef<ChatWidgetHandle>(); const root = createRoot(document.createElement("div"));
+  await act(async () => { root.render(<ChatWidget ref={ref} client={client} conversationId="11111111-1111-4111-8111-111111111111" sheet={{ initialState: "full" }} />); await new Promise((r) => setTimeout(r, 10)); });
+  await act(async () => { ref.current!.collapse(); await new Promise((r) => setTimeout(r, 0)); });
+  expect(client.getActiveConversation()).toBe("11111111-1111-4111-8111-111111111111");
+  await act(async () => root.unmount()); client.destroy(); vi.unstubAllGlobals();
+});
+
+it("ignores an old decision failure after the approval advances", async () => {
+  const { client, emit } = createDrivableClient(); let reject!: (error: Error) => void;
+  const decision = vi.spyOn(client, "submitApprovalDecision").mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; })).mockResolvedValue();
+  const container = document.createElement("div"); const root = createRoot(container);
+  await act(async () => root.render(<ChatWidget client={client} />));
+  const approval = { id: "first", status: "pending" as const, actions: [], allowedDecisions: ["approve" as const], expiresAt: null };
+  const message: AgoMessage = { id: "m", conversationId: "c", role: "assistant", status: "WAITING_APPROVAL", content: "Review", createdAt: new Date(), approval };
+  await act(async () => { emit("message:start", { conversationId: "c", messageId: "m" }); emit("message:update", message); });
+  const approve = () => Array.from(container.querySelectorAll("button")).find((el) => el.textContent === "Approve")!;
+  await act(async () => approve().click());
+  await act(async () => emit("message:update", { ...message, approval: { ...approval, id: "second" } }));
+  await act(async () => reject(new Error("offline")));
+  expect(container.textContent).not.toContain("Could not submit decision");
+  await act(async () => approve().click());
+  expect(decision).toHaveBeenNthCalledWith(1, "first", "approve");
+  expect(decision).toHaveBeenNthCalledWith(2, "second", "approve");
+  await act(async () => root.unmount());
+});
+
+it("keeps an ordinary locally streaming response alive while the sheet is hidden", async () => {
+  vi.stubGlobal("matchMedia", vi.fn((query: string) => ({ matches: !query.includes("prefers-reduced-motion"), media: query, addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => true })));
+  const { client, emit } = createDrivableClient();
+  const activate = vi.spyOn(client, "setActiveConversation");
+  const ref = createRef<ChatWidgetHandle>(); const container = document.createElement("div"); const root = createRoot(container);
+  await act(async () => root.render(<ChatWidget ref={ref} client={client} sheet={{ initialState: "full" }} />));
+  await act(async () => setTextareaValue(container.querySelector("textarea")!, "hello"));
+  await act(async () => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  await act(async () => { emit("message:start", { conversationId: "c", messageId: "m" }); ref.current!.collapse(); });
+  expect(activate).not.toHaveBeenCalledWith(null);
+  await act(async () => { emit("message:answer-complete", { id: "m", conversationId: "c", role: "assistant", status: "DONE", content: "still streaming", createdAt: new Date() }); ref.current!.expand(); });
+  expect(container.textContent).toContain("still streaming");
+  await act(async () => root.unmount()); vi.unstubAllGlobals();
+});
+
+
+it("never renders an old client's messages during client replacement", async () => {
+  const first = createDrivableClient(); const second = createDrivableClient();
+  const seen: string[][] = [];
+  function Harness({ client }: { client: AgoClient }) { const { messages } = useMessages({ client }); seen.push(messages.map((m) => m.content)); return null; }
+  const root = createRoot(document.createElement("div"));
+  await act(async () => root.render(<Harness client={first.client} />));
+  await act(async () => { first.emit("message:start", { conversationId: "a", messageId: "m" }); first.emit("message:complete", { id: "m", conversationId: "a", role: "assistant", status: "DONE", content: "private", createdAt: new Date() }); });
+  expect(seen.at(-1)).toContain("private");
+  seen.length = 0;
+  await act(async () => root.render(<Harness client={second.client} />));
+  expect(seen.every((messages) => !messages.includes("private"))).toBe(true);
+  await act(async () => root.unmount());
+});
+
+it("keeps the composer draft when a suspended client replacement is discarded", async () => {
+  const first = createDrivableClient().client;
+  const second = createDrivableClient().client;
+  const suspended = new Promise<never>(() => {});
+  function Suspend(): never { throw suspended; }
+  function Harness({ client, pending = false, title = "Chat" }: { client: AgoClient; pending?: boolean; title?: string }) {
+    return (
+      <Suspense fallback="Loading">
+        <ChatWidget client={client} title={title} />
+        {pending && <Suspend />}
+      </Suspense>
+    );
+  }
+
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  await act(async () => root.render(<Harness client={first} />));
+  await act(async () => setTextareaValue(container.querySelector("textarea")!, "draft"));
+  await act(async () => {
+    startTransition(() => root.render(<Harness client={second} pending />));
+  });
+  await act(async () => root.render(<Harness client={first} title="Updated" />));
+  expect(container.querySelector("textarea")?.value).toBe("draft");
+  await act(async () => root.unmount());
+});
+
+it("only calls onMessageReceived for accepted live DONE completions", async () => {
+  const { client, emit } = createDrivableClient();
+  const received = vi.fn(); const container = document.createElement("div"); const root = createRoot(container);
+  await act(async () => root.render(<ChatWidget client={client} onMessageReceived={received} />));
+  await act(async () => {
+    emit("message:start", { conversationId: "c", messageId: "m" });
+    for (const status of ["ERROR", "CANCELED", "DONE"]) emit("message:complete", { id: "m", conversationId: "c", role: "assistant", status, content: status, createdAt: new Date() });
+  });
+  expect(received).toHaveBeenCalledExactlyOnceWith({ id: "m", content: "DONE" });
+  await act(async () => root.unmount());
+});
+
+it("does not notify a widget after the shared client is activated elsewhere", async () => {
+  const client = new AgoClient({ baseUrl: "https://example.test", fetch: (async (url: string | URL | Request) => new Response(JSON.stringify({ id: String(url).split("/").at(-1), title: "", messages: [] }), { headers: { "Content-Type": "application/json" } })) as typeof fetch });
+  const received = vi.fn(); const container = document.createElement("div"); const root = createRoot(container);
+  await act(async () => root.render(<ChatWidget client={client} conversationId="a" onMessageReceived={received} />));
+  await act(async () => { await client.setActiveConversation("b"); });
+  await act(async () => { (client as unknown as { eventEmitter: { emit: (event: string, value: unknown) => void } }).eventEmitter.emit("message:complete", { id: "b-message", conversationId: "b", role: "assistant", status: "DONE", content: "private b", createdAt: new Date() }); });
+  expect(received).not.toHaveBeenCalled();
+  expect(container.textContent).not.toContain("private b");
+  await act(async () => root.unmount()); client.destroy();
+});
+
+it("notifies once for a completion from its own fork", async () => {
+  const { client, emit } = createDrivableClient(); const received = vi.fn();
+  const container = document.createElement("div"); const root = createRoot(container);
+  await act(async () => root.render(<ChatWidget client={client} conversationId="a" onMessageReceived={received} />));
+  await act(async () => setTextareaValue(container.querySelector("textarea")!, "fork"));
+  await act(async () => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  await act(async () => {
+    emit("message:start", { conversationId: "b", messageId: "m" });
+    emit("message:complete", { id: "m", conversationId: "b", role: "assistant", status: "DONE", content: "fork answer", createdAt: new Date() });
+  });
+  expect(received).toHaveBeenCalledExactlyOnceWith({ id: "m", content: "fork answer" });
+  await act(async () => root.unmount());
+});
+
+
+it("clears transcript, draft and approval when the host logs out inside completion", async () => {
+  const { client, emit } = createDrivableClient();
+  const received = vi.fn(() => emit("conversation:update", { conversationId: null, interaction: null }));
+  const container = document.createElement("div"); const root = createRoot(container);
+  await act(async () => root.render(<ChatWidget client={client} onMessageReceived={received} />));
+  await act(async () => setTextareaValue(container.querySelector("textarea")!, "private draft"));
+  await act(async () => {
+    emit("message:start", { conversationId: "a", messageId: "m" });
+    emit("message:update", { id: "m", conversationId: "a", role: "assistant", status: "WAITING_APPROVAL", content: "private answer", createdAt: new Date(), approval: { id: "secret", status: "pending", actions: [{ name: "private action", arguments: {} }], allowedDecisions: ["approve"], expiresAt: null } });
+  });
+  expect(container.textContent).toContain("private action");
+  await act(async () => emit("message:complete", { id: "m", conversationId: "a", role: "assistant", status: "DONE", content: "private answer", createdAt: new Date() }));
+  expect(received).toHaveBeenCalledTimes(1);
+  expect(container.textContent).not.toContain("private answer");
+  expect(container.textContent).not.toContain("private action");
+  expect(container.querySelector("textarea")!.value).toBe("");
+  await act(async () => root.unmount());
+});
+
+it.each(["activate", "clear"] as const)("does not restore old completion when the callback calls %s", async (action) => {
+  const { client, emit } = createDrivableClient();
+  let state!: ReturnType<typeof useMessagesInternal>;
+  function Harness() {
+    state = useMessagesInternal({ client, conversationId: "a" }, () => {
+      if (action === "activate") void state.activate("b");
+      else state.clearMessages();
+    });
+    return null;
+  }
+  const root = createRoot(document.createElement("div"));
+  await act(async () => root.render(<Harness />));
+  await act(async () => emit("message:complete", { id: "m", conversationId: "a", role: "assistant", status: "DONE", content: "old", createdAt: new Date() }));
+  expect(state.messages).toEqual([]);
+  expect(state.conversationId).toBe(action === "activate" ? "b" : undefined);
+  await act(async () => root.unmount());
+});
+
+it("suppresses late real follow callbacks when the host logs out on completion", async () => {
+  const fixture = (name: string) => readFileSync(`tests/fixtures/background-sdk/${name}`, "utf8");
+  const fetcher = vi.fn(async (url: string | URL | Request) => {
+    if (String(url).endsWith("/messages")) return new Response(fixture("initial-send.sse"), { headers: { "Content-Type": "text/event-stream" } });
+    if (String(url).endsWith("/events")) return new Response(fixture("follow-to-final.sse"), { headers: { "Content-Type": "text/event-stream" } });
+    throw new Error(`Unexpected request: ${String(url)}`);
+  });
+  const client = new AgoClient({ baseUrl: "https://example.test", userJwt: "old-token", fetch: fetcher as typeof fetch });
+  let done!: () => void;
+  const completed = new Promise<void>((resolve) => { done = resolve; });
+  const received = vi.fn(() => { client.updateConfig({ userJwt: null }); done(); });
+  const container = document.createElement("div"); const root = createRoot(container);
+  await act(async () => root.render(<ChatWidget client={client} onMessageReceived={received} />));
+  await act(async () => setTextareaValue(container.querySelector("textarea")!, "Prepare a report"));
+  await act(async () => { container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); await completed; await new Promise((resolve) => setTimeout(resolve, 10)); });
+  expect(received).toHaveBeenCalledTimes(1);
+  expect(container.textContent).not.toContain("report is complete");
+  expect(container.textContent).not.toContain("background-report.csv");
+  expect(container.querySelector("textarea")!.value).toBe("");
+  await act(async () => root.unmount()); client.destroy();
+});
+
+it("does not post a draft when onMessageSent synchronously logs out", async () => {
+  const fetcher = vi.fn(async () => new Response('data: {"message_id":"m","thread":{"id":"a"},"status":"DONE"}\n\n', { headers: { "Content-Type": "text/event-stream" } }));
+  const client = new AgoClient({ baseUrl: "https://example.test", userJwt: "old-token", fetch: fetcher as typeof fetch });
+  const container = document.createElement("div"); const root = createRoot(container);
+  await act(async () => root.render(<ChatWidget client={client} allowFiles onMessageSent={() => client.updateConfig({ userJwt: null })} />));
+  const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+  await act(async () => { Object.defineProperty(fileInput, "files", { value: [new File(["private"], "private.txt")], configurable: true }); fileInput.dispatchEvent(new Event("change", { bubbles: true })); });
+  await act(async () => setTextareaValue(container.querySelector("textarea")!, "private draft"));
+  await act(async () => { container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); await new Promise((resolve) => setTimeout(resolve, 10)); });
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(container.querySelector("textarea")!.value).toBe("");
+  await act(async () => root.unmount()); client.destroy();
+});
+
+it.each(["manual", null])("preserves a manual selection made during reset (%s)", async (selection) => {
+  const fetcher = vi.fn(async () => new Response('data: {"message_id":"m","thread":{"id":"new"},"status":"DONE"}\n\n', { headers: { "Content-Type": "text/event-stream" } }));
+  const client = new AgoClient({ baseUrl: "https://example.test", userJwt: "old-token", fetch: fetcher as typeof fetch });
+  client.on("conversation:update", (data) => { if (data.conversationId === null) client.setActiveConversation(selection); });
+  const container = document.createElement("div"); const root = createRoot(container);
+  await act(async () => root.render(<ChatWidget client={client} />));
+  await act(async () => { client.updateConfig({ userJwt: null }); client.updateConfig({ userJwt: "new-token" }); });
+  await act(async () => setTextareaValue(container.querySelector("textarea")!, "new draft"));
+  await act(async () => { container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); await new Promise((resolve) => setTimeout(resolve, 10)); });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(client.getActiveConversation()).toBe(selection);
+  await act(async () => root.unmount()); client.destroy();
+});
+
+
+it("does not post or restore a draft when onMessageSent activates another conversation", async () => {
+  const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    if (init?.method === "POST") throw new Error("unexpected POST");
+    const id = String(url).split("/").at(-1);
+    return new Response(JSON.stringify({ id, title: "", messages: [] }), { headers: { "Content-Type": "application/json" } });
+  });
+  const client = new AgoClient({ baseUrl: "https://example.test", userJwt: "token", fetch: fetcher as typeof fetch });
+  const container = document.createElement("div"); const root = createRoot(container);
+  await act(async () => root.render(<ChatWidget client={client} conversationId="a" onMessageSent={() => { void client.setActiveConversation("b"); }} />));
+  await act(async () => setTextareaValue(container.querySelector("textarea")!, "private draft"));
+  await act(async () => { container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); await new Promise((resolve) => setTimeout(resolve, 10)); });
+  expect(fetcher.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+  expect(container.querySelector("textarea")!.value).toBe("");
+  await act(async () => root.unmount()); client.destroy();
+});
+
+it("does not post an old draft when onMessageSent synchronously replaces the client", async () => {
+  const oldFetch = vi.fn(async () => new Response("unexpected"));
+  const newFetch = vi.fn(async () => new Response("unexpected"));
+  const first = new AgoClient({ baseUrl: "https://example.test", fetch: oldFetch as typeof fetch });
+  const second = new AgoClient({ baseUrl: "https://example.test", fetch: newFetch as typeof fetch });
+  const container = document.createElement("div"); const root = createRoot(container);
+  await act(async () => root.render(<ChatWidget client={first} onMessageSent={() => flushSync(() => root.render(<ChatWidget client={second} />))} />));
+  await act(async () => setTextareaValue(container.querySelector("textarea")!, "private draft"));
+  await act(async () => { container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); await new Promise((resolve) => setTimeout(resolve, 10)); });
+  expect(oldFetch).not.toHaveBeenCalled();
+  expect(newFetch).not.toHaveBeenCalled();
+  expect(container.querySelector("textarea")!.value).toBe("");
+  await act(async () => root.unmount()); first.destroy(); second.destroy();
+});
+
+it("does not post when onMessageSent synchronously blocks the current conversation", async () => {
+  const { client, emit, sendMessage } = createDrivableClient();
+  const container = document.createElement("div"); const root = createRoot(container);
+  await act(async () => root.render(<ChatWidget client={client} conversationId="a" onMessageSent={() => emit("conversation:update", { conversationId: "a", interaction: { canSendMessage: false, blockingMessageId: null } })} />));
+  await act(async () => setTextareaValue(container.querySelector("textarea")!, "draft"));
+  await act(async () => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(sendMessage).not.toHaveBeenCalled();
+  expect(container.querySelector("textarea")!.value).toBe("draft");
+  await act(async () => root.unmount());
+});
+
+it("does not post a draft when onMessageSent synchronously unmounts the widget", async () => {
+  const fetcher = vi.fn(async () => new Response("unexpected"));
+  const client = new AgoClient({ baseUrl: "https://example.test", fetch: fetcher as typeof fetch });
+  const container = document.createElement("div"); const root = createRoot(container);
+  await act(async () => root.render(<ChatWidget client={client} onMessageSent={() => flushSync(() => root.unmount())} />));
+  await act(async () => setTextareaValue(container.querySelector("textarea")!, "private draft"));
+  await act(async () => { container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); await new Promise((resolve) => setTimeout(resolve, 10)); });
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(container.textContent).not.toContain("private draft");
+  client.destroy();
+});
+
+it("still sends normally when onMessageSent keeps the same view", async () => {
+  const fetcher = vi.fn(async () => new Response('data: {"message_id":"m","thread":{"id":"a"},"status":"IN_PROGRESS"}\n\ndata: {"content":"answer","message_id":"m","thread":{"id":"a"}}\n\ndata: {"message_id":"m","thread":{"id":"a"},"status":"DONE"}\n\n', { headers: { "Content-Type": "text/event-stream" } }));
+  const client = new AgoClient({ baseUrl: "https://example.test", fetch: fetcher as typeof fetch });
+  const sent = vi.fn(); const received = vi.fn();
+  const container = document.createElement("div"); const root = createRoot(container);
+  await act(async () => root.render(<ChatWidget client={client} onMessageSent={sent} onMessageReceived={received} />));
+  await act(async () => setTextareaValue(container.querySelector("textarea")!, "hello"));
+  await act(async () => { container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); await new Promise((resolve) => setTimeout(resolve, 10)); });
+  expect(sent).toHaveBeenCalledExactlyOnceWith("hello");
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(received).toHaveBeenCalledTimes(1);
+  expect(container.textContent).toContain("answer");
+  await act(async () => root.unmount()); client.destroy();
+});
+
+it("ignores a reentrant submit from onMessageSent", async () => {
+  const fetcher = vi.fn(async () => new Response('data: {"message_id":"m","thread":{"id":"a"},"status":"DONE"}\n\n', { headers: { "Content-Type": "text/event-stream" } }));
+  const client = new AgoClient({ baseUrl: "https://example.test", fetch: fetcher as typeof fetch });
+  const container = document.createElement("div"); const root = createRoot(container);
+  const sent = vi.fn(() => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  await act(async () => root.render(<ChatWidget client={client} onMessageSent={sent} />));
+  await act(async () => setTextareaValue(container.querySelector("textarea")!, "hello"));
+  await act(async () => { container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); await new Promise((resolve) => setTimeout(resolve, 10)); });
+  expect(sent).toHaveBeenCalledTimes(1);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  await act(async () => root.unmount()); client.destroy();
+});
+
+it("does not resubmit the old draft reentrantly during an authentication reset", async () => {
+  const fetcher = vi.fn(async () => new Response('data: {"message_id":"m","thread":{"id":"a"},"status":"DONE"}\n\n', { headers: { "Content-Type": "text/event-stream" } }));
+  const client = new AgoClient({ baseUrl: "https://example.test", userJwt: "old-token", fetch: fetcher as typeof fetch });
+  const container = document.createElement("div"); const root = createRoot(container);
+  let called = false;
+  await act(async () => root.render(<ChatWidget client={client} onMessageSent={() => {
+    if (!called) {
+      called = true;
+      client.updateConfig({ userJwt: null });
+      container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    }
+  }} />));
+  await act(async () => setTextareaValue(container.querySelector("textarea")!, "private draft"));
+  await act(async () => { container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); await new Promise((resolve) => setTimeout(resolve, 10)); });
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(container.querySelector("textarea")!.value).toBe("");
+  await act(async () => root.unmount()); client.destroy();
+});
+
+it("does not render or report hidden completions, and renders an authoritative unhide", async () => {
+  const { client, emit } = createDrivableClient();
+  const received = vi.fn(); const headless = vi.fn();
+  client.on("message:complete", headless);
+  const container = document.createElement("div"); const root = createRoot(container);
+  await act(async () => root.render(<ChatWidget client={client} onMessageReceived={received} />));
+  const message: AgoMessage = { id: "m", conversationId: "a", role: "assistant", status: "DONE", content: "hidden answer", hidden: true, createdAt: new Date() };
+  await act(async () => { emit("message:start", { conversationId: "a", messageId: "m" }); emit("message:update", message); emit("message:complete", message); });
+  expect(container.textContent).not.toContain("hidden answer");
+  expect(received).not.toHaveBeenCalled();
+  expect(headless).toHaveBeenCalledExactlyOnceWith(message);
+  await act(async () => emit("message:update", { ...message, hidden: false }));
+  expect(container.textContent).toContain("hidden answer");
+  await act(async () => root.unmount());
 });

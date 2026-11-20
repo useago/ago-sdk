@@ -19,7 +19,7 @@ interface AgoConfig {
   permission?: string;      // X-Widget-Permission header
   language?: string | null; // Host interface locale, sent as Accept-Language
   userEmail?: string;       // X-User-Email header, identify the end user
-  userJwt?: string;         // Authorization: Bearer <jwt>, authenticated users
+  userJwt?: string | null;         // Authorization: Bearer <jwt>, authenticated users
   metadata?: Record<string, unknown> | null; // Message body, for user/ticket enrichment
   debug?: boolean;          // enable verbose console logging
   warnOnEmptyReply?: boolean; // default true; see "Empty replies" below
@@ -157,6 +157,8 @@ Common after login (attaching a JWT) or switching agents:
 ```ts
 client.updateConfig({ userJwt: token, userEmail: "jane@acme.com" });
 ```
+
+A non-empty `userJwt` update continues the same local session, including anonymous login, without a verification request. Before switching accounts, set `userJwt` to `null` or destroy and recreate the client. See [session behavior](../general/core.md).
 
 Changing `permission` to a falsy value removes the header. In React, the
 `useAgo` hook re-applies `agent`, `permission`, `language`, `userEmail`, `userJwt`,

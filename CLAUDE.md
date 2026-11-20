@@ -30,6 +30,26 @@ npm run typecheck # Type check
 - Client-side functions are registered via `FunctionRegistry`
 - React components are optional (peer dependency)
 
+## Coding standards
+
+- **Prefer top-level imports.** Use `import type { Foo } from "..."` for types
+  instead of inline `import("...").Foo` annotations. Use static imports for runtime
+  dependencies by default. Use dynamic `import()` only for a concrete runtime
+  requirement, such as lazy-loading an optional dependency or resolving a
+  configurable module path. Add a brief comment explaining that requirement.
+
+### React effects and state ownership
+
+- Derive display values from props or existing snapshots. Avoid copying those
+  values into state through an effect.
+- When state belongs to a client, conversation, or approval, use a component
+  `key` or a guarded React state update to exclude obsolete state before commit.
+- Keep rendering pure. Mutate refs that invalidate requests or release locks in
+  event handlers and effect setup or cleanup. Drive component keys from React
+  state or props.
+- Use effects for subscriptions and external synchronization. Subscription
+  callbacks can update state.
+
 ## Documentation (keep it simple)
 
 Docs exist so a developer can try the SDK in minutes. Optimize for that, not for

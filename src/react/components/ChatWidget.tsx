@@ -22,7 +22,9 @@ import {
 import type { SheetOptions, SheetState } from "../../widget/sheetController";
 import { useAgoActivity } from "../hooks/useAgoActivity";
 import type { AgoActivityItem } from "../hooks/useAgoActivity";
-import { useMessages } from "../hooks/useMessages";
+import { useMessagesInternal } from "../hooks/useMessages";
+import { BackgroundState } from "./BackgroundState";
+import type { AgoClientEvents, ConversationInteraction } from "../../client/types";
 import { useSheet } from "../hooks/useSheet";
 import { ActivityLine } from "./ActivityLine";
 import { renderInlineMarkdown } from "./inlineMarkdown";
@@ -192,10 +194,43 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
   const isPeek = sheet.compact && sheet.state === "peek";
   const contextClient = useOptionalAgoClient();
   const resolvedClient = client ?? contextClient;
-  const { messages, isLoading, error, sendMessage, stop } = useMessages({
-    client,
-    conversationId: initialConversationId,
-  });
+  const {
+    messages, isLoading, isPreparing, error, stop, conversationId, currentConversation,
+    _sendFromWidget,
+  } = useMessagesInternal(
+    { client, conversationId: initialConversationId, observeBackground: !isPeek },
+    (message) => onMessageReceived?.({ id: message.id, content: message.content }),
+  );
+
+  const [interactions, setInteractions] = useState<Record<string, ConversationInteraction>>({});
+  const interactionRef = useRef<Record<string, ConversationInteraction>>({});
+  const [sessionGeneration, setSessionGeneration] = useState(0);
+  const [draftScope, setDraftScope] = useState({ client: resolvedClient, conversationId, revision: 0 });
+  if (draftScope.client !== resolvedClient || draftScope.conversationId !== conversationId) {
+    // A draft keeps its composer when its first response supplies a server ID.
+    const changedView = draftScope.client !== resolvedClient || draftScope.conversationId !== undefined;
+    setDraftScope({ client: resolvedClient, conversationId, revision: draftScope.revision + (changedView ? 1 : 0) });
+  }
+  useEffect(() => {
+    interactionRef.current = {};
+    setInteractions({});
+    if (!resolvedClient) return;
+    const update = (data: AgoClientEvents["conversation:update"]) => {
+      if (data.conversationId === null) {
+        interactionRef.current = {};
+        setInteractions({});
+        setSessionGeneration((generation) => generation + 1);
+      } else {
+        interactionRef.current = { ...interactionRef.current, [data.conversationId]: data.interaction };
+        setInteractions(interactionRef.current);
+      }
+    };
+    resolvedClient.on("conversation:update", update);
+    return () => resolvedClient.off("conversation:update", update);
+  }, [resolvedClient]);
+  const interaction = conversationId
+    ? interactions[conversationId] ?? (currentConversation?.id === conversationId ? currentConversation.interaction : undefined)
+    : undefined;
 
   // Install the conversational form collectors for the widget's lifetime.
   // Inline configs (with `schema`) are built synchronously; name-only entries are
@@ -258,18 +293,6 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
     pane.scrollTop = pane.scrollHeight;
   };
 
-  // Callback when message is received
-  useEffect(() => {
-    const lastMessage = messages[messages.length - 1];
-    if (
-      lastMessage &&
-      lastMessage.role === "assistant" &&
-      lastMessage.status === "DONE" &&
-      onMessageReceived
-    ) {
-      onMessageReceived({ id: lastMessage.id, content: lastMessage.content });
-    }
-  }, [messages, onMessageReceived]);
 
   useEffect(() => {
     if (isPeek) setHasUnread(true);
@@ -380,27 +403,33 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
     };
   }, [sheet.isModal, collapse]);
 
-    const handleSend = async (content: string, files?: File[]) => {
+  const handleSend = async (content: string, files?: File[]) => {
+    if (interaction?.canSendMessage === false) return false;
     // Sending is an explicit "show me the latest" gesture: re-attach the pane
     // even if the reader had scrolled up to re-read something.
     shouldAutoScrollRef.current = true;
     setAtBottom(true);
-    onMessageSent?.(content);
-    // `sendMessage` resolves to null when the send failed. Reporting that back
-    // lets the composer put the draft back instead of losing what was typed.
-    const result = await sendMessage(content, files);
-    return result !== null;
+    return _sendFromWidget(content, files, onMessageSent, () =>
+      !!conversationId && interactionRef.current[conversationId]?.canSendMessage === false);
   };
 
-  // The input is blocked only while the agent is generating the main answer.
-  // Once the answer text is done (`status: "DONE"`) the input re-enables, even
-  // though the stream stays open while follow-up replies are still being
-  // generated.
+  // The main answer stops blocking input when its text is done, even if the
+  // stream remains open to generate follow-up replies.
   const lastMessage = messages[messages.length - 1];
+  const peekStatus = lastMessage?.role === "assistant"
+    ? lastMessage.outcome ? text.backgroundState[lastMessage.outcome]
+      : lastMessage.status === "WAITING_APPROVAL" ? text.backgroundState.waiting
+      : lastMessage.status === "PAUSED" ? text.backgroundState.paused
+      : lastMessage.progress || lastMessage.approval ? text.backgroundState.inProgress
+      : undefined
+    : undefined;
   const isAnswering =
     isLoading &&
-    lastMessage?.role === "assistant" &&
-    (lastMessage.status === "IN_PROGRESS" || lastMessage.status === "WAITING_CLIENT");
+    (!lastMessage || lastMessage.role === "user" ||
+      (lastMessage.role === "assistant" &&
+        (lastMessage.status === "IN_PROGRESS" || lastMessage.status === "WAITING_CLIENT")));
+
+  const inputBlocked = interaction?.canSendMessage === false || isAnswering || isPreparing;
 
   // What the agent is doing right now. The dots alone say "something is
   // happening" and then vanish as soon as the first token lands, which is
@@ -442,7 +471,7 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
   // Default: clicking a suggested reply sends it as a new user message.
   // `onFollowUpClick={false}` disables interactivity; a function overrides it.
   const handleFollowUpClick =
-    onFollowUpClick === false
+    onFollowUpClick === false || inputBlocked
       ? undefined
       : (onFollowUpClick ?? ((reply: string) => handleSend(reply)));
 
@@ -507,7 +536,7 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
           type="button"
           className="ago-chat-widget__peek"
           aria-expanded={false}
-          aria-label={text.common.openConversation}
+          aria-label={peekStatus ? `${text.common.openConversation}: ${text.backgroundState.backgroundWorkStatus}: ${peekStatus}` : text.common.openConversation}
           onClick={() => {
             setHasUnread(false);
             expand("user");
@@ -555,11 +584,13 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
                 }}
               />
             )}
-            <span style={{ marginLeft: "auto", fontSize: "14px" }} aria-hidden>
-              ↑
+            <span style={{ marginLeft: "auto", fontSize: "12px", textTransform: "none", letterSpacing: 0 }} aria-hidden>
+              {text.common.openConversation} ↑
             </span>
           </span>
-          {isAnswering && !lastMessage?.content ? (
+          {peekStatus ? (
+            <span style={{ fontSize: "13px", lineHeight: 1.5 }}>{text.backgroundState.backgroundWorkStatus}: {peekStatus}</span>
+          ) : isAnswering && (lastMessage?.role !== "assistant" || !lastMessage.content) ? (
             // Before the first token there is nothing to preview. Falling back
             // to the greeting here showed stale text exactly when the user most
             // wants to know something is happening.
@@ -722,27 +753,29 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
           </div>
         ) : (
           messages.map((message, index) => (
-            <Message
-              key={message.id}
-              message={message}
-              showAgentName={showAgentName}
-              isLast={index === messages.length - 1}
-              onFollowUpClick={handleFollowUpClick}
-              showStreamingDots={!showingActivity}
-              feedback={
-                // Only a finished answer can be judged.
-                feedback &&
-                message.role === "assistant" &&
-                message.status === "DONE" &&
-                message.content ? (
-                  <MessageFeedback
-                    messageId={message.id}
-                    client={client}
-                    {...(feedback === true ? {} : feedback)}
-                  />
-                ) : undefined
-              }
-            />
+            <div key={message.id}>
+              {message.role === "assistant" && resolvedClient && <BackgroundState message={message} client={resolvedClient} />}
+              <Message
+                message={message}
+                showAgentName={showAgentName}
+                isLast={index === messages.length - 1}
+                onFollowUpClick={handleFollowUpClick}
+                showStreamingDots={!showingActivity}
+                feedback={
+                  // Only a finished answer can be judged.
+                  feedback &&
+                  message.role === "assistant" &&
+                  message.status === "DONE" &&
+                  message.content ? (
+                    <MessageFeedback
+                      messageId={message.id}
+                      client={client}
+                      {...(feedback === true ? {} : feedback)}
+                    />
+                  ) : undefined
+                }
+              />
+            </div>
           ))
         )}
 
@@ -815,13 +848,14 @@ export const ChatWidget = forwardRef<ChatWidgetHandle, ChatWidgetProps>(
       {/* Input */}
       <ChatInput
         onSend={handleSend}
-        onStop={allowStop ? () => void stop() : undefined}
-        disabled={isAnswering}
+        key={`${sessionGeneration}:${draftScope.revision}`}
+        onStop={allowStop && isAnswering && lastMessage?.canStop !== false ? () => void stop() : undefined}
+        disabled={inputBlocked}
         placeholder={placeholder}
         allowFiles={allowFiles}
         speechToText={speechToText}
         client={resolvedClient ?? undefined}
-        scopeKey={`${initialConversationId ?? messages[0]?.conversationId ?? ""}:${sheet.state}`}
+        scopeKey={`${conversationId ?? ""}:${sheet.state}`}
       />
     </div>
   );

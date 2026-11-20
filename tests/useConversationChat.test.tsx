@@ -129,3 +129,69 @@ describe("useConversationChat", () => {
     server.streams[0].end();
   });
 });
+
+it("does not start background following when the view unmounts before the initial response", async () => {
+  const { readFileSync } = await import("node:fs");
+  const initial = readFileSync("tests/fixtures/background-sdk/initial-send.sse", "utf8");
+  let response!: ReadableStreamDefaultController<Uint8Array>;
+  const calls: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request) => {
+    const path = String(url); calls.push(path);
+    if (path.endsWith("/api/sdk/v1/messages")) return new Response(new ReadableStream<Uint8Array>({ start(controller) { response = controller; } }));
+    if (path.includes("/conversations/")) return new Response(JSON.stringify({ id: "11111111-1111-4111-8111-111111111111", messages: [] }));
+    throw new Error(`Unexpected background read: ${path}`);
+  }));
+  const client = new AgoClient({ baseUrl: "https://example.test" });
+  const { result, root } = await mountChat(client);
+  let sent!: Promise<unknown>;
+  await act(async () => { sent = result.current!.sendMessage("report"); await vi.waitFor(() => expect(response).toBeDefined()); root.unmount(); });
+  await act(async () => { response.enqueue(new TextEncoder().encode(initial)); response.close(); await sent; await flush(); });
+  expect(calls.filter((url) => /\/messages\/[^/]+\/(events|status)$/.test(url))).toEqual([]);
+  expect(calls.some((url) => url.endsWith("/stop"))).toBe(false);
+  client.destroy();
+});
+
+it("does not detach a later mount of the same conversation", async () => {
+  const { readFileSync } = await import("node:fs");
+  const running = readFileSync("tests/fixtures/background-sdk/history-running.json", "utf8");
+  let followSignal: AbortSignal | null | undefined;
+  const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url).includes("/conversations/")) return new Response(running);
+    if (String(url).endsWith("/events")) {
+      followSignal = init?.signal;
+      return new Response(new ReadableStream<Uint8Array>({ start() {} }));
+    }
+    throw new Error(String(url));
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const client = new AgoClient({ baseUrl: "https://example.test" });
+  const id = "11111111-1111-4111-8111-111111111111";
+  const first = await mountChat(client, id);
+  await vi.waitFor(() => expect(followSignal).toBeDefined());
+  expect(first.result.current!.interaction).toEqual({ canSendMessage: false, blockingMessageId: "33333333-3333-4333-8333-333333333333" });
+  const second = await mountChat(client, id);
+  await act(async () => first.root.unmount());
+  expect(followSignal?.aborted).toBe(false);
+  await act(async () => second.root.unmount());
+  expect(followSignal?.aborted).toBe(true);
+  client.destroy();
+});
+
+it("does not detach a later imperative selection of the same conversation", async () => {
+  const { readFileSync } = await import("node:fs");
+  const running = readFileSync("tests/fixtures/background-sdk/history-running.json", "utf8");
+  let signal: AbortSignal | null | undefined;
+  vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url).includes("/conversations/")) return new Response(running);
+    if (String(url).endsWith("/events")) { signal = init?.signal; return new Response(new ReadableStream<Uint8Array>({ start() {} })); }
+    throw new Error(String(url));
+  }));
+  const client = new AgoClient({ baseUrl: "https://example.test" });
+  const id = "11111111-1111-4111-8111-111111111111";
+  const view = await mountChat(client, id);
+  await vi.waitFor(() => expect(signal).toBeDefined());
+  client.setActiveConversation(id);
+  await act(async () => view.root.unmount());
+  expect(signal?.aborted).toBe(false);
+  client.destroy();
+});

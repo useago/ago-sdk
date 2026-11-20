@@ -1,11 +1,14 @@
 import { attachmentsFromFiles } from "../utils/attachments";
 import { EventEmitter } from "../utils/eventEmitter";
 import { AgoError } from "./errors";
+import { SSEHandler } from "../streaming/SSEHandler";
+import { normalizeInteraction, normalizeMessage } from "./messageNormalizer";
 import type {
   AgoClientEvents,
   AgoMessage,
   ClientFunctionInvocation,
   Conversation,
+  ConversationInteraction,
   FunctionCallState,
   FunctionCallStatus,
   SendMessageOptions,
@@ -41,6 +44,8 @@ export interface AgoConversationSnapshot {
   title: string;
   /** Every message, hidden ones included (filter on `hidden` to display). */
   messages: AgoMessage[];
+  /** Whether the server currently accepts another message. */
+  interaction: ConversationInteraction | null;
   /** An answer is running, paused on a client function, queued, or being polled. */
   isGenerating: boolean;
   /** The conversation's history is being fetched. */
@@ -63,6 +68,7 @@ export interface ConversationHost {
     conversation: AgoConversation,
     content: string,
     options: ConversationSendOptions,
+    localMessageId: string,
   ): Promise<AgoMessage>;
   stopConversation(conversation: AgoConversation): Promise<StopMessageResult | null>;
   hasTurn(conversation: AgoConversation): boolean;
@@ -70,12 +76,33 @@ export interface ConversationHost {
   userSent(conversation: AgoConversation): void;
   getConversation(conversationId: string): Promise<Conversation>;
   fetchConversation(conversationId: string): Promise<Conversation>;
-  stopMessage(messageId: string): Promise<StopMessageResult>;
-  emitStopped(conversation: AgoConversation, messageId: string): void;
+  /** Ask the server to stop a polled message and emit its stop event while the session is current. */
+  stopPolledMessage(conversation: AgoConversation, messageId: string): Promise<StopMessageResult | null>;
   rekeyed(conversation: AgoConversation, previousId: string): void;
   retain(conversation: AgoConversation): void;
   release(conversation: AgoConversation): void;
   generatingChanged(): void;
+  /**
+   * Fetch a message observation endpoint using the client's credentials.
+   * Used for both the live SSE stream and status snapshots.
+   * The caller reads the response and controls cancellation through signal.
+   */
+  fetchObservationResponse(path: string, signal: AbortSignal): Promise<Response>;
+  /** Emit message:update to client listeners while this conversation remains active. */
+  emitMessageUpdate(conversation: AgoConversation, message: AgoMessage): void;
+  /** Emit conversation:update with the active conversation's interaction state. */
+  emitInteractionUpdate(conversation: AgoConversation, interaction: ConversationInteraction): void;
+  /**
+   * Deliver an observed completion to client and conversation listeners while active.
+   * The conversation must deduplicate completions before calling this method.
+   */
+  emitObservedCompletion(conversation: AgoConversation, message: AgoMessage): void;
+  /**
+   * Report observation connectivity through the client's connection:status event.
+   * Access-loss errors reset the session instead; other errors report disconnected
+   * status for the active conversation without clearing its state.
+   */
+  reportConnectionStatus(conversation: AgoConversation, connected: boolean, error?: Error): void;
 }
 
 /** Throws the SDK's error for a message with no text. */
@@ -113,12 +140,21 @@ export class AgoConversation {
   private draft: boolean;
   private title = "";
   private messages: AgoMessage[] = [];
+  private interaction: ConversationInteraction | null = null;
+  private followGeneration = 0;
+  private observeBackground = true;
+  private sessionGeneration = 0;
+  private followController: AbortController | null = null;
+  private followTimer: ReturnType<typeof setTimeout> | null = null;
+  private observed = new Set<string>();
+  private completed = new Set<string>();
   private error: Error | null = null;
   private isLoading = false;
   private loadPromise: Promise<Conversation> | null = null;
   private loaded = false;
   private snapshot: AgoConversationSnapshot;
   private listeners = new Set<() => void>();
+  private forkListeners = new Set<(id: string) => void>();
   private emitter = new EventEmitter<AgoConversationEvents>();
   private handlerCount = 0;
   /** Sends waiting for the running answer to end, oldest first. */
@@ -161,15 +197,23 @@ export class AgoConversation {
   /**
    * Send a message in this conversation. The user message shows at once. While
    * an answer is running, the message waits and is sent when that answer ends:
-   * a conversation answers one message at a time.
+   * a conversation answers one message at a time. If the interaction state
+   * blocks sending, rejects with `conversation_busy`, including when a queued
+   * message reaches the front of the queue.
    */
   async sendMessage(
     content: string,
     options: ConversationSendOptions = {},
   ): Promise<AgoMessage> {
     assertMessageContent(content);
+    this._assertCanSend();
+    const sessionGeneration = this.sessionGeneration;
     this.host.retain(this);
     this.host.userSent(this);
+    if (sessionGeneration !== this.sessionGeneration) {
+      this.host.release(this);
+      throw new AgoError("The request was detached from the current session.", "request_detached");
+    }
     this.stopWaitingForPolled();
     const userMessage: AgoMessage = {
       id: `local-${++this.seq}`,
@@ -196,15 +240,19 @@ export class AgoConversation {
         this.notify();
         await released;
         this.handingOff = false;
+        this._assertCanSend();
       } else {
         this.notify();
       }
-      return await this.host.runSend(this, content, options);
+      if (sessionGeneration !== this.sessionGeneration) throw new AgoError("The request was detached from the current session.", "request_detached");
+      return await this.host.runSend(this, content, options, userMessage.id);
     } catch (error) {
-      this.messages = this.messages.filter((m) => m.id !== userMessage.id);
-      this.error = error instanceof Error ? error : new Error(String(error));
-      this.notify();
-      this.drain();
+      if (sessionGeneration === this.sessionGeneration) {
+        this.messages = this.messages.filter((m) => m.id !== userMessage.id);
+        this.error = error instanceof Error ? error : new Error(String(error));
+        this.notify();
+        this.drain();
+      }
       this.host.release(this);
       throw error;
     }
@@ -212,9 +260,11 @@ export class AgoConversation {
 
   /**
    * Stop this conversation's answer (a queued message is then sent). Resolves
-   * with the backend's verdict, or `null` when nothing was generating.
+   * with the backend's verdict, or `null` when nothing was generating or the
+   * interaction state blocks sending.
    */
   stop(): Promise<StopMessageResult | null> {
+    if (this.interaction?.canSendMessage === false) return Promise.resolve(null);
     return this.host.stopConversation(this);
   }
 
@@ -289,21 +339,42 @@ export class AgoConversation {
       this.isLoading = true;
       this.notify();
       const mark = this.seq;
+      const sessionGeneration = this.sessionGeneration;
       this.loadPromise = this.host.getConversation(this.currentId).then(
         (conversation) => {
+          if (sessionGeneration !== this.sessionGeneration) throw new AgoError("The request was detached from the current session.", "request_detached");
           this.applyServerMessages(conversation.messages ?? [], mark);
+          this.interaction = conversation.interaction ?? null;
           this.title = conversation.title?.trim() || this.title;
           this.isLoading = false;
           this.loaded = true;
           this.notify();
+          if (sessionGeneration !== this.sessionGeneration) throw new AgoError("The request was detached from the current session.", "request_detached");
+          if (this.interaction && this.host.isActive(this)) {
+            this.host.reportConnectionStatus(this, true);
+            if (sessionGeneration !== this.sessionGeneration) throw new AgoError("The request was detached from the current session.", "request_detached");
+            for (const message of this.messages) {
+              if (!this.host.isActive(this)) break;
+              this.host.emitMessageUpdate(this, message);
+              if (sessionGeneration !== this.sessionGeneration) throw new AgoError("The request was detached from the current session.", "request_detached");
+            }
+            if (this.host.isActive(this)) this.host.emitInteractionUpdate(this, this.interaction);
+          }
           this.updatePolling();
+          this._updateBackgroundFollowing();
+          if (!this.observeBackground && this.interaction?.canSendMessage === false) {
+            this.loaded = false;
+            this.loadPromise = null;
+          }
           return conversation;
         },
         (error) => {
-          this.isLoading = false;
-          this.loadPromise = null;
-          this.error = error instanceof Error ? error : new Error(String(error));
-          this.notify();
+          if (sessionGeneration === this.sessionGeneration) {
+            this.isLoading = false;
+            this.loadPromise = null;
+            this.error = error instanceof Error ? error : new Error(String(error));
+            this.notify();
+          }
           throw error;
         },
       );
@@ -315,12 +386,59 @@ export class AgoConversation {
   // Fed by the client, from the turn's own stream
   // ─────────────────────────────────────────────────────────────────
 
+  /** @internal Check whether background work prevents sending a message. */
+  _isBackgroundBusy(): boolean {
+    return this.interaction?.canSendMessage === false;
+  }
+
+  /** @internal Refresh the observed message after an approval decision. */
+  _refreshBackground(): void {
+    const id = this.interaction?.blockingMessageId;
+    if (!id || !this.observeBackground || !this.host.isActive(this)) return;
+    this._stopBackgroundFollowing();
+    void this._readBackgroundStatus(id, this.followGeneration);
+  }
+
+  /** @internal Apply a server snapshot to this conversation's message store. */
+  _applyBackgroundSnapshot(snapshot: { interaction: ConversationInteraction; message: AgoMessage }, fromSend = false): void {
+    const generation = this.followGeneration;
+    const { message, interaction } = snapshot;
+    if (message.conversationId !== this.currentId) return;
+    const previous = this.messages.find((entry) => entry.id === message.id);
+    if (previous && TERMINAL.has(previous.status) && !TERMINAL.has(message.status)) return;
+    if (TERMINAL.has(message.status) && message.attachments?.some((file) => !file.url)) {
+      this.observed.add(message.id);
+      this._scheduleBackgroundStatus(message.id);
+      return;
+    }
+    const index = this.messages.findIndex((entry) => entry.id === message.id);
+    this.messages = index < 0 ? [...this.messages, message] : this.messages.map((entry, i) => i === index ? message : entry);
+    this.interaction = interaction;
+    if (!this.observeBackground && interaction.canSendMessage === false) {
+      this.loaded = false;
+      this.loadPromise = null;
+    }
+    if (fromSend || !TERMINAL.has(message.status)) this.observed.add(message.id);
+    this.notify();
+    if (generation !== this.followGeneration) return;
+    this.host.emitMessageUpdate(this, message);
+    if (generation !== this.followGeneration || !this.host.isActive(this)) return;
+    this.host.emitInteractionUpdate(this, interaction);
+    if (generation !== this.followGeneration || !this.host.isActive(this)) return;
+    if (TERMINAL.has(message.status) && this.observed.has(message.id) && !this.completed.has(message.id)) {
+      this.completed.add(message.id);
+      this.host.emitObservedCompletion(this, message);
+    }
+  }
+
   /** @internal */
   _dispatch<K extends keyof AgoConversationEvents>(
     event: K,
     data: AgoConversationEvents[K],
+    current?: () => boolean,
   ): void {
-    this.emitter.emit(event, data);
+    if (current) this.emitter.emit(event, data, current);
+    else this.emitter.emit(event, data);
   }
 
   /** @internal */
@@ -339,6 +457,27 @@ export class AgoConversation {
     this.host.rekeyed(this, previousId);
     this.notify();
     this.emitter.emit("id", { previousId, id });
+  }
+
+  /** @internal Move a send that the server forked into another conversation. */
+  _moveTurnTo(target: AgoConversation, turn: TurnRef, userMessageId: string): void {
+    const keys = new Set([userMessageId, this.assistantKey(turn)]);
+    const moved = this.messages.filter((message) => keys.has(message.id));
+    this.messages = this.messages.filter((message) => !keys.has(message.id));
+    target.messages = [...target.messages.filter((message) => !keys.has(message.id)), ...moved.map((message) => ({ ...message, conversationId: target.id }))];
+    for (const message of moved) {
+      this.localSeq.delete(message.id);
+      target.localSeq.set(message.id, ++target.seq);
+    }
+    this.notify();
+    target.notify();
+    for (const listener of [...this.forkListeners]) listener(target.id);
+  }
+
+  /** @internal Subscribe to sends moved to another conversation; returns an unsubscribe function. */
+  _subscribeToFork(listener: (id: string) => void): () => void {
+    this.forkListeners.add(listener);
+    return () => { this.forkListeners.delete(listener); };
   }
 
   /** @internal */
@@ -473,40 +612,58 @@ export class AgoConversation {
   _turnEnded(): void {
     this.notify();
     this.drain();
+    this._updateBackgroundFollowing();
+  }
+
+  /** @internal Suspend server observation while preserving local turns and selection. */
+  _setBackgroundObservation(enabled: boolean): void {
+    if (this.observeBackground === enabled) return;
+    this.observeBackground = enabled;
+    if (!enabled) {
+      this._stopBackgroundFollowing();
+      if (this.interaction?.canSendMessage === false) {
+        this.loaded = false;
+        this.loadPromise = null;
+      }
+    } else if (this.loaded) this._updateBackgroundFollowing();
   }
 
   /** @internal The client's active conversation changed to or from this one. */
   _activeChanged(): void {
+    if (!this.host.isActive(this) && this.interaction?.canSendMessage === false) {
+      this.loaded = false;
+      this.loadPromise = null;
+      this.observed.clear();
+    }
     this.updatePolling();
+    if (!this.host.isActive(this) || this.loaded) this._updateBackgroundFollowing();
   }
 
   /** @internal Stop the polled answer of a reloaded page, if any. */
   async _stopPolled(): Promise<StopMessageResult | null> {
+    if (this.interaction?.canSendMessage === false) return null;
     const poll = this.poll;
     if (!poll) return null;
+    const sessionGeneration = this.sessionGeneration;
     this.stopPolling();
     this.messages = this.messages.map((m) =>
       m.id === poll.messageId ? { ...m, status: "CANCELED" } : m,
     );
     this.notify();
+    if (sessionGeneration !== this.sessionGeneration) return null;
     this.drain();
-    let result: StopMessageResult | null = null;
-    try {
-      result = await this.host.stopMessage(poll.messageId);
-    } catch {
-      // The local state is already stopped; the server finishes on its own.
-    }
-    this.host.emitStopped(this, poll.messageId);
-    return result;
+    return this.host.stopPolledMessage(this, poll.messageId);
   }
 
   /** @internal The client was destroyed: drop queued sends and timers. */
   _dispose(): void {
     this.stopPolling();
+    this._stopBackgroundFollowing();
     const queued = this.queue;
     this.queue = [];
     this.handingOff = false;
     this.listeners.clear();
+    this.forkListeners.clear();
     for (const send of queued) {
       send.cancel(
         new AgoError(
@@ -517,9 +674,40 @@ export class AgoConversation {
     }
   }
 
+  /** @internal Discard state belonging to the previous session. */
+  _resetSession(destroyed = false): void {
+    this.sessionGeneration++;
+    this.stopPolling();
+    this._stopBackgroundFollowing();
+    const queued = this.queue;
+    this.queue = [];
+    this.handingOff = false;
+    for (const send of queued) send.cancel(destroyed
+      ? new AgoError("The client was destroyed before this message was sent.", "client_destroyed")
+      : new AgoError("The request was detached from the current session.", "request_detached"));
+    this.messages = [];
+    this.title = "";
+    this.error = null;
+    this.isLoading = false;
+    this.localSeq.clear();
+    this.interaction = null;
+    this.loaded = false;
+    this.loadPromise = null;
+    this.observed.clear();
+    this.completed.clear();
+    this.notify();
+  }
+
   // ─────────────────────────────────────────────────────────────────
   // Internals
   // ─────────────────────────────────────────────────────────────────
+
+  /** Reject a send while the conversation is busy. */
+  private _assertCanSend(): void {
+    if (this.interaction?.canSendMessage === false) {
+      throw new AgoError("The conversation is busy.", "conversation_busy");
+    }
+  }
 
   /** Release the oldest queued send once nothing runs any more. */
   private drain(): void {
@@ -600,7 +788,7 @@ export class AgoConversation {
     );
     const merged = server.map((m) => live.get(m.id) ?? { ...m, conversationId: this.currentId });
     const localOnly = this.messages.filter(
-      (m) => !serverIds.has(m.id) && (live.has(m.id) || (this.localSeq.get(m.id) ?? 0) > mark),
+      (m) => !serverIds.has(m.id) && (live.has(m.id) || (streaming && m.role === "user" && this.localSeq.has(m.id)) || (this.localSeq.get(m.id) ?? 0) > mark),
     );
     this.messages = [...merged, ...localOnly];
   }
@@ -612,6 +800,7 @@ export class AgoConversation {
       !this.draft &&
       this.host.isActive(this) &&
       !this.host.hasTurn(this) &&
+      this.interaction?.canSendMessage !== false &&
       last?.status === "IN_PROGRESS";
     if (!shouldPoll || !last) {
       if (this.poll) {
@@ -685,12 +874,110 @@ export class AgoConversation {
     this.poll = null;
   }
 
+  /** Cancel background observation and invalidate pending reads. */
+  private _stopBackgroundFollowing(): void {
+    this.followGeneration++;
+    this.followController?.abort();
+    this.followController = null;
+    if (this.followTimer !== null) clearTimeout(this.followTimer);
+    this.followTimer = null;
+  }
+
+  /** Start or stop observation according to the active conversation state. */
+  private _updateBackgroundFollowing(): void {
+    if (this.observeBackground && this.host.isActive(this) && this.followTimer !== null) return;
+    if (!this.observeBackground || !this.host.isActive(this) || this.host.hasTurn(this) || this.interaction?.canSendMessage !== false) {
+      this._stopBackgroundFollowing();
+      return;
+    }
+    if (this.followController || this.followTimer !== null) return;
+    const message = this.messages.find((entry) => entry.id === this.interaction?.blockingMessageId);
+    if (!message) return;
+    this.observed.add(message.id);
+    void this._followBackground(message, this.followGeneration);
+  }
+
+  /** Schedule a status read for a paused background message. */
+  private _scheduleBackgroundStatus(messageId: string): void {
+    if (!this.observeBackground || !this.host.isActive(this) || this.followTimer !== null) return;
+    const generation = this.followGeneration;
+    this.followTimer = setTimeout(() => {
+      this.followTimer = null;
+      void this._readBackgroundStatus(messageId, generation);
+    }, POLL_INTERVAL_MS);
+  }
+
+  /** Follow updates for a background message until the observation ends. */
+  private async _followBackground(message: AgoMessage, capturedFollowGeneration: number): Promise<void> {
+    if (["WAITING_APPROVAL", "PAUSED"].includes(message.status)) {
+      this._scheduleBackgroundStatus(message.id);
+      return;
+    }
+    if (!this.observeBackground || !this.host.isActive(this) || capturedFollowGeneration !== this.followGeneration) return;
+    const controller = new AbortController();
+    this.followController = controller;
+    try {
+      const response = await this.host.fetchObservationResponse(`/api/sdk/v1/messages/${encodeURIComponent(message.id)}/events`, controller.signal);
+      if (capturedFollowGeneration !== this.followGeneration) return;
+      this.host.reportConnectionStatus(this, true);
+      if (capturedFollowGeneration !== this.followGeneration) return;
+      if (!response.body) {
+        this._scheduleBackgroundStatus(message.id);
+        return;
+      }
+      let latest = message;
+      const handler = new SSEHandler({ onState: (snapshot) => {
+        if (capturedFollowGeneration !== this.followGeneration) return;
+        latest = snapshot.message;
+        this._applyBackgroundSnapshot(snapshot);
+      } }, { signal: controller.signal });
+      await handler.processStream(response);
+      if (capturedFollowGeneration === this.followGeneration && !TERMINAL.has(latest.status)) this._scheduleBackgroundStatus(latest.id);
+    } catch (error) {
+      if (capturedFollowGeneration !== this.followGeneration) return;
+      this.host.reportConnectionStatus(this, false, error instanceof Error ? error : new Error(String(error)));
+      this._scheduleBackgroundStatus(message.id);
+    } finally {
+      if (this.followController === controller) this.followController = null;
+    }
+  }
+
+  /** Read the latest status of a paused background message. */
+  private async _readBackgroundStatus(messageId: string, capturedFollowGeneration: number): Promise<void> {
+    if (!this.observeBackground || !this.host.isActive(this) || capturedFollowGeneration !== this.followGeneration) return;
+    const controller = new AbortController();
+    this.followController = controller;
+    try {
+      const response = await this.host.fetchObservationResponse(`/api/sdk/v1/messages/${encodeURIComponent(messageId)}/status`, controller.signal);
+      const raw = await response.json() as Parameters<typeof normalizeMessage>[0] & {
+        interaction?: { can_send_message: boolean; blocking_message_id: string | null };
+      };
+      if (capturedFollowGeneration !== this.followGeneration) return;
+      if (!raw.interaction) throw new AgoError("Incomplete message status snapshot.", "stream_error");
+      const message = normalizeMessage(raw, this.currentId, true);
+      this.host.reportConnectionStatus(this, true);
+      if (capturedFollowGeneration !== this.followGeneration) return;
+      this._applyBackgroundSnapshot({ interaction: normalizeInteraction(raw.interaction), message });
+      if (capturedFollowGeneration === this.followGeneration && !TERMINAL.has(message.status)) {
+        if (["WAITING_APPROVAL", "PAUSED"].includes(message.status)) this._scheduleBackgroundStatus(message.id);
+        else void this._followBackground(message, capturedFollowGeneration);
+      }
+    } catch (error) {
+      if (capturedFollowGeneration !== this.followGeneration) return;
+      this.host.reportConnectionStatus(this, false, error instanceof Error ? error : new Error(String(error)));
+      this._scheduleBackgroundStatus(messageId);
+    } finally {
+      if (this.followController === controller) this.followController = null;
+    }
+  }
+
   private buildSnapshot(): AgoConversationSnapshot {
     return {
       id: this.currentId,
       isDraft: this.draft,
       title: this.title,
       messages: this.messages,
+      interaction: this.interaction,
       isGenerating: this.isGenerating(),
       isLoading: this.isLoading,
       error: this.error,

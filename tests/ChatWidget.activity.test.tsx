@@ -1,3 +1,4 @@
+import { createDrivableClient } from "./reactWidgetMockClient";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -9,25 +10,7 @@ import type { AgoMessage } from "../src/client/types";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 /** A client we drive by hand, so a turn can be paused mid-flight. */
-function createDrivableClient() {
-  const handlers: Record<string, Array<(data: unknown) => void>> = {};
-  const emit = (event: string, data: unknown) =>
-    (handlers[event] ?? []).forEach((h) => h(data));
-  const client = {
-    on: (e: string, h: (data: unknown) => void) => {
-      (handlers[e] ??= []).push(h);
-    },
-    off: (e: string, h: (data: unknown) => void) => {
-      handlers[e] = (handlers[e] ?? []).filter((x) => x !== h);
-    },
-    sendMessage: vi.fn(() => new Promise<AgoMessage>(() => {})),
-    stop: vi.fn(async () => null),
-    getMessages: vi.fn(async () => []),
-    approveFunction: vi.fn(async () => {}),
-    rejectFunction: vi.fn(async () => {}),
-  } as unknown as AgoClient;
-  return { client, emit };
-}
+
 
 const streamingMessage: AgoMessage = {
   id: "m1",

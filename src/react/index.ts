@@ -18,6 +18,9 @@ export type {
   SheetSnapshot,
 } from "../widget/sheetController";
 
+export { BackgroundState } from "./components/BackgroundState";
+export type { BackgroundStateProps, BackgroundStateLabels } from "./components/BackgroundState";
+
 export { Message } from "./components/Message";
 export type { MessageProps } from "./components/Message";
 
@@ -135,6 +138,7 @@ export type {
   FunctionCallStatus,
   StopMessageResult,
   Conversation,
+  ConversationInteraction,
   FeedbackDetails,
   FeedbackRating,
   FeedbackReason,

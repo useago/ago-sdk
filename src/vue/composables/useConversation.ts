@@ -1,4 +1,6 @@
-import { ref, onMounted } from "vue";
+import { ref, onMounted, onUnmounted } from "vue";
+import type { BindingHandle } from "../../client/bindingOwnership";
+import { AgoError } from "../../client/errors";
 import type { AgoClient } from "../../client/AgoClient";
 import type { Conversation } from "../../client/types";
 import { useAgo } from "./useAgo";
@@ -24,36 +26,70 @@ export function useConversation(options: UseConversationOptions = {}) {
   const isLoading = ref(false);
   const error = ref<Error | null>(null);
 
+  let owner: BindingHandle | undefined;
+  let generation = 0;
+  const reset = (data: import("../../client/types").AgoClientEvents["conversation:update"]) => {
+    if (data.conversationId === null) {
+      generation++;
+      owner = undefined;
+      conversations.value = [];
+      currentConversation.value = null;
+      error.value = null;
+      isLoading.value = false;
+    } else if (currentConversation.value?.id === data.conversationId) {
+      currentConversation.value = { ...currentConversation.value, interaction: data.interaction };
+    }
+  };
   async function refreshConversations() {
+    const capturedGeneration = generation;
     isLoading.value = true;
     error.value = null;
     try {
-      conversations.value = (await client.getConversations()).data;
+      const data = (await client.getConversations()).data;
+      if (capturedGeneration === generation) conversations.value = data;
     } catch (err) {
-      error.value = err instanceof Error ? err : new Error("Failed to load conversations");
+      if (capturedGeneration === generation) error.value = err instanceof Error ? err : new Error("Failed to load conversations");
     } finally {
-      isLoading.value = false;
+      if (capturedGeneration === generation) isLoading.value = false;
     }
   }
 
   async function selectConversation(id: string) {
     isLoading.value = true;
     error.value = null;
+    const activation = client._bindConversation();
+    activation.select(id);
+    owner = activation;
     try {
-      currentConversation.value = await client.getConversation(id);
+      const conversation = await client.conversation(id).load();
+      if (activation.isCurrent()) currentConversation.value = conversation;
     } catch (err) {
-      error.value = err instanceof Error ? err : new Error("Failed to load conversation");
+      if (activation.isCurrent() && !(err instanceof AgoError && err.code === "request_detached"))
+        error.value = err instanceof Error ? err : new Error("Failed to load conversation");
     } finally {
-      isLoading.value = false;
+      if (owner === activation) isLoading.value = false;
     }
   }
 
   function startNewConversation() {
     currentConversation.value = null;
+    isLoading.value = false;
+    error.value = null;
+    const activation = client._bindConversation();
+    activation.select(null);
+    owner = activation;
   }
 
   onMounted(() => {
+    client.on("conversation:update", reset);
     if (autoLoad) refreshConversations();
+  });
+
+  onUnmounted(() => {
+    generation++;
+    client.off("conversation:update", reset);
+    if (owner && owner.isCurrent()) owner.detach();
+    owner = undefined;
   });
 
   return {

@@ -1,6 +1,6 @@
 import { computed } from "vue";
 import type { AgoClient } from "../../client/AgoClient";
-import { useMessages } from "./useMessages";
+import { useMessagesInternal } from "./useMessages";
 import { useConversation } from "./useConversation";
 
 export interface UseChatOptions {
@@ -17,7 +17,7 @@ export interface UseChatOptions {
  * ```
  */
 export function useChat(options: UseChatOptions = {}) {
-  const msgResult = useMessages({
+  const msgResult = useMessagesInternal({
     client: options.client,
     conversationId: options.conversationId,
   });
@@ -42,10 +42,12 @@ export function useChat(options: UseChatOptions = {}) {
     conversationId: msgResult.conversationId,
     // Conversations
     conversations: convResult.conversations,
-    currentConversation: convResult.currentConversation,
-    isConversationsLoading: convResult.isLoading,
-    selectConversation: convResult.selectConversation,
-    startNewConversation: convResult.startNewConversation,
+    currentConversation: msgResult.currentConversation,
+    isConversationsLoading: computed(() => convResult.isLoading.value || msgResult.isHistoryLoading.value),
+    selectConversation: async (id: string) => {
+      await msgResult.activate(id);
+    },
+    startNewConversation: msgResult.clearMessages,
     refreshConversations: convResult.refreshConversations,
   };
 }

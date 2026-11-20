@@ -84,6 +84,45 @@ interrupts the turn (`allowStop`, default `true`; pass `false` to disable it).
 
 `ChatWidget` is a high-level component. For a custom interface, use `useChat`.
 
+### Background work in a custom conversation
+
+Use `useConversationChat` to observe a conversation and render its assistant
+messages with `BackgroundState` before their final answer:
+
+```tsx
+import { BackgroundState, useConversationChat } from "@useago/sdk/react";
+
+function BackgroundChat({ conversationId }: { conversationId?: string }) {
+  const { messages, interaction, isGenerating, sendMessage, stop } =
+    useConversationChat(conversationId);
+  const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+  return (
+    <>
+      {messages.map((message) => (
+        <div key={message.id}>
+          {message.role === "assistant" && <BackgroundState message={message} />}
+          <p>{message.content}</p>
+        </div>
+      ))}
+      {isGenerating && lastAssistant?.canStop !== false && (
+        <button onClick={stop}>Stop</button>
+      )}
+      <button
+        disabled={interaction?.canSendMessage === false}
+        onClick={() => sendMessage("Hello")}
+      >
+        Send
+      </button>
+    </>
+  );
+}
+```
+
+Gate the composer with `interaction.canSendMessage` and local submission state.
+`canStop` controls Stop independently. `BackgroundState` is passive: the hook owns
+observation. It uses the provider's client for approval decisions, accepts a
+`client` prop, and renders disabled decision buttons without either.
+
 ## 3. Custom UI with `useChat`
 
 All-in-one state for a custom chat interface (composes `useMessages` +
@@ -313,10 +352,10 @@ Key events: `message:start`, `message:chunk` (`{ content }` per token),
 ## Exports cheat-sheet (`@useago/sdk/react`)
 
 - Provider/context: `AgoProvider`, `useAgoClient`, `useOptionalAgoClient`
-- Hooks: `useAgo`, `useChat`, `useMessages`, `useConversation`, `useFeedback`,
+- Hooks: `useAgo`, `useChat`, `useMessages`, `useConversation`, `useConversationChat`, `useFeedback`,
   `useAgoFunction`, `useAgoNavigation`, `useAgoPageState`, `useAgoContext`,
   `useAgoStore`, `useFormCollector`
-- Components: `ChatWidget`, `Message`, `ChatInput`, `Markdown`, `MessageFeedback`
+- Components: `ChatWidget`, `BackgroundState`, `Message`, `ChatInput`, `Markdown`, `MessageFeedback`
 - Forms: `createFormCollector`
 - Testing: `createMockClient`
 - Types: `AgoConfig`, `AgoMessage`, `Conversation`, `AgoAgent`, `AgoSource`,

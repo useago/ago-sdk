@@ -25,7 +25,7 @@ export class AgoApiError extends AgoError {
   constructor(
     message: string,
     code: string,
-    statusCode: number,
+    statusCode: number | undefined,
     public type: string,
     public param?: string,
     public docUrl?: string
@@ -34,7 +34,7 @@ export class AgoApiError extends AgoError {
     this.name = "AgoApiError";
   }
 
-  static fromResponse(data: ApiErrorResponse, statusCode: number): AgoApiError {
+  static fromResponse(data: ApiErrorResponse, statusCode?: number): AgoApiError {
     const error = data.error;
     // Surface the doc link in the message itself: most developers see the
     // message string (console, logs) long before they inspect `docUrl`.

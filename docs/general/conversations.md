@@ -30,19 +30,33 @@ event.
 ## React
 
 ```tsx
-import { useConversationChat } from "@useago/sdk/react";
+import { BackgroundState, useConversationChat } from "@useago/sdk/react";
 
 function Chat({ conversationId }: { conversationId?: string }) {
-  const { messages, isGenerating, sendMessage, stop } = useConversationChat(conversationId);
+  const { messages, interaction, isGenerating, sendMessage, stop } = useConversationChat(conversationId);
+  const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
   return (
     <>
-      {messages.map((m) => <p key={m.id}>{m.content}</p>)}
-      {isGenerating ? <button onClick={stop}>Stop</button> : null}
-      <button onClick={() => sendMessage("Hello")}>Send</button>
+      {messages.map((m) => (
+        <div key={m.id}>
+          {m.role === "assistant" && <BackgroundState message={m} />}
+          <p>{m.content}</p>
+        </div>
+      ))}
+      {isGenerating && lastAssistant?.canStop !== false && <button onClick={stop}>Stop</button>}
+      <button disabled={interaction?.canSendMessage === false} onClick={() => sendMessage("Hello")}>Send</button>
     </>
   );
 }
 ```
+
+`BackgroundState` displays progress, activity, outcomes and approval decisions as
+message updates arrive, including before the final answer. It uses the provider's
+client for decisions, or accepts a `client` prop. Without either, it renders
+read-only with disabled approval buttons. It does not observe or poll on its own;
+`useConversationChat` owns observation. Use `interaction.canSendMessage` to
+gate the composer and local submission state as needed. `canStop` controls Stop
+for the response and is independent of whether another message can be sent.
 
 Switching `conversationId` shows the other conversation; the answer of the one
 you left keeps running and is whole when you come back. Unmounting never stops

@@ -255,34 +255,46 @@ a call that changes page resolves only once the destination has registered its
 own tools. See
 [functions and context](docs/general/functions-and-context.md#webmcp-bridge-share-your-functions-with-browser-agents).
 
+## Follow background work
+
+The React and embeddable widgets display a background agent's progress, review
+requests and report in the conversation. For a custom interface, use the
+message snapshots and conversation interaction policy from the SDK. See
+[Follow background work](docs/general/core.md#follow-background-work).
+
 ## Let the user stop a long answer
 
-`<ChatWidget>` already does this: while the agent answers, its send button turns
-into a **Stop** button (pass `allowStop={false}` to opt out). In a custom UI, wire
-the `stop` returned by `useChat` / `useMessages`:
+`<ChatWidget>` shows **Stop** when a response can be stopped (pass
+`allowStop={false}` to opt out). Background work cannot be stopped through the
+widget. For an ordinary reply, wire the `stop` returned by `useChat` /
+`useMessages`:
 
 ```tsx
 import { useChat } from "@useago/sdk/react";
 
 function Chat() {
   const { messages, sendMessage, stop, isLoading } = useChat();
+  const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
 
   return (
     <div>
       {messages.map((m) => (
         <p key={m.id}><b>{m.role}:</b> {m.content}</p>
       ))}
-      {isLoading ? (
+      {isLoading && lastAssistant?.canStop !== false ? (
         <button onClick={() => void stop()}>Stop</button>
       ) : (
-        <button onClick={() => sendMessage("Write me a long report")}>Send</button>
+        <button disabled={isLoading} onClick={() => sendMessage("Write me a long report")}>Send</button>
       )}
     </div>
   );
 }
 ```
 
-Stopping closes the stream **and** tells the backend to stop generating. Closing
+For background work in a custom UI, also apply the current
+`conversation:update` input policy; `isLoading` alone is not sufficient.
+
+Stopping a supported turn closes the stream **and** tells the backend to stop generating. Closing
 the stream alone would not stop the agent: it would keep running and the full
 answer would reappear on the next load. The text already produced stays on
 screen, the message ends as `CANCELED`, and the pending `sendMessage` resolves

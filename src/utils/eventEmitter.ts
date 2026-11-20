@@ -1,3 +1,5 @@
+type ScopeCheck = () => boolean;
+
 type EventHandler<T = unknown> = (data: T) => void;
 
 /**
@@ -24,16 +26,16 @@ export class EventEmitter<Events extends Record<string, any> = Record<string, un
     }
   }
 
-  emit<K extends keyof Events>(event: K, data: Events[K]): void {
+  /** Deliver an event to its listeners, logging listener errors without interrupting others. */
+  emit<K extends keyof Events>(event: K, data: Events[K], isCurrent?: ScopeCheck): void {
     const eventHandlers = this.handlers.get(event);
-    if (eventHandlers) {
-      eventHandlers.forEach((handler) => {
-        try {
-          handler(data);
-        } catch (error) {
-          console.error(`Error in event handler for ${String(event)}:`, error);
-        }
-      });
+    if (!eventHandlers) return;
+    for (const handler of [...eventHandlers]) {
+      if (isCurrent && !isCurrent()) break;
+      if (this.handlers.get(event) !== eventHandlers || !eventHandlers.has(handler)) continue;
+      try { handler(data); } catch (error) {
+        console.error(`Error in event handler for ${String(event)}:`, error);
+      }
     }
   }
 

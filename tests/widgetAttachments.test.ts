@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createMockClient } from "../src/testing/createMockClient";
+import { createMockClient } from "./widgetMockClient";
 import { mountChatWidget } from "../src/widget/createChatWidget";
 
 describe("widget attachment messages", () => {

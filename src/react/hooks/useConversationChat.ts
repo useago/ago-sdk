@@ -5,7 +5,7 @@ import type {
   ConversationSendOptions,
 } from "../../client/AgoConversation";
 import { AgoError } from "../../client/errors";
-import type { AgoMessage } from "../../client/types";
+import type { AgoMessage, ConversationInteraction } from "../../client/types";
 import { useOptionalAgoClient } from "../context/AgoContext";
 
 export interface UseConversationChatOptions {
@@ -21,6 +21,8 @@ export interface UseConversationChatResult {
   title: string;
   /** Visible messages, with their live `toolCalls` and `functionCalls`. */
   messages: AgoMessage[];
+  /** Whether the server permits another message in this conversation. */
+  interaction: ConversationInteraction | null;
   /** This conversation is answering (or has a message waiting to be sent). */
   isGenerating: boolean;
   /** The conversation's history is being fetched. */
@@ -63,7 +65,14 @@ export function useConversationChat(
     [client, conversationId],
   );
   // The conversation on screen: a background answer may not act on the page.
-  useEffect(() => client._followUser(conversation.id), [client, conversation]);
+  useEffect(() => {
+    if (!client._followUser(conversation.id)) return;
+    const token = client._bindConversation();
+    return () => {
+      if (token.isCurrent()) client._detachFollowedConversation(conversation);
+      token.release();
+    };
+  }, [client, conversation]);
   const snapshot = useSyncExternalStore(
     conversation.subscribe,
     conversation.getSnapshot,
@@ -94,6 +103,7 @@ export function useConversationChat(
     conversationId: snapshot.id,
     title: snapshot.title,
     messages,
+    interaction: snapshot.interaction,
     isGenerating: snapshot.isGenerating,
     isLoading: snapshot.isLoading,
     error: snapshot.error,

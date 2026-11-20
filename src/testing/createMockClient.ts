@@ -1,4 +1,5 @@
 import type { AgoClient } from "../client/AgoClient";
+import type { BindingHandle } from "../client/bindingOwnership";
 import type {
   AgoClientEvents,
   AgoEventName,
@@ -67,17 +68,53 @@ export function createMockClient(
 
   const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
   const calls: Array<{ method: string; args: unknown[] }> = [];
+  let binding: BindingHandle | undefined;
+  let activeConversation: string | null = null;
+  let selecting = false;
+  const conversations = new Map<string, object>();
 
   const defaults: Record<string, MockFn> = {
+    conversation: (id?: string) => {
+      const key = id ?? "draft-mock";
+      if (!conversations.has(key)) {
+        const snapshot = { id: key, isDraft: !id, title: "", messages: [], interaction: null, isGenerating: false, isLoading: false, error: null };
+        conversations.set(key, {
+          id: key,
+          getSnapshot: () => snapshot,
+          subscribe: () => () => {},
+          _subscribeToFork: () => () => {},
+          load: async () => ({ ...noopConversation, id: key }),
+          sendMessage: async () => noopMessage,
+          stop: async () => null,
+        });
+      }
+      return conversations.get(key);
+    },
     sendMessage: async () => noopMessage,
     transcribeAudio: async () => ({ text: "Mock transcription" }),
     continueMessage: async () => noopMessage,
     stop: async () => null,
     stopMessage: async () => ({ status: "not_running" }),
     isGenerating: () => false,
-    setActiveConversation: () => undefined,
+    setActiveConversation: (id: string | null) => { if (!selecting) binding = undefined; activeConversation = id; },
+    _bindConversation: () => {
+      const handle: BindingHandle = {
+        isCurrent: () => binding === handle,
+        select: (id) => {
+          if (!handle.isCurrent()) return;
+          selecting = true;
+          try { (mock.setActiveConversation as MockFn)(id); } finally { selecting = false; }
+        },
+        setBackgroundObservation: () => {},
+        release: () => { if (handle.isCurrent()) binding = undefined; },
+        detach: () => { if (handle.isCurrent()) { handle.select(null); handle.release(); } },
+        captureOperation: () => async (effect) => effect(),
+      };
+      binding = handle;
+      return handle;
+    },
     _followUser: () => undefined,
-    getActiveConversation: () => null,
+    getActiveConversation: () => activeConversation,
     onGeneratingChanged: () => () => undefined,
     resumePendingClientFunctions: async () => null,
     registerResumeGate: () => () => undefined,
@@ -156,6 +193,7 @@ export function createMockClient(
     },
     updateConfig: () => undefined,
     destroy: () => {
+      binding = undefined;
       listeners.clear();
     },
   };

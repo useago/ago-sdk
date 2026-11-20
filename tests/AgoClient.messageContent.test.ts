@@ -76,6 +76,7 @@ it("does not interrupt a running turn when blank content is rejected", async () 
   vi.stubGlobal("fetch", fetch);
   const client = createClient();
   const pending = client.sendMessage("First message");
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
   const signal = (fetch.mock.calls[0] as unknown as [string, RequestInit])[1].signal!;
 
   await expect(client.sendMessage("", {

@@ -74,6 +74,40 @@ afterEach(() => {
 });
 
 describe("stop(): interrupting a streaming turn", () => {
+  it.each(["logout", "stop"] as const)("handles %s while waiting for the initial response", async (action) => {
+    const fetcher = vi.fn((_url: string | URL | Request, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () =>
+          reject(new DOMException("The operation was aborted.", "AbortError")),
+        );
+      }),
+    );
+    const client = new AgoClient({ baseUrl: "https://x.example.com", userJwt: "old", fetch: fetcher as typeof fetch });
+    const conversation = client.conversation();
+    const stopped = vi.fn();
+    const complete = vi.fn();
+    client.on("message:stopped", stopped);
+    client.on("message:complete", complete);
+    const sent = conversation.sendMessage("private message");
+    expect(fetcher).toHaveBeenCalledOnce();
+
+    if (action === "logout") {
+      client.updateConfig({ userJwt: null });
+      const messagesAfterReset = conversation.getMessages();
+      await expect(sent).rejects.toMatchObject({ code: "request_detached" });
+      expect(stopped).not.toHaveBeenCalled();
+      expect(complete).not.toHaveBeenCalled();
+      expect(conversation.getMessages()).toEqual(messagesAfterReset);
+      expect(client.isGenerating()).toBe(false);
+    } else {
+      await client.stop();
+      await expect(sent).resolves.toMatchObject({ status: "CANCELED", id: "" });
+      expect(stopped).toHaveBeenCalledOnce();
+      expect(complete).not.toHaveBeenCalled();
+    }
+    client.destroy();
+  });
+
   it("closes the stream, tells the backend, and keeps the partial answer", async () => {
     const { fn, calls } = stubFetch(STREAM);
     vi.stubGlobal("fetch", fn);
@@ -84,7 +118,11 @@ describe("stop(): interrupting a streaming turn", () => {
     client.on("message:stopped", () => events.push("stopped"));
     client.on("message:error", () => events.push("error"));
 
-    const chunked = client.waitFor("message:chunk");
+    const chunked = new Promise<void>((resolve) => {
+      client.on("message:chunk", (chunk) => {
+        if (chunk.content === "lo") resolve();
+      });
+    });
     const sent = client.sendMessage("hi");
     await chunked;
 
@@ -156,7 +194,11 @@ describe("stop(): interrupting a streaming turn", () => {
     vi.stubGlobal("fetch", fn);
     const client = makeClient();
 
-    const chunked = client.waitFor("message:chunk");
+    const chunked = new Promise<void>((resolve) => {
+      client.on("message:chunk", (chunk) => {
+        if (chunk.content === "lo") resolve();
+      });
+    });
     const sent = client.sendMessage("hi");
     await chunked;
 
@@ -279,5 +321,43 @@ describe("stop(): a turn paused on client functions", () => {
     expect(calls.some((u) => u.endsWith("/messages/m1/stop"))).toBe(true);
     expect(calls.some((u) => u.endsWith("/continue"))).toBe(false);
     expect(client.isGenerating()).toBe(false);
+  });
+
+  it.each(["paused", "polled"])("suppresses a %s stop event after session reset", async (kind) => {
+    let finishStop!: (response: Response) => void;
+    let stopSignal: AbortSignal | null | undefined;
+    const fetcher: typeof fetch = async (url, options) => {
+      if (String(url).endsWith("/stop")) {
+        stopSignal = options?.signal;
+        return new Promise((resolve) => { finishStop = resolve; });
+      }
+      if (kind === "paused") return new Response(PAUSED[0] + PAUSED[2]);
+      return jsonResponse({
+        id: "c1",
+        title: "Conversation",
+        messages: [{ id: "m1", role: "assistant", status: "IN_PROGRESS", content: "Partial answer" }],
+      });
+    };
+    const client = new AgoClient({ baseUrl: "https://x.example.com", userJwt: "old", fetch: fetcher });
+    const stopped = vi.fn();
+    client.on("message:stopped", stopped);
+    if (kind === "paused") {
+      expect((await client.sendMessage("hi")).status).toBe("WAITING_CLIENT");
+    } else {
+      client.setActiveConversation("c1");
+      await client.conversation("c1").load();
+    }
+    expect(client.isGenerating()).toBe(true);
+
+    const stop = client.stop();
+    expect(finishStop).toBeTypeOf("function");
+    client.setActiveConversation("other");
+    client.updateConfig({ userJwt: null });
+    expect(stopSignal?.aborted).toBe(true);
+    finishStop(jsonResponse({ status: "stopping" }));
+
+    await expect(stop).resolves.toEqual({ status: "stopping" });
+    expect(stopped).not.toHaveBeenCalled();
+    client.destroy();
   });
 });

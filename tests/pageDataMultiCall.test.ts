@@ -15,11 +15,8 @@ afterEach(() => {
 });
 
 /** Feed raw SSE frames to a handler the way the transport does. */
-function feed(handler: SSEHandler, frames: Record<string, unknown>[]) {
-  const stream = handler as unknown as {
-    handleChunk: (d: Record<string, unknown>) => void;
-  };
-  for (const frame of frames) stream.handleChunk(frame);
+async function feed(handler: SSEHandler, frames: Record<string, unknown>[]) {
+  await handler.processStream(new Response(frames.map((frame) => `data: ${JSON.stringify(frame)}\n\n`).join("")));
 }
 
 describe("plusieurs appels front dans le meme tour", () => {
@@ -71,7 +68,7 @@ describe("plusieurs appels front dans le meme tour", () => {
     expect(elapsed).toBeLessThan(800);
   });
 
-  it("le flux SSE lance les appels sans les attendre (donc en parallele)", () => {
+  it("le flux SSE lance les appels sans les attendre (donc en parallele)", async () => {
     const seen: string[] = [];
     const handler = new SSEHandler({
       onClientFunction: async (d) => {
@@ -80,7 +77,7 @@ describe("plusieurs appels front dans le meme tour", () => {
       },
     });
 
-    feed(handler, [
+    await feed(handler, [
       { type: "client_function", function_name: "fnA", id: "1", arguments: { x: 1 } },
       { type: "client_function", function_name: "fnB", id: "2", arguments: { x: 2 } },
     ]);
@@ -89,7 +86,7 @@ describe("plusieurs appels front dans le meme tour", () => {
     expect(seen).toEqual(["fnA", "fnB"]);
   });
 
-  it("deux appels identiques mais d'invocationId different sont TOUS DEUX executes", () => {
+  it("deux appels identiques mais d'invocationId different sont TOUS DEUX executes", async () => {
     const seen: string[] = [];
     const handler = new SSEHandler({
       onClientFunction: (d) => {
@@ -97,7 +94,7 @@ describe("plusieurs appels front dans le meme tour", () => {
       },
     });
 
-    feed(handler, [
+    await feed(handler, [
       // readPageData n'a AUCUN parametre : deux appels distincts ont la meme
       // cle de dedup (`readPageData::{}`), meme avec des invocationId differents.
       { type: "client_function", function_name: "readPageData", id: "call-1", arguments: {} },
@@ -110,7 +107,7 @@ describe("plusieurs appels front dans le meme tour", () => {
     expect(seen).toEqual(["call-1", "call-2"]);
   });
 
-  it("le meme appel emis sous ses DEUX formes SSE ne tourne qu'une fois", () => {
+  it("le meme appel emis sous ses DEUX formes SSE ne tourne qu'une fois", async () => {
     const seen: string[] = [];
     const handler = new SSEHandler({
       onClientFunction: (d) => {
@@ -118,7 +115,7 @@ describe("plusieurs appels front dans le meme tour", () => {
       },
     });
 
-    feed(handler, [
+    await feed(handler, [
       // Forme brute (state dict) : aucun id.
       { type: "client_function", function_name: "readPageData", arguments: {} },
       // Forme UI (tool_call_data) : le meme appel, avec son id.
@@ -128,7 +125,7 @@ describe("plusieurs appels front dans le meme tour", () => {
     expect(seen).toEqual([""]);
   });
 
-  it("une 3e emission apres les deux formes est bien un nouvel appel", () => {
+  it("une 3e emission apres les deux formes est bien un nouvel appel", async () => {
     const seen: string[] = [];
     const handler = new SSEHandler({
       onClientFunction: (d) => {
@@ -136,7 +133,7 @@ describe("plusieurs appels front dans le meme tour", () => {
       },
     });
 
-    feed(handler, [
+    await feed(handler, [
       { type: "client_function", function_name: "readPageData", arguments: {} },
       { type: "client_function", function_name: "readPageData", id: "call-1", arguments: {} },
       { type: "client_function", function_name: "readPageData", id: "call-2", arguments: {} },
