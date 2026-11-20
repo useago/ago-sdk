@@ -1,9 +1,9 @@
 import { afterEach, expect, it, vi } from "vitest";
-import html2canvas from "html2canvas-pro";
+import { domToCanvas } from "modern-screenshot";
 import { AgoClient } from "../src/client/AgoClient";
 import { capturePage, collectSupportEvidence } from "@useago/sdk/support";
 
-vi.mock("html2canvas-pro", () => ({ default: vi.fn() }));
+vi.mock("modern-screenshot", () => ({ domToCanvas: vi.fn() }));
 const clients: AgoClient[] = [];
 
 afterEach(() => {
@@ -33,28 +33,28 @@ it("exports retained, filtered errors without capturing an unrequested screensho
   const log = JSON.parse(await read(evidence.files[0]));
   expect(log.errors).toHaveLength(1);
   expect(log.errors[0]).toMatchObject({ message: "Checkout failed", count: 2 });
-  expect(html2canvas).not.toHaveBeenCalled();
+  expect(domToCanvas).not.toHaveBeenCalled();
 });
 
 it("collects a requested PNG alongside the logs, excluding private DOM content", async () => {
   document.body.innerHTML = '<input type="password"><div data-ago-private>Secret</div><div class="private">Private</div><iframe></iframe><p>Visible</p>';
   const canvas = document.createElement("canvas");
   vi.spyOn(canvas, "toBlob").mockImplementation((callback) => callback(new Blob(["png"], { type: "image/png" })));
-  vi.mocked(html2canvas).mockResolvedValue(canvas);
+  vi.mocked(domToCanvas).mockResolvedValue(canvas);
   const evidence = await collectSupportEvidence({ getRecentErrors: () => [] }, { screenshot: { exclude: ".private" } });
   expect(evidence.files.map((file) => file.name)).toEqual(["errors.json", "screenshot.png"]);
   expect(evidence.files[1].type).toBe("image/png");
-  const config = vi.mocked(html2canvas).mock.calls[0][1]!;
+  const config = vi.mocked(domToCanvas).mock.calls[0][1]!;
   expect(config).toMatchObject({ width: window.innerWidth, height: window.innerHeight, scale: 1 });
   for (const element of document.body.children) {
-    expect(config.ignoreElements!(element)).toBe(element.tagName !== "P");
+    expect(config.filter!(element)).toBe(element.tagName === "P");
   }
   await expect(capturePage({ element: document.querySelector("[data-ago-private]")! })).rejects.toMatchObject({ code: "screenshot_private_element" });
   await expect(capturePage({ element: document.querySelector("iframe")! })).rejects.toMatchObject({ code: "screenshot_private_element" });
 });
 
 it("keeps the log when screenshot rendering fails and reports the missing screenshot", async () => {
-  vi.mocked(html2canvas).mockRejectedValue(new Error("Unsupported CSS"));
+  vi.mocked(domToCanvas).mockRejectedValue(new Error("Unsupported CSS"));
   const evidence = await collectSupportEvidence({ getRecentErrors: () => [] }, { screenshot: true });
   expect(evidence.screenshotError).toBe("Unsupported CSS");
   expect(evidence.files.map((file) => file.name)).toEqual(["errors.json"]);

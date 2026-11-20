@@ -42,7 +42,6 @@ export default defineConfig({
         "vue",
         "react-markdown",
         "remark-gfm",
-        "html2canvas-pro",
       ],
       output: {
         globals: {

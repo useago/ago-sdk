@@ -18,6 +18,7 @@ Planned as 1.17.0.
 ### Changed
 
 - A message sent while a person has the conversation no longer ends in an empty assistant bubble or an empty-reply warning: `sendMessage` resolves with `handoffPaused: true` and `message:complete` does not fire.
+- `capturePage` and `collectSupportEvidence` now render with the same bundled renderer as remote assistance (modern-screenshot). `html2canvas-pro` is no longer a dependency, so installs are lighter. Same options, same exclusions.
 
 ## [1.16.0] - 2026-11-12
 
