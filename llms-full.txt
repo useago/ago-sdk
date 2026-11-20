@@ -2372,9 +2372,9 @@ Add these `File` objects to your ticket form's regular attachments so the user c
 review or remove them before submitting. Collection does not create a ticket or
 upload files. A screenshot failure preserves the error log and returns `screenshotError`.
 
-`html2canvas-pro` is installed with the SDK; the renderer loads only
-when a screenshot is requested. Other SDK entry points don't require it.
-CSS and cross-origin content may render differently. Iframes, password inputs and elements
+The renderer ([modern-screenshot](https://github.com/qq15725/modern-screenshot)) ships
+inside the SDK as a separate file that loads only when a screenshot is requested.
+Cross-origin content may render differently. Iframes, password inputs and elements
 marked `data-ago-private` are omitted. Pass `screenshot: { element, exclude: ".private" }`
 to limit capture further. Error logs retain the watcher's existing filters and caps.
 

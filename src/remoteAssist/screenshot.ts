@@ -1,5 +1,6 @@
 import { AgoError } from "../client/errors";
 import { applyMask, findMaskTargets, maskSelector } from "./mask";
+import { loadScreenshotRenderer, renderViewport, type ScreenshotRenderer } from "../utils/renderViewport";
 
 /** Upload ceiling of `POST .../commands/{id}/screenshot`. */
 export const MAX_SCREENSHOT_BYTES = 3 * 1024 * 1024;
@@ -72,24 +73,6 @@ function checkHostBlob(blob: unknown): Blob {
 }
 
 /**
- * Fixed elements live in the viewport, but the captured root is shifted by
- * the scroll offset to show only the viewport: shift them back.
- */
-function pinFixedElements(root: Element, x: number, y: number): void {
-  if (!x && !y) return;
-  for (const el of Array.from(root.querySelectorAll<HTMLElement>("*"))) {
-    if (el.style?.position !== "fixed") continue;
-    let ancestor = el.parentElement;
-    while (ancestor && ancestor !== root && ancestor.style?.position !== "fixed") {
-      ancestor = ancestor.parentElement;
-    }
-    if (ancestor && ancestor !== root) continue;
-    const current = el.style.transform && el.style.transform !== "none" ? ` ${el.style.transform}` : "";
-    el.style.setProperty("transform", `translate(${x}px, ${y}px)${current}`, "important");
-  }
-}
-
-/**
  * Capture the visible part of the page (viewport only) as an image under
  * 3 MB, with every sensitive field masked in the captured copy. The live page
  * is never modified. The renderer is loaded on the first capture only.
@@ -100,32 +83,21 @@ export async function captureViewport(options: CaptureOptions = {}): Promise<Blo
     throw new AgoError("Screenshots need a browser.", "remote_assist_screenshot_unavailable");
   }
   const selector = maskSelector(options.mask);
-  let lib: typeof import("./renderer");
+  let lib: ScreenshotRenderer;
   try {
-    lib = await import("./renderer");
+    lib = await loadScreenshotRenderer();
   } catch (error) {
     throw new AgoError(
       `The screenshot renderer could not be loaded (${error instanceof Error ? error.message : String(error)}).`,
       "remote_assist_screenshot_unavailable",
     );
   }
-  const x = window.scrollX || 0;
-  const y = window.scrollY || 0;
-  const width = window.innerWidth;
-  const height = window.innerHeight;
-  const bodyBackground = document.body ? getComputedStyle(document.body).backgroundColor : "";
-  const canvas = await lib.domToCanvas(document.documentElement, {
-    width,
-    height,
+  const exclude = options.exclude;
+  const canvas = await renderViewport(lib, {
     scale: Math.min(window.devicePixelRatio || 1, MAX_SCALE),
-    backgroundColor:
-      bodyBackground && bodyBackground !== "rgba(0, 0, 0, 0)" ? bodyBackground : "#ffffff",
-    style: { transform: `translate(${-x}px, ${-y}px)`, transformOrigin: "0 0" },
-    filter: options.exclude ? (node) => !options.exclude!(node) : null,
+    filter: exclude ? (node) => !exclude(node) : undefined,
     onCloneNode: (clone) => {
-      if (!(clone instanceof Element)) return;
       for (const target of findMaskTargets(clone, selector)) applyMask(target);
-      pinFixedElements(clone, x, y);
     },
   });
   return encodeUnderLimit(canvas);
