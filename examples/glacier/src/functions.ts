@@ -204,6 +204,9 @@ export function buildIceCreamFunctions(store: OrderStore) {
         customerName: { type: 'string', description: 'Customer name on the order ticket' },
       },
     },
+    // Only the customer (or the AI on their behalf) places the order: a
+    // support agent in remote assistance cannot.
+    remote: false,
     handler: async (args: Record<string, unknown>) => {
       const { current, cart } = store.get();
       const items: IceCreamState[] = [...cart];

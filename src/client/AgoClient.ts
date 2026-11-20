@@ -6,6 +6,13 @@ import type {
   ErrorWatcherOptions,
 } from "../errors/ErrorWatcher";
 import { ErrorWatcher } from "../errors/ErrorWatcher";
+import {
+  annotateStaffNames,
+  normalizeRole,
+  parseConversationMarker,
+  parseHandoff,
+} from "../handoff/handoff";
+import { LiveConversation } from "../handoff/LiveConversation";
 import type {
   FormCollectorDefinition,
   FormCollectorSchema,
@@ -42,6 +49,8 @@ import type {
 } from "../functions/types";
 import { createAgoProactive } from "../proactive/createAgoProactive";
 import type { ProactiveController } from "../proactive/types";
+import { getRemoteAssistKit } from "../remoteAssist/kit";
+import { RemoteAssistController } from "../remoteAssist/RemoteAssistController";
 import type {
   ContextEntry,
   ContextSnapshot,
@@ -49,7 +58,7 @@ import type {
 } from "../state/ClientContextRegistry";
 import { ClientContextRegistry } from "../state/ClientContextRegistry";
 import type { PageStateBaseline } from "../state/pageStateDelta";
-import { computePageStateDelta } from "../state/pageStateDelta";
+import { computePageStateDelta, mergePageState } from "../state/pageStateDelta";
 import { SSEHandler } from "../streaming/SSEHandler";
 import { mapAttachment } from "../utils/attachments";
 import { appendFile, isNativeFile } from "../utils/uploadFile";
@@ -81,7 +90,9 @@ import type {
   CreateTicketResult,
   FeedbackDetails,
   FeedbackRating,
+  HandoffState,
   PaginatedResult,
+  RawHandoff,
   SdkConfig,
   SdkHomePageConfig,
   SendMessageOptions,
@@ -169,6 +180,8 @@ interface RawSdkConfig {
     speech_to_text_enabled?: boolean;
   }>;
   proactive?: { enabled?: boolean };
+  live_handoff?: { enabled?: boolean };
+  remote_assist?: { enabled?: boolean };
 }
 
 /**
@@ -325,6 +338,27 @@ export class AgoClient {
   /** The `listPages` companion is live. */
   private listPagesRegistered = false;
 
+  /** Handoff state per conversation and the live stream of the active one. */
+  private live: LiveConversation;
+
+  /** `GET /config`, fetched once for the features that depend on it. */
+  private sdkConfig: Promise<SdkConfig> | null = null;
+
+  /** The active conversation when {@link destroy} ran, restored by {@link reviveAfterDestroy}. */
+  private activeBeforeDestroy: { id: string; setByApp: boolean } | null = null;
+
+  /**
+   * Remote assistance (visitor side): consent, banner, command execution.
+   * Inert unless `remoteAssist` is set in the config and the tenant enabled it.
+   * Always off in React Native (`@useago/sdk/native`).
+   *
+   * ```ts
+   * client.on("remoteAssist:requested", (session) => showMyPrompt(session));
+   * acceptButton.onclick = () => client.remoteAssist.accept();
+   * ```
+   */
+  readonly remoteAssist: RemoteAssistController;
+
   constructor(config: AgoConfig) {
     validateConfig(config, "AgoClient");
     this.config = config;
@@ -360,7 +394,104 @@ export class AgoClient {
 
     this.attachWebMCPBridge();
 
+    this.remoteAssist = new RemoteAssistController(
+      {
+        http: this.httpClient,
+        emit: (event, data) => this.eventEmitter.emit(event, data),
+        serverEnabled: async () =>
+          (await this.getSdkConfigOnce()).remoteAssist.enabled,
+        getActiveConversation: () => this.liveConversationId(),
+        watchConversation: (id) => this.watchConversation(id),
+        getFunction: (name) => this.functionRegistry.get(name),
+        getFunctions: () => this.functionRegistry.getAll(),
+        execute: (name, args) => this.functionRegistry.execute(name, args),
+        requiresApproval: (invocation) => this.requiresApproval(invocation),
+        recordActivity: (entry) => this.addActivity(entry),
+        getPageState: () => {
+          const state = mergePageState(
+            this.contextRegistry.getSnapshot()?.entries ?? {},
+          );
+          return Object.keys(state).length > 0 ? state : null;
+        },
+        onFunctionsChanged: (listener) => this.functionRegistry.onChange(listener),
+        onContextChanged: (listener) => {
+          this.eventEmitter.on("context:changed", listener);
+          return () => this.eventEmitter.off("context:changed", listener);
+        },
+        available: () => getRemoteAssistKit() !== null,
+        capture: (options) => {
+          const kit = getRemoteAssistKit();
+          return kit
+            ? kit.capture(options)
+            : Promise.reject(
+                new AgoError("Screenshots need a browser.", "remote_assist_screenshot_unavailable"),
+              );
+        },
+        loadUi: (actions) => {
+          const kit = getRemoteAssistKit();
+          return kit
+            ? kit.loadUi(actions, this.config.language)
+            : Promise.reject(new AgoError("The remote-assistance UI needs a browser.", "remote_assist_ui_unavailable"));
+        },
+        storage: () => getRemoteAssistKit()?.storage() ?? null,
+      },
+      config.remoteAssist,
+    );
+    this.live = this.createLiveConversation();
+    this.remoteAssist.start();
+
     logger.log("AgoClient initialized");
+  }
+
+  private createLiveConversation(): LiveConversation {
+    return new LiveConversation({
+      http: this.httpClient,
+      emit: (event, data) => {
+        // Staff replies and markers reach a conversation object only this way.
+        if (event === "conversation:updated") {
+          const updated = data as AgoClientEvents["conversation:updated"];
+          this.conversationObjects.get(updated.id)?._serverUpdate(updated);
+        }
+        this.eventEmitter.emit(event, data);
+      },
+      fetchConversation: (id) => this.fetchConversation(id),
+      isStreaming: (id) =>
+        [...this.turns.values()].some((turn) => turn.stream && this.turnIn(turn, id)),
+      streamQuery: () => this.remoteAssist.liveQuery(),
+      onReady: (id) => this.remoteAssist.onLiveSignal(id),
+      onRemoteAssistUpdate: (id) => this.remoteAssist.onLiveSignal(id),
+      onActiveChange: (id) => this.remoteAssist.onActiveConversationChange(id),
+      onHandoffChange: (id, handoff) =>
+        this.remoteAssist.onHandoffChange(id, handoff),
+    });
+  }
+
+  private getSdkConfigOnce(): Promise<SdkConfig> {
+    if (!this.sdkConfig) {
+      this.sdkConfig = this.getConfig().catch((error) => {
+        this.sdkConfig = null;
+        throw error;
+      });
+    }
+    return this.sdkConfig;
+  }
+
+  /** The active conversation once the server named it (a draft has no live state). */
+  private liveConversationId(): string | null {
+    const id = this.activeConversationId;
+    if (!id || this.conversationObjects.get(id)?.isDraft) return null;
+    return id;
+  }
+
+  /** Follow `conversationId` when nothing is active yet (remote-assist resume after a reload). */
+  private watchConversation(conversationId: string): void {
+    if (this.activeConversationId) return;
+    this._followUser(conversationId);
+    if (this.activeConversationId === conversationId && !this.live.hasHandoff(conversationId)) {
+      this.fetchConversation(conversationId).catch((error) =>
+        logger.warn("Loading the conversation's handoff state failed:", error),
+      );
+    }
   }
 
   private attachWebMCPBridge(): void {
@@ -553,6 +684,10 @@ export class AgoClient {
           if (data.full_content !== undefined && turn.messageId) {
             conversation._setText(turn, data.full_content);
           }
+          const threadId = data.thread?.id ?? turn.conversationId;
+          if (threadId && "handoff" in data) {
+            this.live.updateHandoff(threadId, data.handoff as RawHandoff | null);
+          }
           this.eventEmitter.emit("stream:message", data);
         },
         onStart: (data) => {
@@ -616,6 +751,13 @@ export class AgoClient {
             "waitingConfirmed",
           );
         },
+        onHandoffPaused: ({ conversationId }) => {
+          const id = conversationId || turn.conversationId || "";
+          this.emitFor(conversation, "message:handoff-paused", {
+            conversationId: id,
+            handoff: id ? this.live.getHandoff(id) : null,
+          });
+        },
         onComplete: (message) => {
           // A turn stopped before the backend named its message has nothing to
           // complete: emitting it would land a blank bubble in the transcript.
@@ -654,7 +796,7 @@ export class AgoClient {
       }
 
       paused = message.status === "WAITING_CLIENT" && !stream.stopRequested;
-      if (!paused) this.maybeFlagEmptyReply(message, conversation);
+      if (!paused && !message.handoffPaused) this.maybeFlagEmptyReply(message, conversation);
       return message;
     } finally {
       this.endStream(turn, stream, paused);
@@ -821,6 +963,7 @@ export class AgoClient {
   private endStream(turn: Turn, stream: TurnStream, paused: boolean): void {
     if (turn.stream !== stream) return;
     turn.stream = null;
+    this.live.onTurnEnd(turn.conversationId);
     if (paused && this.turns.has(turn.id)) {
       this.generatingChanged();
       return;
@@ -918,7 +1061,7 @@ export class AgoClient {
    * @internal The conversation the user sends in or opens is the one on
    * screen, until the app names it with {@link setActiveConversation}.
    */
-  _followUser(conversationId: string): void {
+  _followUser(conversationId: string | null): void {
     if (!this.activeSetByApp) this.applyActive(conversationId);
   }
 
@@ -936,6 +1079,7 @@ export class AgoClient {
       this.releaseIfUnused(left);
     }
     if (next) this.conversationObjects.get(next)?._activeChanged();
+    this.live.setActive(this.liveConversationId());
   }
 
   /** The conversation on screen (see {@link setActiveConversation}), or `null`. */
@@ -1020,6 +1164,7 @@ export class AgoClient {
       }
       if (this.activeConversationId === previousId) {
         this.activeConversationId = conversation.id;
+        this.live.setActive(this.liveConversationId());
       }
     },
     retain: (conversation) => {
@@ -1591,17 +1736,21 @@ export class AgoClient {
     return conversation;
   }
 
-  /** `getConversation` without the `conversation:loaded` event (used to poll). */
+  /**
+   * `getConversation` without the `conversation:loaded` event (used to poll),
+   * with the conversation's handoff state recorded.
+   */
   private async fetchConversation(conversationId: string): Promise<Conversation> {
     const response = await this.httpClient.get<{
       id: string;
       title: string;
       created_at?: string | null;
       last_message_at?: string | null;
+      handoff?: RawHandoff | null;
       messages: Array<{
         id: string;
         content: string;
-        role: "user" | "assistant";
+        role: string;
         status: string;
         created_at: string;
         hidden?: boolean;
@@ -1612,38 +1761,75 @@ export class AgoClient {
       }>;
     }>(`/api/sdk/v1/conversations/${conversationId}`);
 
+    const handoff: HandoffState | null = parseHandoff(response.handoff);
     const conversation: Conversation = {
       id: response.id,
       title: response.title,
       lastMessageDate: new Date(
         response.last_message_at ?? response.created_at ?? 0,
       ),
-      messages: response.messages.map((m) => ({
-        id: m.id,
-        conversationId: response.id,
-        content: m.content,
-        role: m.role,
-        status: m.status as AgoMessage["status"],
-        createdAt: new Date(m.created_at),
-        hidden: m.hidden,
-        sources:
-          m.sources && m.sources.length > 0
-            ? m.sources.map(({ id, title, url }) => ({ id, title, url: url ?? undefined }))
-            : undefined,
-        toolCalls: AgoClient.mapPersistedToolCalls(m.tool_call_data),
-        attachments:
-          m.attachments && m.attachments.length > 0
-            ? m.attachments.map(mapAttachment)
-            : undefined,
-        // Re-render the follow-up pills under the last answer on reload; the
-        // widget only shows them on the last message (see renderMessage isLast).
-        followUpReplies:
-          m.follow_up_replies && m.follow_up_replies.length > 0
-            ? m.follow_up_replies
-            : undefined,
-      })),
+      handoff,
+      messages: response.messages.map((m) => {
+        const role = normalizeRole(m.role);
+        const marker =
+          role === "system" ? parseConversationMarker(m.content) : null;
+        return {
+          id: m.id,
+          conversationId: response.id,
+          content: m.content ?? "",
+          role,
+          ...(marker ? { marker } : {}),
+          status: m.status as AgoMessage["status"],
+          createdAt: new Date(m.created_at),
+          hidden: m.hidden,
+          sources:
+            m.sources && m.sources.length > 0
+              ? m.sources.map(({ id, title, url }) => ({ id, title, url: url ?? undefined }))
+              : undefined,
+          toolCalls: AgoClient.mapPersistedToolCalls(m.tool_call_data),
+          attachments:
+            m.attachments && m.attachments.length > 0
+              ? m.attachments.map(mapAttachment)
+              : undefined,
+          // Re-render the follow-up pills under the last answer on reload; the
+          // widget only shows them on the last message (see renderMessage isLast).
+          followUpReplies:
+            m.follow_up_replies && m.follow_up_replies.length > 0
+              ? m.follow_up_replies
+              : undefined,
+        };
+      }),
     };
+    annotateStaffNames(conversation.messages ?? [], handoff);
+    // Older backends omit the field: only a present one says anything.
+    if ("handoff" in response) {
+      this.live.setHandoff(conversation.id, handoff);
+    }
     return conversation;
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // Live human takeover
+  // ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Whether the active conversation is on screen (e.g. your chat panel is
+   * open). Read receipts are only sent while it is AND the tab is visible.
+   * Default `true`; the bundled widget reports its panel state itself. While
+   * a human handles the active conversation (see
+   * {@link setActiveConversation}), the SDK keeps a live stream open, refetches
+   * it on changes (`conversation:updated`) and sends read receipts.
+   */
+  setConversationVisible(visible: boolean): void {
+    this.live.setVisible(visible);
+  }
+
+  /**
+   * Live human takeover state of a conversation: `null` while the AI answers
+   * (or when the SDK has not loaded it yet).
+   */
+  getHandoff(conversationId: string): HandoffState | null {
+    return this.live.getHandoff(conversationId);
   }
 
   /**
@@ -1740,6 +1926,8 @@ export class AgoClient {
         speechToTextEnabled: !!p.speech_to_text_enabled,
       })),
       proactive: { enabled: !!raw.proactive?.enabled },
+      liveHandoff: { enabled: !!raw.live_handoff?.enabled },
+      remoteAssist: { enabled: !!raw.remote_assist?.enabled },
     };
   }
 
@@ -2366,6 +2554,7 @@ export class AgoClient {
       createPageStateFunction(controls, {
         name: fnName,
         requiresApproval: opts?.requiresApproval,
+        remote: opts?.remote,
         getResultBudget: () =>
           dataSource
             ? this.pageDataBudget(dataSource)
@@ -2402,6 +2591,7 @@ export class AgoClient {
           description: `Read what the current page is displaying, without changing anything: ${dataSource.description}`,
           parameters: { type: "object", properties: {} },
           maxResultBytes: dataSource.maxResultBytes,
+          remote: opts?.remote,
         },
       );
       this.pageDataCompanions.add(companion);
@@ -2746,7 +2936,8 @@ export class AgoClient {
       return {
         name: "Recent activity",
         description:
-          "Recent actions by the user and the agent in the app, oldest first. " +
+          "Recent actions by the user, the agent and a human support agent " +
+          "(actor \"support\") in the app, oldest first. " +
           "Use this to understand what just happened before this message. " +
           "Use current-page for the user’s current location.",
         data: { events },
@@ -2917,6 +3108,10 @@ export class AgoClient {
       );
     }
 
+    if (cleaned.remoteAssist !== undefined) {
+      this.remoteAssist.configure(cleaned.remoteAssist);
+    }
+
     if (cleaned.errorWatcher !== undefined) {
       if (cleaned.errorWatcher) {
         this.enableErrorWatcher(
@@ -2946,7 +3141,12 @@ export class AgoClient {
       conversation._dispose();
     }
     this.conversationObjects.clear();
+    this.activeBeforeDestroy = this.activeConversationId
+      ? { id: this.activeConversationId, setByApp: this.activeSetByApp }
+      : null;
     this.activeConversationId = null;
+    this.live.stop();
+    this.remoteAssist.destroy();
     this.generatingListeners.clear();
     this.stoppedTurnIds.clear();
     for (const pending of this.pendingApprovals.values()) {
@@ -2984,5 +3184,14 @@ export class AgoClient {
       createAgoProactive(this, this.config.proactive);
     }
     this.attachWebMCPBridge();
+    // StrictMode's remount must not lose the conversation on screen: it keeps
+    // client functions scoped and the live takeover stream open.
+    const active = this.activeBeforeDestroy;
+    this.activeBeforeDestroy = null;
+    if (active && this.activeConversationId === null) {
+      this.activeSetByApp = active.setByApp;
+      this.applyActive(active.id);
+    }
+    this.remoteAssist.start();
   }
 }

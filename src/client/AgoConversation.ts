@@ -23,6 +23,7 @@ export type AgoConversationEvents = Pick<
   | "message:waiting-client"
   | "message:stopped"
   | "message:error"
+  | "message:handoff-paused"
   | "conversation:title"
   | "toolCall:received"
   | "function:invoke"
@@ -473,6 +474,13 @@ export class AgoConversation {
   _turnEnded(): void {
     this.notify();
     this.drain();
+  }
+
+  /** @internal A live refetch brought the server copy (staff replies, takeover markers). */
+  _serverUpdate(conversation: Conversation): void {
+    this.applyServerMessages(conversation.messages ?? [], this.seq);
+    if (conversation.title?.trim()) this.title = conversation.title.trim();
+    this.notify();
   }
 
   /** @internal The client's active conversation changed to or from this one. */

@@ -1,3 +1,9 @@
+import { enableBrowserRemoteAssist } from "../remoteAssist/browserKit";
+
+// Browser entry: remote assistance gets its consent UI and screenshots. Kept by
+// bundlers through package.json `sideEffects`; `@useago/sdk/native` never calls it.
+enableBrowserRemoteAssist();
+
 export { AgoService } from "./ago.service";
 export { provideAgo } from "./provide";
 export type { AgoProvideOptions } from "./provide";

@@ -15,6 +15,7 @@ const MAX_ALTERNATIVES = 100;
 interface PageStateFunctionOptions {
   name: string;
   requiresApproval?: boolean;
+  remote?: boolean;
   getResultBudget: () => number;
   data?: {
     description: string;
@@ -278,6 +279,7 @@ export function createPageStateFunction(
       required: [],
     },
     requiresApproval: options.requiresApproval,
+    remote: options.remote,
     // Only pin a ceiling when the page asked for one; otherwise the registry's
     // live default applies, so updateConfig still moves it.
     maxResultBytes: options.data?.maxResultBytes,

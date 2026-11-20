@@ -1,3 +1,9 @@
+import { enableBrowserRemoteAssist } from "../remoteAssist/browserKit";
+
+// Browser entry: remote assistance gets its consent UI and screenshots. Kept by
+// bundlers through package.json `sideEffects`; `@useago/sdk/native` never calls it.
+enableBrowserRemoteAssist();
+
 // React context
 export { AgoProvider, useAgoClient, useOptionalAgoClient } from "./context";
 export type { AgoProviderProps, AgoDeclarativeConfig } from "./context/AgoContext";
@@ -55,6 +61,12 @@ export type {
 
 export { useChat } from "./hooks/useChat";
 export type { UseChatOptions, UseChatResult } from "./hooks/useChat";
+
+export { useHandoff } from "./hooks/useHandoff";
+export type { UseHandoffResult } from "./hooks/useHandoff";
+
+export { useRemoteAssist } from "./hooks/useRemoteAssist";
+export type { UseRemoteAssistResult } from "./hooks/useRemoteAssist";
 
 export { useFeedback } from "./hooks/useFeedback";
 export type { UseFeedbackOptions, UseFeedbackResult } from "./hooks/useFeedback";
@@ -141,8 +153,18 @@ export type {
   PaginatedResult,
   AgoAgent,
   AgoSource,
+  ConversationMarker,
+  HandoffState,
+  MessageRole,
   ToolCallData,
 } from "../client/types";
+export type {
+  RemoteAssistApprovalRequest,
+  RemoteAssistOptions,
+  RemoteAssistSession,
+  RemoteAssistSnapshot,
+  RemoteAssistState,
+} from "../remoteAssist/types";
 export { FEEDBACK_REASONS } from "../client/types";
 export type {
   NudgeAction,

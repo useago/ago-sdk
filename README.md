@@ -434,6 +434,23 @@ metadata described in the ticket form guide.
 Details in [Floating bubble](docs/general/widget.md#floating-bubble-placement-bubble)
 and [Ticket form](docs/general/widget.md#ticket-form-the-form-tool-call).
 
+## Let your support team help on the page
+
+When a person from your team takes the conversation over, their replies arrive
+live with their name. Add `remoteAssist` and they can also ask the visitor for
+remote assistance: once the visitor accepts, the agent sees the page, calls the
+same functions as the AI, and takes masked screenshots. The visitor can stop it
+at any time.
+
+```ts
+const ago = new AgoClient({
+  baseUrl: "https://playground.api.useago.com",
+  remoteAssist: { screenshot: { mask: [".iban"] } }, // off by default
+});
+```
+
+Details in [Human takeover and remote assistance](docs/general/human-takeover-and-remote-assist.md).
+
 ## Show the source docs the agent retrieved
 
 Each assistant message carries the knowledge sources it used in `m.sources`
@@ -504,6 +521,7 @@ and no-build HTML.
 - [**Functions & context**](docs/general/functions-and-context.md): let the agent run your code and see what the user sees
 - [**Several conversations at once**](docs/general/conversations.md): answers that keep running in the background, one Stop each
 - [**Events & streaming**](docs/general/events-and-streaming.md): low-level hooks into the message stream
+- [**Human takeover & remote assistance**](docs/general/human-takeover-and-remote-assist.md): live agent replies, consent-based help on the page, masked screenshots
 - [**Testing**](docs/general/testing.md): mock client for unit tests
 - [**Configuration & auth**](docs/general/configuration.md): every `AgoConfig` option, headers, errors
 - [**Custom domain (reverse proxy)**](docs/general/custom-domain.md): serve AGO from your own domain, same-origin

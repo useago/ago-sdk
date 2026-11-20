@@ -8,6 +8,13 @@ import type {
   ProactiveNudgeInstance,
   ProactiveOptions,
 } from "../proactive/types";
+import type {
+  RemoteAssistApprovalRequest,
+  RemoteAssistCommandEvent,
+  RemoteAssistEndReason,
+  RemoteAssistOptions,
+  RemoteAssistSession,
+} from "../remoteAssist/types";
 import type { ContextSnapshot } from "../state/ClientContextRegistry";
 import type { StorageLike } from "../state/createStore";
 
@@ -155,6 +162,18 @@ export interface AgoConfig {
    * Use `webmcp: false` on a definition to keep it out.
    */
   webmcp?: boolean;
+  /**
+   * Let a human support agent who took over a conversation assist the visitor
+   * on this page: see the page and its declared state, run the client
+   * functions the AI can run, and (if allowed here) take screenshots. Every
+   * session starts with a consent prompt in the visitor's browser and shows a
+   * banner with a Stop button for as long as it lasts.
+   *
+   * Off by default. Also requires the tenant setting (`GET /config` →
+   * `remote_assist.enabled`). `true` enables it without screenshots; pass
+   * {@link RemoteAssistOptions} to allow screenshots or to render your own UI.
+   */
+  remoteAssist?: boolean | RemoteAssistOptions;
 }
 
 /** See {@link AgoConfig.clientFunctionsMode}. */
@@ -216,13 +235,55 @@ export interface AgoAttachment {
 }
 
 /**
+ * Who wrote a message. `staff` is a human support agent replying after a
+ * handoff; `system` carries a conversation marker (see {@link ConversationMarker}).
+ */
+export type MessageRole = "user" | "assistant" | "staff" | "system";
+
+/**
+ * A conversation event carried by a `system` message, to render as a centered
+ * line (never as a bubble). `agentName` is the agent's first name when known.
+ */
+export type ConversationMarker =
+  | { event: "handoff_requested"; available: boolean }
+  | { event: "handoff_accepted"; agentName: string | null }
+  | { event: "handoff_transferred"; agentName: string | null }
+  | { event: "handoff_ended" };
+
+/**
+ * Live human takeover state of a conversation. `null` (on
+ * {@link Conversation.handoff}) means the AI answers.
+ * - `waiting`: the visitor asked for a human; nobody picked it up yet.
+ * - `human`: a support agent owns the conversation; the AI stays silent.
+ */
+export interface HandoffState {
+  state: "waiting" | "human";
+  /** First name of the agent who took the conversation, when known. */
+  agentName: string | null;
+  requestedAt: Date | null;
+}
+
+/**
  * Message from AGO
  */
 export interface AgoMessage {
   id: string;
   conversationId: string;
   content: string;
-  role: "user" | "assistant";
+  role: MessageRole;
+  /** Parsed marker of a `system` message. Absent when the content is not a known marker. */
+  marker?: ConversationMarker;
+  /**
+   * First name of the support agent who wrote a `staff` message, when known
+   * (from the handoff markers before it, or the current handoff).
+   */
+  staffName?: string;
+  /**
+   * Set on the message `sendMessage` resolves with when a human owns the
+   * conversation: the visitor's message was saved and no AI answer follows.
+   * Its `id` and `content` are empty.
+   */
+  handoffPaused?: boolean;
   status: MessageStatus;
   agent?: AgoAgent;
   sources?: AgoSource[];
@@ -418,6 +479,10 @@ export interface SdkPermissionConfig {
 export interface SdkConfig {
   permissions: SdkPermissionConfig[];
   proactive: { enabled: boolean };
+  /** Live human takeover is on for the tenant. `false` on older backends. */
+  liveHandoff: { enabled: boolean };
+  /** Remote assistance is on for the tenant. `false` on older backends. */
+  remoteAssist: { enabled: boolean };
 }
 
 /** Input of `AgoClient.createTicket` (`POST /api/sdk/v1/tickets`). */
@@ -533,6 +598,11 @@ export interface Conversation {
   title: string;
   lastMessageDate: Date;
   messages?: AgoMessage[];
+  /**
+   * Live human takeover state, from `getConversation`. `null` while the AI
+   * answers; `undefined` on list items and older backends.
+   */
+  handoff?: HandoffState | null;
 }
 
 /**
@@ -701,6 +771,17 @@ export interface SSEChunkData {
   display_mode?: "collapsible" | "display" | "both";
   /** Tool call ids still awaiting a client result, sent with the final `WAITING_CLIENT` event. */
   waiting_tool_call_ids?: string[];
+  /** Handoff state, sent when a turn hands off or when a human owns the conversation. */
+  handoff?: RawHandoff | null;
+  /** The visitor wrote while a human owns the conversation: no AI answer follows. */
+  handoff_paused?: boolean;
+}
+
+/** Handoff state as the backend serializes it. */
+export interface RawHandoff {
+  state?: string | null;
+  agent_name?: string | null;
+  requested_at?: string | null;
 }
 
 /**
@@ -776,6 +857,43 @@ export interface AgoClientEvents {
     conversationId: string;
     messageId: string;
   };
+  /**
+   * The visitor wrote while a human support agent owns the conversation: the
+   * message was saved and the stream ended with no AI answer. Fires instead of
+   * `message:complete`, so a UI drops its pending assistant bubble here. The
+   * agent's reply arrives later through `conversation:updated`.
+   */
+  "message:handoff-paused": {
+    conversationId: string;
+    handoff: HandoffState | null;
+  };
+  /**
+   * The live human takeover state of a conversation changed (from
+   * `getConversation`, the message stream or the live stream).
+   */
+  "handoff:changed": {
+    conversationId: string;
+    handoff: HandoffState | null;
+  };
+  /**
+   * The active conversation changed while a human handles it (a staff reply,
+   * a marker) and was refetched. Carries the full conversation: replace the
+   * transcript with `messages`. Never fires while a turn streams for it.
+   */
+  "conversation:updated": Conversation;
+  /** A support agent asks for remote assistance: show a consent prompt. */
+  "remoteAssist:requested": RemoteAssistSession;
+  /** The visitor accepted (or a reload resumed) a session in this tab. */
+  "remoteAssist:started": RemoteAssistSession;
+  /** The session ended (declined, stopped, expired or ended by the agent). */
+  "remoteAssist:ended": { sessionId: string; reason: RemoteAssistEndReason };
+  /** A remote command changed status (running, awaiting approval, done...). */
+  "remoteAssist:command": RemoteAssistCommandEvent;
+  /**
+   * A remote command runs a function that requires approval. Answer with
+   * `client.remoteAssist.approve(commandId)` / `reject(commandId)`.
+   */
+  "remoteAssist:approval": RemoteAssistApprovalRequest;
   "message:error": {
     error: string;
     /** Stable error code (see configuration.md#error-codes) when the failure was an AgoError. */

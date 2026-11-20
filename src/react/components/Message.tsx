@@ -5,6 +5,8 @@ import {
   formatFileSize,
   safeAttachmentUrl,
 } from "../../utils/attachments";
+import { markerText } from "../../widget/handoffView";
+import { useUiCatalog } from "../hooks/useUiCatalog";
 import { Markdown } from "./Markdown";
 
 // ── Subcomponents ───────────────────────────────────────────────────
@@ -243,6 +245,30 @@ export const Message: React.FC<MessageProps> = ({
   showStreamingDots = true,
   feedback,
 }) => {
+  const catalog = useUiCatalog();
+  if (message.role === "system") {
+    // Only known markers render; any other system event is model context.
+    if (!message.marker) return null;
+    return (
+      <div
+        className={`ago-message ago-message--system ${className}`}
+        role="note"
+        style={{
+          textAlign: "center",
+          color: "#6b6d6f",
+          fontSize: "12px",
+          lineHeight: "18px",
+          margin: "8px 16px 16px",
+        }}
+      >
+        {markerText(message.marker, catalog.handoff)}
+      </div>
+    );
+  }
+  const isStaff = message.role === "staff";
+  const authorName = isStaff
+    ? message.staffName || catalog.handoff.staffFallback
+    : message.agent?.displayName || message.agent?.name;
   const isUser = message.role === "user";
   // WAITING_CLIENT = paused on client function results mid-turn: still streaming
   // from the user's point of view (the SDK resumes the same message).
@@ -259,7 +285,7 @@ export const Message: React.FC<MessageProps> = ({
       }}
     >
       {/* Agent name for assistant messages */}
-      {!isUser && showAgentName && message.agent && (
+      {!isUser && (isStaff || (showAgentName && message.agent)) && (
         <div
           className="ago-message__agent"
           style={{
@@ -273,7 +299,7 @@ export const Message: React.FC<MessageProps> = ({
             padding: "0 4px",
           }}
         >
-          {message.agent.displayName || message.agent.name}
+          {authorName}
         </div>
       )}
 
@@ -345,7 +371,7 @@ export const Message: React.FC<MessageProps> = ({
       )}
 
       {/* Thumbs sit right under the answer they judge. */}
-      {!isUser && feedback}
+      {!isUser && !isStaff && feedback}
 
       {/* Follow-up replies — only on the last message, so stale suggestions
           disappear once the user sends their next message. */}

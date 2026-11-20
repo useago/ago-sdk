@@ -1,6 +1,6 @@
 import { ref, onMounted, onUnmounted } from "vue";
 import type { AgoClient } from "../../client/AgoClient";
-import type { AgoMessage, AgoUploadFile } from "../../client/types";
+import type { AgoMessage, AgoUploadFile, Conversation } from "../../client/types";
 import { useAgo } from "./useAgo";
 
 export interface UseMessagesOptions {
@@ -56,6 +56,7 @@ export function useMessages(options: UseMessagesOptions = {}) {
       messages.value.push(message);
     }
     isLoading.value = false;
+    flushUpdate();
   };
 
   const handleError = (data: { error: string; conversationId?: string }) => {
@@ -93,7 +94,38 @@ export function useMessages(options: UseMessagesOptions = {}) {
     isLoading.value = false;
   };
 
+  // A human owns the conversation: the message was saved, no answer follows.
+  const handleHandoffPaused = (data: { conversationId: string }) => {
+    if (isOther(data.conversationId)) return;
+    messages.value = messages.value.filter(
+      (m: AgoMessage) =>
+        !(
+          m.role === "assistant" &&
+          (m.status === "IN_PROGRESS" || m.status === "WAITING_CLIENT") &&
+          !m.content
+        ),
+    );
+    isLoading.value = false;
+  };
+
+  // A live refetch (staff reply, marker) that landed while a send was settling.
+  let pendingUpdate: Conversation | null = null;
+  const applyUpdate = (conversation: Conversation) => {
+    if (!conversationId.value || conversation.id !== conversationId.value) return;
+    if (isLoading.value) {
+      pendingUpdate = conversation;
+      return;
+    }
+    pendingUpdate = null;
+    messages.value = (conversation.messages ?? []).filter((m) => !m.hidden);
+  };
+  const flushUpdate = () => {
+    if (pendingUpdate && !isLoading.value) applyUpdate(pendingUpdate);
+  };
+
   onMounted(() => {
+    client.on("message:handoff-paused", handleHandoffPaused);
+    client.on("conversation:updated", applyUpdate);
     client.on("message:start", handleStart);
     client.on("message:chunk", handleChunk);
     client.on("message:complete", handleComplete);
@@ -102,6 +134,8 @@ export function useMessages(options: UseMessagesOptions = {}) {
   });
 
   onUnmounted(() => {
+    client.off("message:handoff-paused", handleHandoffPaused);
+    client.off("conversation:updated", applyUpdate);
     client.off("message:start", handleStart);
     client.off("message:chunk", handleChunk);
     client.off("message:complete", handleComplete);
@@ -143,7 +177,11 @@ export function useMessages(options: UseMessagesOptions = {}) {
       // Replace temp messages
       messages.value = messages.value.filter((m: AgoMessage) => !m.id.startsWith("temp-"));
       const updatedUser = { ...userMsg, id: userMsg.id.replace("temp-", "user-"), conversationId: response.conversationId };
-      if (!messages.value.some((m: AgoMessage) => m.id === response.id)) {
+      if (response.handoffPaused) {
+        messages.value.push(updatedUser);
+        isLoading.value = false;
+        flushUpdate();
+      } else if (!messages.value.some((m: AgoMessage) => m.id === response.id)) {
         messages.value.push(updatedUser, response);
       } else {
         messages.value.push(updatedUser);

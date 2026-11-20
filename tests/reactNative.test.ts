@@ -406,6 +406,13 @@ describe("@useago/sdk/native", () => {
     expect(native).not.toHaveProperty("Markdown");
   });
 
+  it("keeps remote assistance off: no browser kit, no capability announced", async () => {
+    const client = new native.AgoClient({ baseUrl: BASE_URL, remoteAssist: { screenshot: true } });
+    expect(client.remoteAssist.isEnabled()).toBe(false);
+    expect(await client.remoteAssist.liveQuery()).toBe("");
+    client.destroy();
+  });
+
   it("toAgoFile maps document and image picker assets", () => {
     expect(
       toAgoFile({ uri: "file:///a/report.pdf", name: "report.pdf", mimeType: "application/pdf", size: 10 }),

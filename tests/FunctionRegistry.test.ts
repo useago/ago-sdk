@@ -222,15 +222,18 @@ describe("FunctionRegistry", () => {
       expect(result).toBe(circular);
     });
 
-    it("should not send maxResultBytes to the backend in schemas", () => {
+    it("keeps SDK-side settings (maxResultBytes, remote) out of the backend schemas", () => {
       registry.register("big", () => ({}), {
         ...schema,
         maxResultBytes: 100,
+        remote: false,
       });
 
       const schemas = registry.getSchemas();
 
       expect(schemas[0]).not.toHaveProperty("maxResultBytes");
+      expect(schemas[0]).not.toHaveProperty("remote");
+      expect(registry.get("big")?.remote).toBe(false);
     });
   });
 

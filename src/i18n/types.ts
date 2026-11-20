@@ -3,6 +3,8 @@ import type { WidgetLabels } from "../widget/types";
 import type { TimeAgoLabels } from "../widget/timeAgo";
 import type { FeedbackLabels } from "../widget/renderFeedback";
 import type { SpeechToTextLabels } from "../widget/speechToText";
+import type { HandoffLabels } from "../widget/handoffView";
+import type { RemoteAssistLabels } from "../remoteAssist/ui";
 
 export interface UiCatalog {
   form: ToolCallFormLabels;
@@ -10,6 +12,8 @@ export interface UiCatalog {
   timeAgo: TimeAgoLabels;
   feedback: FeedbackLabels;
   speech: SpeechToTextLabels;
+  handoff: HandoffLabels;
+  remoteAssist: RemoteAssistLabels;
   common: {
     stopButton: string;
     close: string;

@@ -109,6 +109,37 @@ export default {
     "noSpeech": "No audio was recorded. Please try again.",
     "transcriptionFailed": "Transcription failed. Please try again."
   },
+  "handoff": {
+    "waiting": "Waiting for an agent",
+    "talkingWith": "You are talking with {name}",
+    "talkingWithAnonymous": "You are talking with an agent",
+    "requested": "You asked to talk with a person",
+    "requestedUnavailable": "You asked to talk with a person. The team is away right now and will reply as soon as possible.",
+    "accepted": "{name} joined the conversation",
+    "acceptedAnonymous": "An agent joined the conversation",
+    "transferred": "The conversation was transferred to {name}",
+    "transferredAnonymous": "The conversation was transferred to another agent",
+    "ended": "The agent left the conversation",
+    "staffFallback": "Support agent"
+  },
+  "remoteAssist": {
+    "requestTitle": "{name} would like to assist you",
+    "requestTitleAnonymous": "A support agent would like to assist you",
+    "requestIntro": "If you accept, they will be able to:",
+    "canSeePage": "See the page you are on",
+    "canAct": "Perform actions for you in this app",
+    "canScreenshot": "Take screenshots of this page",
+    "requestFootnote": "You can stop at any time.",
+    "accept": "Accept",
+    "decline": "Decline",
+    "banner": "{name} is assisting you",
+    "bannerAnonymous": "A support agent is assisting you",
+    "stop": "Stop",
+    "approvalTitle": "{name} wants to run an action",
+    "approvalTitleAnonymous": "A support agent wants to run an action",
+    "allow": "Allow",
+    "deny": "Deny"
+  },
   "common": {
     "stopButton": "Stop",
     "close": "Close",

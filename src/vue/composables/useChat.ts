@@ -2,6 +2,7 @@ import { computed } from "vue";
 import type { AgoClient } from "../../client/AgoClient";
 import { useMessages } from "./useMessages";
 import { useConversation } from "./useConversation";
+import { useHandoff } from "./useHandoff";
 
 export interface UseChatOptions {
   client?: AgoClient;
@@ -27,6 +28,8 @@ export function useChat(options: UseChatOptions = {}) {
     autoLoad: options.autoLoad,
   });
 
+  const { handoff } = useHandoff(msgResult.conversationId, { client: options.client });
+
   const error = computed(
     () => msgResult.error.value || convResult.error.value
   );
@@ -47,5 +50,7 @@ export function useChat(options: UseChatOptions = {}) {
     selectConversation: convResult.selectConversation,
     startNewConversation: convResult.startNewConversation,
     refreshConversations: convResult.refreshConversations,
+    // Live human takeover state of the current conversation (`null`: the AI answers)
+    handoff,
   };
 }

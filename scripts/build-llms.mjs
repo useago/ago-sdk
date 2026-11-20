@@ -35,6 +35,7 @@ const concepts = [
   'docs/general/functions-and-context.md',
   'docs/general/events-and-streaming.md',
   'docs/general/configuration.md',
+  'docs/general/human-takeover-and-remote-assist.md',
 ];
 
 const header = `# AGO SDK (@useago/sdk) — coding-agent guide

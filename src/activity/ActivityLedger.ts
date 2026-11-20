@@ -1,13 +1,19 @@
+/**
+ * Who did it: the visitor, the AI agent, or a human support agent acting
+ * through remote assistance.
+ */
+export type ActivityActor = "user" | "agent" | "support";
+
 export interface ActivityEntry {
   ts: number;
-  actor: "user" | "agent";
+  actor: ActivityActor;
   name: string;
   summary: string;
   data?: Record<string, unknown>;
 }
 
 export interface ActivityInput {
-  actor?: "user" | "agent";
+  actor?: ActivityActor;
   name: string;
   summary: string;
   data?: Record<string, unknown>;

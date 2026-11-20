@@ -109,6 +109,37 @@ export default {
     "noSpeech": "Aucun son n’a été enregistré. Veuillez réessayer.",
     "transcriptionFailed": "La transcription a échoué. Veuillez réessayer."
   },
+  "handoff": {
+    "waiting": "En attente d'un conseiller",
+    "talkingWith": "Vous discutez avec {name}",
+    "talkingWithAnonymous": "Vous discutez avec un conseiller",
+    "requested": "Vous avez demandé à parler à une personne",
+    "requestedUnavailable": "Vous avez demandé à parler à une personne. L'équipe est absente pour le moment et vous répondra dès que possible.",
+    "accepted": "{name} a rejoint la conversation",
+    "acceptedAnonymous": "Un conseiller a rejoint la conversation",
+    "transferred": "La conversation a été transférée à {name}",
+    "transferredAnonymous": "La conversation a été transférée à un autre conseiller",
+    "ended": "Le conseiller a quitté la conversation",
+    "staffFallback": "Conseiller"
+  },
+  "remoteAssist": {
+    "requestTitle": "{name} souhaite vous assister",
+    "requestTitleAnonymous": "Un conseiller souhaite vous assister",
+    "requestIntro": "Si vous acceptez, il pourra :",
+    "canSeePage": "Voir la page sur laquelle vous êtes",
+    "canAct": "Effectuer des actions pour vous dans cette application",
+    "canScreenshot": "Prendre des captures d'écran de cette page",
+    "requestFootnote": "Vous pouvez arrêter à tout moment.",
+    "accept": "Accepter",
+    "decline": "Refuser",
+    "banner": "{name} vous assiste",
+    "bannerAnonymous": "Un conseiller vous assiste",
+    "stop": "Arrêter",
+    "approvalTitle": "{name} souhaite effectuer une action",
+    "approvalTitleAnonymous": "Un conseiller souhaite effectuer une action",
+    "allow": "Autoriser",
+    "deny": "Refuser"
+  },
   "common": {
     "stopButton": "Arrêter",
     "close": "Fermer",

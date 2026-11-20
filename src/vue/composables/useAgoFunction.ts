@@ -42,6 +42,8 @@ export function useAgoFunction(
      * `false` keeps this function out of WebMCP.
      */
     webmcp?: WebMCPToolMeta | false;
+    /** `false` keeps this function away from remote assistance. */
+    remote?: boolean;
   }
 ): void {
   const client = useAgo();
@@ -53,6 +55,7 @@ export function useAgoFunction(
       maxResultBytes: options.maxResultBytes,
       requiresApproval: options.requiresApproval,
       webmcp: options.webmcp,
+      remote: options.remote,
     });
   });
 

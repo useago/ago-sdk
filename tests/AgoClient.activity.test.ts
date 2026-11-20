@@ -34,7 +34,8 @@ describe("AgoClient activity ledger", () => {
     const entry = snap?.entries["activity:recent"];
     expect(entry).toBeDefined();
     expect(entry?.description).toBe(
-      "Recent actions by the user and the agent in the app, oldest first. " +
+      "Recent actions by the user, the agent and a human support agent " +
+        '(actor "support") in the app, oldest first. ' +
         "Use this to understand what just happened before this message. " +
         "Use current-page for the user’s current location.",
     );

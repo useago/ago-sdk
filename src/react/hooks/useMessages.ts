@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgoClient } from "../../client/AgoClient";
-import type { AgoMessage, AgoUploadFile } from "../../client/types";
+import type { AgoMessage, AgoUploadFile, Conversation } from "../../client/types";
 import { attachmentsFromFiles } from "../../utils/attachments";
 import { useOptionalAgoClient } from "../context/AgoContext";
 
@@ -61,6 +61,10 @@ export function useMessages({
   const pendingPlaceholderRef = useRef<string | null>(null);
   // Real message id -> the optimistic bubble standing in for it.
   const placeholdersRef = useRef(new Map<string, string>());
+  // A live refetch (staff reply, marker) that landed while a send was settling.
+  const pendingUpdate = useRef<Conversation | null>(null);
+  const loadingRef = useRef(false);
+  loadingRef.current = isLoading;
 
   // Load messages when conversation ID changes
   useEffect(() => {
@@ -229,6 +233,33 @@ export function useMessages({
       setIsLoading(false);
     };
 
+    // A human owns the conversation: the message was saved, no answer follows.
+    const handleHandoffPaused = (data: { conversationId: string }) => {
+      if (isOther(data.conversationId)) return;
+      pendingPlaceholderRef.current = null;
+      setMessages((prev) =>
+        prev.filter(
+          (m) =>
+            !(m.role === "assistant" && isStreamingStatus(m.status) && !m.content)
+        )
+      );
+      setIsLoading(false);
+    };
+
+    // While a human handles the conversation the server copy is the truth:
+    // staff replies and markers arrive only through this refetch.
+    const handleConversationUpdated = (conversation: Conversation) => {
+      if (!conversationIdRef.current || conversation.id !== conversationIdRef.current) return;
+      if (loadingRef.current) {
+        pendingUpdate.current = conversation;
+        return;
+      }
+      pendingUpdate.current = null;
+      setMessages((conversation.messages ?? []).filter((m) => !m.hidden));
+    };
+
+    client.on("message:handoff-paused", handleHandoffPaused);
+    client.on("conversation:updated", handleConversationUpdated);
     client.on("message:start", handleMessageStart);
     client.on("message:chunk", handleMessageChunk);
     client.on("message:answer-complete", handleAnswerComplete);
@@ -237,6 +268,8 @@ export function useMessages({
     client.on("message:stopped", handleMessageStopped);
 
     return () => {
+      client.off("message:handoff-paused", handleHandoffPaused);
+      client.off("conversation:updated", handleConversationUpdated);
       client.off("message:start", handleMessageStart);
       client.off("message:chunk", handleMessageChunk);
       client.off("message:answer-complete", handleAnswerComplete);
@@ -245,6 +278,13 @@ export function useMessages({
       client.off("message:stopped", handleMessageStopped);
     };
   }, [client]);
+
+  useEffect(() => {
+    const update = pendingUpdate.current;
+    if (isLoading || !update || update.id !== conversationId) return;
+    pendingUpdate.current = null;
+    setMessages((update.messages ?? []).filter((m) => !m.hidden));
+  }, [isLoading, conversationId]);
 
   const sendMessage = useCallback(
     async (content: string, files?: AgoUploadFile[]): Promise<AgoMessage | null> => {
@@ -289,6 +329,22 @@ export function useMessages({
           setConversationId(response.conversationId);
         }
         placeholdersRef.current.delete(response.id);
+
+        if (response.handoffPaused) {
+          if (pendingPlaceholderRef.current === assistantMessage.id) {
+            pendingPlaceholderRef.current = null;
+          }
+          setMessages((prev) => [
+            ...prev.filter((m) => !m.id.startsWith("temp-")),
+            {
+              ...userMessage,
+              id: userMessage.id.replace("temp-", "user-"),
+              conversationId: response.conversationId,
+            },
+          ]);
+          setIsLoading(false);
+          return response;
+        }
 
         // Replace temp messages with real ones.
         // The handleMessageComplete callback may also fire — it uses findIndex

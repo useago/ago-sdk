@@ -2113,3 +2113,66 @@ it("switches text-only widget chrome without fetching form config or losing the 
     expect(getConfig).not.toHaveBeenCalled();
   } finally { widget.destroy(); host.remove(); }
 });
+
+it("renders a human takeover: staff bubble with the agent's name, marker lines, and a status line", async () => {
+  let handoff: import("../src/client/types").HandoffState | null = { state: "waiting", agentName: null, requestedAt: null };
+  const at = new Date(0);
+  const client = createMockClient({
+    overrides: {
+      getHandoff: () => handoff,
+      getConversation: async () =>
+        makeConversation("conv-h", [
+          { id: "m1", conversationId: "conv-h", content: "I want a person", role: "user", status: "DONE", createdAt: at },
+          {
+            id: "m2",
+            conversationId: "conv-h",
+            content: '{"event":"handoff_accepted","agent_name":"Jane"}',
+            role: "system",
+            status: "DONE",
+            createdAt: at,
+            marker: { event: "handoff_accepted", agentName: "Jane" },
+          },
+          { id: "m3", conversationId: "conv-h", content: "Hi, Jane here", role: "staff", staffName: "Jane", status: "DONE", createdAt: at },
+          { id: "m4", conversationId: "conv-h", content: '{"event":"unknown"}', role: "system", status: "DONE", createdAt: at },
+        ]),
+    },
+  });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const widget = mountChatWidget(host, { client, conversationId: "conv-h" });
+  try {
+    await vi.waitFor(() => expect(host.textContent).toContain("Hi, Jane here"));
+    expect(host.querySelector('[role="note"]')?.textContent).toBe("Jane joined the conversation");
+    expect(host.textContent).not.toContain("{");
+    const staff = host.querySelector(".ago-message--staff")!;
+    expect(staff.textContent).toContain("Jane");
+    expect(host.querySelector(".ago-handoff-status")?.textContent).toBe("Waiting for an agent");
+
+    handoff = { state: "human", agentName: "Jane", requestedAt: null };
+    client.__emitEvent("handoff:changed", { conversationId: "conv-h", handoff });
+    expect(host.querySelector(".ago-handoff-status")?.textContent).toBe("You are talking with Jane");
+
+    handoff = null;
+    client.__emitEvent("handoff:changed", { conversationId: "conv-h", handoff });
+    expect(host.querySelector(".ago-handoff-status")).toBeNull();
+  } finally { widget.destroy(); host.remove(); }
+});
+
+it("stops following the previous conversation on a new one, without freezing the active conversation", async () => {
+  const client = new AgoClient({ baseUrl: "https://example.test" });
+  vi.spyOn(client, "getConversation").mockImplementation(async (id) => {
+    client._followUser(id);
+    return makeConversation(id);
+  });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const widget = mountChatWidget(host, { client, conversationId: "conv-old" });
+  try {
+    await vi.waitFor(() => expect(client.getActiveConversation()).toBe("conv-old"));
+    widget.newConversation();
+    expect(client.getActiveConversation()).toBeNull();
+    // A later send or open is still followed (setActiveConversation would stop that).
+    client._followUser("conv-next");
+    expect(client.getActiveConversation()).toBe("conv-next");
+  } finally { widget.destroy(); host.remove(); client.destroy(); }
+});
