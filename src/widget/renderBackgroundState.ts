@@ -33,6 +33,7 @@ export function renderBackgroundState(
     borderRadius: "var(--ago-radius, 16px)", backgroundColor: PANEL_BACKGROUND, padding: "12px",
   });
   root.className = "ago-background-state";
+  root.dataset.messageId = message.id;
   const header = div({ fontWeight: "600", display: "flex", gap: "8px", alignItems: "center" });
   const icon = document.createElement("span");
   icon.setAttribute("aria-hidden", "true");
@@ -45,8 +46,12 @@ export function renderBackgroundState(
   header.append(icon, title);
   root.appendChild(header);
   const approval = message.approval;
-  if (approval) {
-    const card = div({
+  if (approval && (approval.actions.length > 0 || approval.allowedDecisions.length > 0)) {
+    const card = document.createElement("details");
+    card.open = approval.status === "pending";
+    card.dataset.approvalId = approval.id;
+    card.dataset.approvalStatus = approval.status;
+    css(card, {
       border: `1px solid ${BORDER_COLOR}`,
       backgroundColor: PANEL_BACKGROUND,
       borderRadius: "10px",
@@ -55,9 +60,9 @@ export function renderBackgroundState(
       marginTop: "8px",
     });
     card.className = "ago-background-state__approval";
-    const title = div({ fontWeight: "600" });
-    title.textContent =
-      approval.status === "pending" ? labels.waiting : labels[approval.status];
+    const title = document.createElement("summary");
+    css(title, { fontWeight: "600", cursor: "pointer", minHeight: "44px", alignContent: "center" });
+    title.textContent = `${labels.approval} · ${approval.status === "pending" ? labels.waiting : labels[approval.status]}`;
     card.appendChild(title);
     for (const action of approval.actions) {
       const name = div({ fontWeight: "600", marginTop: "8px" });
@@ -159,6 +164,7 @@ export function renderBackgroundState(
       const heading = div({ fontWeight: "600", marginBottom: "5px" });
       heading.textContent = labels.activity;
       const log = div({ maxHeight: "128px", overflowY: "auto", padding: "8px", borderRadius: "8px", backgroundColor: AGENT_BUBBLE_BACKGROUND, fontFamily: "monospace", fontSize: "12px" });
+      log.className = "ago-background-state__activity-log";
       for (const entry of progress.activity) {
         const item = div({ paddingBlock: "2px", whiteSpace: "pre-wrap" });
         item.textContent = entry.text;

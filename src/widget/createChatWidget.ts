@@ -727,7 +727,30 @@ export function mountChatWidget(
   function updateMessageList(mutate: () => void): void {
     withoutScrollTracking(() => {
       const scrollTop = messagesEl.scrollTop;
+      const backgroundViews = new Map([...listEl.querySelectorAll<HTMLElement>(".ago-background-state")].map((state) => {
+        const approval = state.querySelector<HTMLDetailsElement>(".ago-background-state__approval");
+        return [state.dataset.messageId, {
+          activityScroll: state.querySelector<HTMLElement>(".ago-background-state__activity-log")?.scrollTop,
+          approval: approval && {
+            id: approval.dataset.approvalId,
+            status: approval.dataset.approvalStatus,
+            open: approval.open,
+            focused: document.activeElement === approval.querySelector("summary"),
+          },
+        }] as const;
+      }));
       mutate();
+      for (const state of listEl.querySelectorAll<HTMLElement>(".ago-background-state")) {
+        const previous = backgroundViews.get(state.dataset.messageId);
+        if (!previous) continue;
+        const approval = state.querySelector<HTMLDetailsElement>(".ago-background-state__approval");
+        if (approval && previous.approval && previous.approval.id === approval.dataset.approvalId && previous.approval.status === approval.dataset.approvalStatus) {
+          approval.open = previous.approval.open;
+          if (previous.approval.focused) approval.querySelector("summary")?.focus({ preventScroll: true });
+        }
+        const log = state.querySelector<HTMLElement>(".ago-background-state__activity-log");
+        if (log && previous.activityScroll !== undefined) log.scrollTop = previous.activityScroll;
+      }
       if (!autoScrollEnabled || !stickToBottom) {
         messagesEl.scrollTop = scrollTop;
       }

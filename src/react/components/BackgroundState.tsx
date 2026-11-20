@@ -84,8 +84,11 @@ export function BackgroundState({ message, client, labels: overrides, onError, c
         </span>
         {header}
       </div>
-      {approval && (
-        <section
+      {approval && (approval.actions.length > 0 || approval.allowedDecisions.length > 0) && (
+        <details
+          key={JSON.stringify([clientScope.revision, message.id, approval.id])}
+          className="ago-background-state__approval"
+          open={approval.status === "pending"}
           aria-label={labels.approval}
           style={{
             border: "1px solid var(--ago-border-color, #dee3e8)",
@@ -94,8 +97,9 @@ export function BackgroundState({ message, client, labels: overrides, onError, c
             marginBlock: 8,
           }}
         >
-          <strong>{labels.approval}</strong>
-          <p>{approvalLabels[approval.status]}</p>
+          <summary style={{ fontWeight: 600, cursor: "pointer", minHeight: 44, alignContent: "center" }}>
+            {labels.approval} · {approvalLabels[approval.status]}
+          </summary>
           {approval.actions.map((action, index) => (
             <div key={index}>
               <strong>{action.name}</strong>
@@ -111,7 +115,7 @@ export function BackgroundState({ message, client, labels: overrides, onError, c
             labels={labels}
             onError={onError}
           />
-        </section>
+        </details>
       )}
       {progress && (
         <section aria-label={labels.progress} style={{ marginTop: 10 }}>

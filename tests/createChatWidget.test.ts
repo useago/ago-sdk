@@ -2813,3 +2813,54 @@ describe("vanilla approval decision scope", () => {
     widget.destroy();
   });
 });
+
+
+describe("background view persistence", () => {
+  it.each(["inline", "bubble"] as const)("preserves activity scroll across unchanged and changed snapshots in %s", async (placement) => {
+    const client = createMockClient();
+    const root = document.createElement("div");
+    document.body.append(root);
+    const widget = mountChatWidget(root, { client, placement, defaultOpen: true, conversationId: "conv-1", welcomeMessage: "", loadThreads: false });
+    try {
+      await vi.waitFor(() => expect(client.getActiveConversation()).toBe("conv-1"));
+      const message = makeAssistantMessage({ status: "WAITING_APPROVAL", content: "", canStop: false, progress: {
+        steps: [], activity: Array.from({ length: 30 }, (_, index) => ({ text: `Tool ${index}`, timestamp: null })), truncated: false,
+      } });
+      const policy = { conversationId: "conv-1", interaction: { canSendMessage: false, blockingMessageId: message.id } };
+      client.__emitEvent("conversation:update", policy);
+      client.__emitEvent("message:update", message);
+      const log = () => [...root.querySelectorAll<HTMLElement>(".ago-background-state div")].find((element) => element.style.maxHeight === "128px")!;
+      log().scrollTop = 80;
+      client.__emitEvent("message:update", structuredClone(message));
+      client.__emitEvent("conversation:update", policy);
+      expect(log().scrollTop).toBe(80);
+      client.__emitEvent("message:update", { ...message, progress: { ...message.progress!, activity: [...message.progress!.activity, { text: "Another tool", timestamp: null }] } });
+      expect(log().scrollTop).toBe(80);
+    } finally { widget.destroy(); root.remove(); }
+  });
+
+  it("collapses resolved approval details and preserves reopening across polling", async () => {
+    const client = createMockClient();
+    const root = document.createElement("div");
+    document.body.append(root);
+    const widget = mountChatWidget(root, { client, conversationId: "conv-1", welcomeMessage: "", loadThreads: false });
+    try {
+      await vi.waitFor(() => expect(client.getActiveConversation()).toBe("conv-1"));
+      const message = makeAssistantMessage({ status: "WAITING_APPROVAL", content: "", approval: {
+        id: "review", status: "pending", actions: [{ name: "Publish", arguments: { file: "report.csv" } }], allowedDecisions: ["approve"], expiresAt: null,
+      } });
+      client.__emitEvent("message:update", message);
+      const details = () => root.querySelector<HTMLDetailsElement>(".ago-background-state__approval")!;
+      expect(details().tagName).toBe("DETAILS");
+      expect(details().open).toBe(true);
+      const approved: AgoMessage = { ...message, status: "IN_PROGRESS", approval: { ...message.approval!, status: "approved", allowedDecisions: [] } };
+      client.__emitEvent("message:update", approved);
+      expect(details().open).toBe(false);
+      details().open = true;
+      client.__emitEvent("message:update", structuredClone(approved));
+      expect(details().open).toBe(true);
+      client.__emitEvent("message:update", { ...message, approval: { ...message.approval!, id: "next-review" } });
+      expect(details().open).toBe(true);
+    } finally { widget.destroy(); root.remove(); }
+  });
+});

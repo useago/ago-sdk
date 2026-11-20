@@ -127,3 +127,22 @@ describe("BackgroundState public component", () => {
     if (change !== "unmount") await act(async () => view.root.unmount());
   });
 });
+
+
+it("keeps pending approval open, collapses on resolution, and preserves manual reopening", async () => {
+  const client = createMockClient();
+  const view = await mount(<BackgroundState message={message} client={client} />);
+  try {
+    const details = () => view.container.querySelector<HTMLDetailsElement>("details")!;
+    expect(details()).not.toBeNull();
+    expect(details().open).toBe(true);
+    const approved: AgoMessage = { ...message, status: "IN_PROGRESS", approval: { ...message.approval!, status: "approved", allowedDecisions: [] } };
+    await view.render(<BackgroundState message={approved} client={client} />);
+    expect(details().open).toBe(false);
+    details().open = true;
+    await view.render(<BackgroundState message={structuredClone(approved)} client={client} />);
+    expect(details().open).toBe(true);
+    await view.render(<BackgroundState message={{ ...message, approval: { ...message.approval!, id: "next-review" } }} client={client} />);
+    expect(details().open).toBe(true);
+  } finally { await act(async () => view.root.unmount()); }
+});
