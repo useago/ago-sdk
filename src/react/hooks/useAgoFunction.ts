@@ -43,6 +43,8 @@ export interface UseAgoFunctionOptions {
    * `false` keeps this function out of WebMCP.
    */
   webmcp?: WebMCPToolMeta | false;
+  /** `false` keeps this function away from remote assistance (see `ClientFunctionDefinition.remote`). */
+  remote?: boolean;
 }
 
 /**
@@ -87,6 +89,7 @@ export function useAgoFunction(
     maxResultBytes,
     requiresApproval,
     webmcp,
+    remote,
   } =
     typeof nameOrDef === "string"
       ? { name: nameOrDef, ...(options as UseAgoFunctionOptions) }
@@ -110,6 +113,7 @@ export function useAgoFunction(
       maxResultBytes,
       requiresApproval,
       webmcp,
+      remote,
     });
 
     return () => {
@@ -124,6 +128,7 @@ export function useAgoFunction(
     maxResultBytes,
     requiresApproval,
     webmcpKey,
+    remote,
   ]);
 }
 
@@ -236,6 +241,7 @@ export function useAgoPageState(
   const client = useAgoClient();
   const fnName = opts?.functionName ?? "setPageState";
   const requiresApproval = opts?.requiresApproval;
+  const remote = opts?.remote;
   // Only the static shape belongs in the deps: `data` itself is a fresh object
   // literal on every render, and re-registering that often would churn the
   // function list for nothing.
@@ -294,6 +300,7 @@ export function useAgoPageState(
     client.registerPageStateFunction(stableControls, {
       functionName: fnName,
       requiresApproval,
+      remote,
       data,
       settleTimeoutMs,
     });
@@ -305,6 +312,7 @@ export function useAgoPageState(
     client,
     fnName,
     requiresApproval,
+    remote,
     hasData,
     dataDescription,
     dataMaxResultBytes,

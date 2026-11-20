@@ -109,6 +109,37 @@ export default {
     "noSpeech": "Nenhum áudio foi gravado. Tente novamente.",
     "transcriptionFailed": "A transcrição falhou. Tente novamente."
   },
+  "handoff": {
+    "waiting": "Aguardando um atendente",
+    "talkingWith": "Você está falando com {name}",
+    "talkingWithAnonymous": "Você está falando com um atendente",
+    "requested": "Você pediu para falar com uma pessoa",
+    "requestedUnavailable": "Você pediu para falar com uma pessoa. A equipe não está disponível agora e responderá assim que possível.",
+    "accepted": "{name} entrou na conversa",
+    "acceptedAnonymous": "Um atendente entrou na conversa",
+    "transferred": "A conversa foi transferida para {name}",
+    "transferredAnonymous": "A conversa foi transferida para outro atendente",
+    "ended": "O atendente saiu da conversa",
+    "staffFallback": "Atendente"
+  },
+  "remoteAssist": {
+    "requestTitle": "{name} gostaria de ajudar você",
+    "requestTitleAnonymous": "Um atendente gostaria de ajudar você",
+    "requestIntro": "Se você aceitar, ele poderá:",
+    "canSeePage": "Ver a página em que você está",
+    "canAct": "Realizar ações por você neste aplicativo",
+    "canScreenshot": "Fazer capturas de tela desta página",
+    "requestFootnote": "Você pode parar a qualquer momento.",
+    "accept": "Aceitar",
+    "decline": "Recusar",
+    "banner": "{name} está ajudando você",
+    "bannerAnonymous": "Um atendente está ajudando você",
+    "stop": "Parar",
+    "approvalTitle": "{name} quer realizar uma ação",
+    "approvalTitleAnonymous": "Um atendente quer realizar uma ação",
+    "allow": "Permitir",
+    "deny": "Negar"
+  },
   "common": {
     "stopButton": "Parar",
     "close": "Fechar",

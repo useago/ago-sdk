@@ -17,7 +17,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <AgoProvider
       baseUrl={import.meta.env.VITE_AGO_BASE_URL ?? 'https://playground.api.useago.com'}
-      defaultAgentId="glacier"
+      defaultAgentId={import.meta.env.VITE_AGO_AGENT ?? 'glacier'}
+      // A support agent who takes the conversation over can ask for remote
+      // assistance: see the page, run the functions above, take screenshots.
+      // Also needs remote assistance enabled for the workspace.
+      remoteAssist={{ screenshot: true }}
       // ?dev mounts the dev panel (see App.tsx) and turns on the SDK logger,
       // so warnings like the function result-size guard show in the console.
       debug={new URLSearchParams(window.location.search).has('dev')}

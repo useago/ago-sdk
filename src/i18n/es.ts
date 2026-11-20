@@ -109,6 +109,37 @@ export default {
     "noSpeech": "No se grabó audio. Inténtelo de nuevo.",
     "transcriptionFailed": "La transcripción falló. Inténtelo de nuevo."
   },
+  "handoff": {
+    "waiting": "Esperando a un agente",
+    "talkingWith": "Estás hablando con {name}",
+    "talkingWithAnonymous": "Estás hablando con un agente",
+    "requested": "Pediste hablar con una persona",
+    "requestedUnavailable": "Pediste hablar con una persona. El equipo no está disponible ahora y te responderá lo antes posible.",
+    "accepted": "{name} se unió a la conversación",
+    "acceptedAnonymous": "Un agente se unió a la conversación",
+    "transferred": "La conversación se transfirió a {name}",
+    "transferredAnonymous": "La conversación se transfirió a otro agente",
+    "ended": "El agente salió de la conversación",
+    "staffFallback": "Agente de soporte"
+  },
+  "remoteAssist": {
+    "requestTitle": "{name} quiere ayudarte",
+    "requestTitleAnonymous": "Un agente de soporte quiere ayudarte",
+    "requestIntro": "Si aceptas, podrá:",
+    "canSeePage": "Ver la página en la que estás",
+    "canAct": "Realizar acciones por ti en esta aplicación",
+    "canScreenshot": "Hacer capturas de pantalla de esta página",
+    "requestFootnote": "Puedes detenerlo en cualquier momento.",
+    "accept": "Aceptar",
+    "decline": "Rechazar",
+    "banner": "{name} te está ayudando",
+    "bannerAnonymous": "Un agente de soporte te está ayudando",
+    "stop": "Detener",
+    "approvalTitle": "{name} quiere realizar una acción",
+    "approvalTitleAnonymous": "Un agente de soporte quiere realizar una acción",
+    "allow": "Permitir",
+    "deny": "Denegar"
+  },
   "common": {
     "stopButton": "Detener",
     "close": "Cerrar",

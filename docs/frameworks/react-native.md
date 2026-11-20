@@ -165,3 +165,4 @@ Native's `XMLHttpRequest` and its reply arrives in one piece.
 | `ChatWidget`, `Message`, `Markdown`, `ChatInput` and other components | Not exported: they render HTML. Build the UI with React Native views |
 | The `<script>` widget | Not applicable |
 | Proactive nudges, `errorWatcher`, WebMCP, devtools panel | Not supported yet: they observe the browser (DOM events, `window` errors) |
+| [Remote assistance](../general/human-takeover-and-remote-assist.md#remote-assistance) | Off: the consent prompt and screenshots need a browser. Human takeover works |

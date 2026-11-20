@@ -63,6 +63,12 @@ import {
   type MessageFeedbackState,
 } from "./renderFeedback";
 import { renderFormNotice, renderMessage } from "./renderMessage";
+import {
+  handoffStatusText,
+  markerText,
+  renderHandoffStatus,
+  renderMarkerLine,
+} from "./handoffView";
 import { buildChatScreen, type ChatScreenHandle } from "./screens/chat";
 import { buildHistoryScreen, type HistoryScreenHandle } from "./screens/history";
 import { buildHomeScreen, type HomeScreenHandle } from "./screens/home";
@@ -1001,7 +1007,7 @@ export function mountChatWidget(
   const feedbackStates = new Map<string, MessageFeedbackState>();
 
   function buildFeedback(message: AgoMessage): HTMLElement | null {
-    if (!feedbackOptions) return null;
+    if (!feedbackOptions || message.role !== "assistant") return null;
     // Only a finished answer can be judged. An empty `conversationId` means the
     // bubble is local (the streamed greeting), so there is nothing to report on.
     if (
@@ -1468,6 +1474,16 @@ export function mountChatWidget(
   /** Build the DOM node for the message at `index`, in the placement's look. */
   function renderOne(index: number): HTMLElement {
     const message = messages[index];
+    if (message.role === "system") {
+      if (message.marker) {
+        return renderMarkerLine(markerText(message.marker, text.handoff));
+      }
+      // Other system events are model context, never transcript content.
+      const none = div({ display: "none" });
+      none.className = "ago-message ago-message--system";
+      return none;
+    }
+    if (message.role === "staff") return renderStaffMessage(index);
     if (!isBubble) {
       return renderMessage(message, { ...messageOpts(index), renderToolCall });
     }
@@ -1481,6 +1497,57 @@ export function mountChatWidget(
       actionsRow: buildFeedback(message),
       renderToolCall,
     });
+  }
+
+  /** A human agent's reply: an agent bubble, signed with their first name. */
+  function renderStaffMessage(index: number): HTMLElement {
+    const message = messages[index];
+    const name = message.staffName || text.handoff.staffFallback;
+    const view: AgoMessage = {
+      ...message,
+      role: "assistant",
+      agent: { id: "", name },
+    };
+    let node: HTMLElement;
+    if (!isBubble) {
+      node = renderMessage(view, {
+        ...messageOpts(index),
+        showAgentName: true,
+        feedbackRow: null,
+      });
+    } else {
+      node = renderEmbedMessage(view, {
+        isLast: false,
+        followUpEnabled: false,
+        agentRowTinted: !!theme?.agentBubbleBg,
+        agentRowTextTinted: !!theme?.agentBubbleText,
+        labels,
+        actionsRow: null,
+      });
+      const author = div({
+        fontSize: "12px",
+        fontWeight: "600",
+        color: MUTED_TEXT_COLOR,
+        padding: "0 12px",
+        marginBottom: "-4px",
+      });
+      author.className = "ago-message__agent";
+      author.textContent = name;
+      node.insertBefore(author, node.firstChild);
+    }
+    node.classList.add("ago-message--staff");
+    node.dataset.messageRole = "staff";
+    return node;
+  }
+
+  /** "Waiting for an agent" / "You are talking with Jane", while handed off. */
+  function renderHandoffLine(): HTMLElement | null {
+    if (!conversationId) return null;
+    const status = handoffStatusText(
+      client.getHandoff?.(conversationId) ?? null,
+      text.handoff,
+    );
+    return status ? renderHandoffStatus(status) : null;
   }
 
   /** Presentation options for the bubble at `index`. Shared by both render paths. */
@@ -1522,6 +1589,7 @@ export function mountChatWidget(
    */
   function renderStreamingTail(): boolean {
     if (errorMessage || formNotices.length > 0) return false;
+    if (conversationId && client.getHandoff?.(conversationId)) return false;
     const index = messages.length - 1;
     const message = messages[index];
     if (!message || message.role !== "assistant") return false;
@@ -1601,6 +1669,10 @@ export function mountChatWidget(
         messageNodes[index] = node;
         listEl.appendChild(node);
       });
+    }
+    if (messages.length > 0) {
+      const status = renderHandoffLine();
+      if (status) listEl.appendChild(status);
     }
     // One confirmation per submitted form, below the conversation.
     for (const notice of formNotices) {
@@ -1693,6 +1765,7 @@ export function mountChatWidget(
     }
     isLoading = false;
     render();
+    flushPendingUpdate();
     if (message.status === "DONE") {
       onMessageReceived?.({ id: message.id, content: message.content });
     }
@@ -1780,6 +1853,34 @@ export function mountChatWidget(
     render();
   };
 
+  // ── Live human takeover ────────────────────────────────────────────
+  // A refetch that lands while our own send is still settling waits for it,
+  // so the optimistic bubbles are not swapped out from under `send()`.
+  let pendingUpdate: Conversation | null = null;
+  const applyConversationUpdate = (conversation: Conversation): void => {
+    if (conversation.id !== conversationId) return;
+    if (isLoading) {
+      pendingUpdate = conversation;
+      return;
+    }
+    pendingUpdate = null;
+    messages = conversation.messages ?? [];
+    render();
+  };
+  const flushPendingUpdate = (): void => {
+    if (pendingUpdate && !isLoading) applyConversationUpdate(pendingUpdate);
+  };
+  const onHandoffChanged = (data: AgoClientEvents["handoff:changed"]): void => {
+    if (data.conversationId === conversationId) render();
+  };
+  /** Read receipts count only while the conversation is really on screen. */
+  function syncConversationVisible(): void {
+    const onScreen = panelOpen && (!isBubble || screen === "chat");
+    client.setConversationVisible?.(onScreen);
+  }
+
+  client.on("conversation:updated", applyConversationUpdate);
+  client.on("handoff:changed", onHandoffChanged);
   client.on("config:changed", onConfigChanged);
   window.addEventListener("online", retryTicketFormConfig);
   window.addEventListener("focus", retryTicketFormConfig);
@@ -1934,6 +2035,7 @@ export function mountChatWidget(
         isLoading = false;
       }
       render();
+      flushPendingUpdate();
       // Keep the exposed thread list current (new thread, bumped last-message date).
       if (loadThreads) void refreshThreads();
     } catch (err) {
@@ -2046,6 +2148,7 @@ export function mountChatWidget(
       autoScroll();
     }
     embedHeader?.update({ screen: next });
+    syncConversationVisible();
     footer?.setActive(next);
     footer?.setVisible(next !== "chat");
   }
@@ -2056,6 +2159,7 @@ export function mountChatWidget(
     cancelRecording();
     if (isLoading) await stop();
     conversationId = id;
+    pendingUpdate = null;
     messages = [];
     errorMessage = null;
     formNotices.length = 0;
@@ -2074,6 +2178,10 @@ export function mountChatWidget(
   function startNewConversation(): void {
     if (isLoading) void stop();
     conversationId = undefined;
+    pendingUpdate = null;
+    // The visitor now looks at an empty conversation; setActiveConversation would
+    // stop the client from following the next send.
+    client._followUser?.(null);
     messages = [];
     errorMessage = null;
     formNotices.length = 0;
@@ -2305,6 +2413,8 @@ export function mountChatWidget(
       if (teaserTimer) clearTimeout(teaserTimer);
       if (resizeTimer) clearTimeout(resizeTimer);
       teaser?.remove();
+      client.off("conversation:updated", applyConversationUpdate);
+      client.off("handoff:changed", onHandoffChanged);
       client.off("config:changed", onConfigChanged);
       window.removeEventListener("online", retryTicketFormConfig);
       window.removeEventListener("focus", retryTicketFormConfig);
@@ -2356,6 +2466,7 @@ export function mountChatWidget(
 
   // ── Side-panel open/close (no-ops in inline mode) ──────────────────
   function applyOpenState(): void {
+    syncConversationVisible();
     if (!wrapper) return;
     if (isBubble) {
       applyBubbleGeometry();

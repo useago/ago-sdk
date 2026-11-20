@@ -18,7 +18,29 @@ npm run dev
 
 It defaults to the AGO playground backend (`https://playground.api.useago.com`, agent `glacier`).
 Point `VITE_AGO_BASE_URL` at another domain (e.g. `https://YOUR-DOMAIN.api.useago.com`)
-to use your own agents.
+to use your own agents, and `VITE_AGO_AGENT` at another agent slug.
+
+### Against a local AGO backend
+
+```bash
+cd ../.. && npm run build          # the example uses the built SDK
+cd examples/glacier
+VITE_AGO_BASE_URL=http://localhost:<backend-port> VITE_AGO_AGENT=<agent-slug> npm run dev
+```
+
+The SDK sends the visitor id in `X-User-Anon-Id` (a UUID kept in
+`localStorage` under `ago_widget_id`). A local backend in debug mode accepts any
+`localhost` origin; if the workspace restricts widget domains, add `localhost`.
+
+### Remote assistance
+
+`main.tsx` turns on `remoteAssist` with screenshots, `placeOrder` is declared
+`remote: false`, and the pickup phone field in the order ticket has
+`data-ago-mask`. To try it, enable remote assistance for the workspace, ask the
+agent for a person in the chat, take the conversation over from the AGO
+back-office, and request remote assistance there. Accept in the shop: the
+banner appears, the agent can run the cart and navigation functions but not
+`placeOrder`, and screenshots show the phone field painted over.
 
 The example runs with the default `clientFunctionsMode` (`"pause"`): the agent
 pauses on client function calls (navigation, cart actions) and resumes the same

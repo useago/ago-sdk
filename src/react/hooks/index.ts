@@ -23,3 +23,9 @@ export type {
   UseProactiveNudgeOptions,
   UseProactiveNudgeResult,
 } from "./useProactiveNudge";
+
+export { useHandoff } from "./useHandoff";
+export type { UseHandoffResult } from "./useHandoff";
+
+export { useRemoteAssist } from "./useRemoteAssist";
+export type { UseRemoteAssistResult } from "./useRemoteAssist";

@@ -170,6 +170,11 @@ export interface AgoPageStateOptions {
    */
   requiresApproval?: boolean;
   /**
+   * `false` keeps this state function (and its `readPageData` companion) away
+   * from remote assistance. Default: available.
+   */
+  remote?: boolean;
+  /**
    * Declare what the page displays so `setPageState` returns it. Omit it and
    * the result stays exactly `{ success, applied }`.
    *
@@ -232,6 +237,12 @@ interface ClientFunctionSettings {
    * in-app agent.
    */
   webmcp?: WebMCPToolMeta | false;
+  /**
+   * `false` keeps this function away from remote assistance: a human support
+   * agent never sees it in the page's function list and cannot run it. The AI
+   * agent still can. Default: available to an accepted remote session.
+   */
+  remote?: boolean;
 }
 
 /**

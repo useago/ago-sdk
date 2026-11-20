@@ -1,7 +1,8 @@
 import type { AgoClient } from "../../client/AgoClient";
-import type { AgoMessage, AgoUploadFile, Conversation } from "../../client/types";
+import type { AgoMessage, AgoUploadFile, Conversation, HandoffState } from "../../client/types";
 import { useOptionalAgoClient } from "../context/AgoContext";
 import { useConversation } from "./useConversation";
+import { useHandoff } from "./useHandoff";
 import { useMessages } from "./useMessages";
 
 export interface UseChatOptions {
@@ -40,6 +41,12 @@ export interface UseChatResult {
   startNewConversation: () => void;
   /** Refresh conversations list */
   refreshConversations: () => Promise<void>;
+  /**
+   * Live human takeover state of the current conversation: `null` while the
+   * AI answers. Staff replies and markers appear in `messages` (roles `staff`
+   * and `system`).
+   */
+  handoff: HandoffState | null;
 }
 
 /**
@@ -65,6 +72,8 @@ export function useChat(options: UseChatOptions = {}): UseChatResult {
     conversationId: options.conversationId,
   });
 
+  const { handoff } = useHandoff(messageResult.conversationId ?? null, { client });
+
   const conversationResult = useConversation({
     client,
     autoLoad: options.autoLoad,
@@ -84,5 +93,6 @@ export function useChat(options: UseChatOptions = {}): UseChatResult {
     selectConversation: conversationResult.selectConversation,
     startNewConversation: conversationResult.startNewConversation,
     refreshConversations: conversationResult.refreshConversations,
+    handoff,
   };
 }

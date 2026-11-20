@@ -1,3 +1,9 @@
+import { enableBrowserRemoteAssist } from "./remoteAssist/browserKit";
+
+// Browser entry: remote assistance gets its consent UI and screenshots. Kept by
+// bundlers through package.json `sideEffects`; `@useago/sdk/native` never calls it.
+enableBrowserRemoteAssist();
+
 // Main SDK exports
 export { AgoClient } from "./client/AgoClient";
 export type { ResumeGate } from "./client/AgoClient";
@@ -30,6 +36,7 @@ export type {
   ClientFunctionInvocation,
   ClientFunctionsMode,
   Conversation,
+  ConversationMarker,
   CreateTicketResult,
   TicketForm,
   FeedbackDetails,
@@ -41,6 +48,8 @@ export type {
   FunctionCallStatus,
   FunctionDefinition,
   FunctionSchema,
+  HandoffState,
+  MessageRole,
   MessageStatus,
   PaginatedResult,
   SendMessageOptions,
@@ -89,7 +98,25 @@ export type {
 } from "./state/ClientContextRegistry";
 
 export { ActivityLedger, DEFAULT_MAX_ACTIVITY_ENTRIES } from "./activity/ActivityLedger";
-export type { ActivityEntry, ActivityInput } from "./activity/ActivityLedger";
+export type { ActivityActor, ActivityEntry, ActivityInput } from "./activity/ActivityLedger";
+
+// Live human takeover
+export { parseConversationMarker } from "./handoff/handoff";
+
+// Remote assistance (visitor side)
+export type { RemoteAssistController } from "./remoteAssist/RemoteAssistController";
+export type {
+  RemoteAssistApprovalRequest,
+  RemoteAssistCommand,
+  RemoteAssistCommandEvent,
+  RemoteAssistCommandStatus,
+  RemoteAssistEndReason,
+  RemoteAssistOptions,
+  RemoteAssistScreenshotOptions,
+  RemoteAssistSession,
+  RemoteAssistSnapshot,
+  RemoteAssistState,
+} from "./remoteAssist/types";
 
 // JS error watcher (attached via `errorWatcher` in the config; usable standalone)
 export { ErrorWatcher, DEFAULT_MAX_ERRORS, DEFAULT_MAX_ERROR_AGE_MS } from "./errors/ErrorWatcher";

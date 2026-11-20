@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Planned as 1.17.0.
+
+### Added
+
+- **Human takeover.** Replies from a person on your team show with their name (`role: "staff"`, `staffName`), takeover events render as centered lines (`role: "system"`, parsed `marker`), and a status line says "Waiting for an agent" or "You are talking with Jane". Replies arrive live for the conversation on screen (the active conversation) while a person is involved, and the agent sees when they were read. New: `useHandoff` (React, Vue), `useChat().handoff`, `client.getHandoff()`, `client.setConversationVisible()`, and the `handoff:changed`, `conversation:updated` and `message:handoff-paused` events. In six languages.
+- **Remote assistance** (`remoteAssist`, off by default). During a takeover, the support agent can ask the visitor for help on the page. Once the visitor accepts, in that tab only, the agent sees the page and its state, calls your registered functions (approval rules apply), and, with `screenshot`, takes a screenshot of the viewport with password, card, one-time-code and `data-ago-mask` fields painted over. A banner with a Stop button stays up for the whole session. Keep a function from the agent with `remote: false`. Build your own prompt with `useRemoteAssist` (React, Vue) or `client.remoteAssist`. See [Human takeover and remote assistance](docs/general/human-takeover-and-remote-assist.md).
+- `ActivityActor` gains `"support"` for actions run by the support agent.
+
+### Changed
+
+- A message sent while a person has the conversation no longer ends in an empty assistant bubble or an empty-reply warning: `sendMessage` resolves with `handoffPaused: true` and `message:complete` does not fire.
+
 ## [1.16.0] - 2026-11-12
 
 ### Added

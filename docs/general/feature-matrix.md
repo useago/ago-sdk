@@ -26,6 +26,8 @@ idiomatic binding (hook / composable / service / component) is also provided.
 | Client context | ✅ `setContext` / `addDynamicContext` | ✅ `useAgoContext` | ✅ core API | ✅ core API |
 | Auto page context | ✅ `enableAutoPageContext()` | ✅ `pageContext="auto"` | ✅ core API | ✅ core API |
 | JS errors as context | ✅ `errorWatcher: true` / `reportError` | ✅ `errorWatcher` prop | ✅ plugin option | ✅ `provideAgo` option |
+| Human takeover (live agent replies) | ✅ `getHandoff` / `handoff:changed`, widget built in | ✅ `useHandoff`, `useChat().handoff` | ✅ `useHandoff`, `useChat().handoff` | ➖ core API |
+| Remote assistance | ✅ `remoteAssist` option, `client.remoteAssist` | ✅ `useRemoteAssist` | ✅ `useRemoteAssist` | ➖ core API |
 | Events (`on`/`off`/`once`/`waitFor`) | ✅ | ✅ (via client) | ✅ `useAgoEvents` | ✅ `messages$` Observables |
 | Streaming helpers / async generator | ✅ | ✅ | ✅ | ✅ |
 | Tool calls (form/confirm/reject) | ✅ | ✅ | ✅ | ✅ `AgoService` |

@@ -109,6 +109,37 @@ export default {
     "noSpeech": "Non è stato registrato alcun audio. Riprovi.",
     "transcriptionFailed": "Trascrizione non riuscita. Riprovi."
   },
+  "handoff": {
+    "waiting": "In attesa di un operatore",
+    "talkingWith": "Stai parlando con {name}",
+    "talkingWithAnonymous": "Stai parlando con un operatore",
+    "requested": "Hai chiesto di parlare con una persona",
+    "requestedUnavailable": "Hai chiesto di parlare con una persona. Il team al momento non è disponibile e ti risponderà il prima possibile.",
+    "accepted": "{name} si è unito alla conversazione",
+    "acceptedAnonymous": "Un operatore si è unito alla conversazione",
+    "transferred": "La conversazione è stata trasferita a {name}",
+    "transferredAnonymous": "La conversazione è stata trasferita a un altro operatore",
+    "ended": "L'operatore ha lasciato la conversazione",
+    "staffFallback": "Operatore"
+  },
+  "remoteAssist": {
+    "requestTitle": "{name} vorrebbe assisterti",
+    "requestTitleAnonymous": "Un operatore vorrebbe assisterti",
+    "requestIntro": "Se accetti, potrà:",
+    "canSeePage": "Vedere la pagina in cui ti trovi",
+    "canAct": "Eseguire azioni per te in questa app",
+    "canScreenshot": "Acquisire screenshot di questa pagina",
+    "requestFootnote": "Puoi interrompere in qualsiasi momento.",
+    "accept": "Accetta",
+    "decline": "Rifiuta",
+    "banner": "{name} ti sta assistendo",
+    "bannerAnonymous": "Un operatore ti sta assistendo",
+    "stop": "Interrompi",
+    "approvalTitle": "{name} vuole eseguire un'azione",
+    "approvalTitleAnonymous": "Un operatore vuole eseguire un'azione",
+    "allow": "Consenti",
+    "deny": "Nega"
+  },
   "common": {
     "stopButton": "Interrompi",
     "close": "Chiudi",

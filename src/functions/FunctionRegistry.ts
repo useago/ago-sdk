@@ -91,6 +91,7 @@ export class FunctionRegistry {
         maxResultBytes,
         requiresApproval,
         webmcp,
+        remote,
       } = nameOrDef;
       return this.register(name, h, {
         description,
@@ -98,6 +99,7 @@ export class FunctionRegistry {
         maxResultBytes,
         requiresApproval,
         webmcp,
+        remote,
       });
     }
 
@@ -114,9 +116,10 @@ export class FunctionRegistry {
       logger.warn(`Function "${name}" is being overwritten`);
     }
 
-    // maxResultBytes, requiresApproval and webmcp are SDK-side settings: keep
-    // them out of the schema sent to the backend.
-    const { maxResultBytes, requiresApproval, webmcp, ...schemaRest } = schema;
+    // maxResultBytes, requiresApproval, webmcp and remote are SDK-side
+    // settings: keep them out of the schema sent to the backend.
+    const { maxResultBytes, requiresApproval, webmcp, remote, ...schemaRest } =
+      schema;
     const fullSchema: ClientFunctionSchema = { ...schemaRest, name };
     this.functions.set(name, {
       schema: fullSchema,
@@ -124,6 +127,7 @@ export class FunctionRegistry {
       maxResultBytes,
       requiresApproval,
       webmcp,
+      remote,
     });
 
     const over = overBudget(fullSchema);

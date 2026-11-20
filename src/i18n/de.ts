@@ -109,6 +109,37 @@ export default {
     "noSpeech": "Es wurde kein Audio aufgenommen. Bitte versuchen Sie es erneut.",
     "transcriptionFailed": "Transkription fehlgeschlagen. Bitte versuchen Sie es erneut."
   },
+  "handoff": {
+    "waiting": "Warten auf einen Mitarbeiter",
+    "talkingWith": "Sie sprechen mit {name}",
+    "talkingWithAnonymous": "Sie sprechen mit einem Mitarbeiter",
+    "requested": "Sie haben darum gebeten, mit einer Person zu sprechen",
+    "requestedUnavailable": "Sie haben darum gebeten, mit einer Person zu sprechen. Das Team ist gerade nicht erreichbar und antwortet so bald wie möglich.",
+    "accepted": "{name} ist dem Gespräch beigetreten",
+    "acceptedAnonymous": "Ein Mitarbeiter ist dem Gespräch beigetreten",
+    "transferred": "Das Gespräch wurde an {name} übergeben",
+    "transferredAnonymous": "Das Gespräch wurde an einen anderen Mitarbeiter übergeben",
+    "ended": "Der Mitarbeiter hat das Gespräch verlassen",
+    "staffFallback": "Support-Mitarbeiter"
+  },
+  "remoteAssist": {
+    "requestTitle": "{name} möchte Sie unterstützen",
+    "requestTitleAnonymous": "Ein Support-Mitarbeiter möchte Sie unterstützen",
+    "requestIntro": "Wenn Sie zustimmen, kann er:",
+    "canSeePage": "Die Seite sehen, auf der Sie sich befinden",
+    "canAct": "Aktionen in dieser App für Sie ausführen",
+    "canScreenshot": "Screenshots dieser Seite aufnehmen",
+    "requestFootnote": "Sie können jederzeit beenden.",
+    "accept": "Annehmen",
+    "decline": "Ablehnen",
+    "banner": "{name} unterstützt Sie",
+    "bannerAnonymous": "Ein Support-Mitarbeiter unterstützt Sie",
+    "stop": "Beenden",
+    "approvalTitle": "{name} möchte eine Aktion ausführen",
+    "approvalTitleAnonymous": "Ein Support-Mitarbeiter möchte eine Aktion ausführen",
+    "allow": "Erlauben",
+    "deny": "Ablehnen"
+  },
   "common": {
     "stopButton": "Stoppen",
     "close": "Schließen",

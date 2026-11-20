@@ -198,6 +198,43 @@ export class HttpClient {
     return this.request<T>("POST", path, body, options);
   }
 
+  /** Make a PUT request with a JSON body. */
+  async put<T>(path: string, body?: unknown): Promise<T> {
+    return this.request<T>("PUT", path, body);
+  }
+
+  /**
+   * Open a long-lived GET stream (`text/event-stream`) and return the raw
+   * Response. A non-2xx answer throws an `AgoApiError` carrying the status, so
+   * callers can tell a refusal (4xx) from an outage; an abort is rethrown as-is.
+   */
+  async getStream(
+    path: string,
+    options?: { signal?: AbortSignal }
+  ): Promise<Response> {
+    const url = `${this.baseUrl}${path}`;
+    logger.debug("GET (stream)", url);
+    try {
+      const response = await this.doFetch(url, {
+        method: "GET",
+        headers: { ...this.headers, Accept: "text/event-stream" },
+        signal: options?.signal,
+      });
+      if (!response.ok) {
+        await this.handleErrorResponse(response);
+      }
+      return response;
+    } catch (error) {
+      if (error instanceof AgoApiError || isAbortError(error)) {
+        throw error;
+      }
+      throw new AgoNetworkError(
+        `Network error: ${error instanceof Error ? error.message : "Unknown error"}.`,
+        error instanceof Error ? error : undefined
+      );
+    }
+  }
+
   /**
    * Make a POST request and return the raw Response (for streaming).
    *

@@ -87,7 +87,14 @@ export function createMockClient(
     submitToolCallForm: async () => ({ status: "completed" }),
     confirmToolCall: async () => undefined,
     rejectToolCall: async () => undefined,
-    getConfig: async () => ({ permissions: [], proactive: { enabled: false } }),
+    getConfig: async () => ({
+      permissions: [],
+      proactive: { enabled: false },
+      liveHandoff: { enabled: false },
+      remoteAssist: { enabled: false },
+    }),
+    setConversationVisible: () => undefined,
+    getHandoff: () => null,
     createTicket: async () => ({
       id: "mock-ticket-1",
       url: "https://example.test/tickets/mock-ticket-1",
@@ -174,6 +181,20 @@ export function createMockClient(
 
   // Plain value properties (not wrapped)
   mock.proactive = null;
+  // An idle remote-assistance controller: no session ever starts on the mock.
+  const idleSnapshot = { state: "idle", session: null, pendingApproval: null, accepting: false };
+  mock.remoteAssist = {
+    isEnabled: () => false,
+    getState: () => "idle",
+    getSnapshot: () => idleSnapshot,
+    subscribe: () => () => undefined,
+    accept: async () => false,
+    decline: () => undefined,
+    stop: () => undefined,
+    approve: () => undefined,
+    reject: () => undefined,
+    isAccepting: () => false,
+  };
 
   // Test helpers (not recorded)
   mock.__calls = calls;

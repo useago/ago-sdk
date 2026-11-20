@@ -44,6 +44,14 @@ const final = await client.waitFor("message:complete", { timeout: 10_000 });
 | `form:submitted` | `{ name, values, result }`: a form collector submitted successfully; `result` is the submit response (the third-party API's answer) |
 | `form:error` | `{ name, values, error }`: a form collector submit failed at the network/server level (HTTP non-2xx or a thrown handler/fetch). Validation pre-checks (missing fields, no submit target) do not fire this |
 | `connection:status` | `{ connected }` |
+| `handoff:changed` | `{ conversationId, handoff }`: a human support agent was requested (`state: "waiting"`), took over (`"human"`, with `agentName`), or handed back (`handoff: null`). See [Human takeover](human-takeover-and-remote-assist.md) |
+| `message:handoff-paused` | `{ conversationId, handoff }`: the message was saved for the human agent and the AI did not answer. `message:complete` does not fire and `sendMessage` resolves with an empty message flagged `handoffPaused` |
+| `conversation:updated` | `Conversation`: the conversation was refetched because the support agent replied or the handoff changed |
+| `remoteAssist:requested` | `RemoteAssistSession`: the support agent asks for remote assistance; show a consent prompt (the built-in one does) |
+| `remoteAssist:started` | `RemoteAssistSession`: the visitor accepted in this tab |
+| `remoteAssist:ended` | `{ sessionId, reason }`: `reason` is `declined`, `stopped`, `ended`, `expired`, `handoff_ended` or `conversation_changed` |
+| `remoteAssist:command` | `{ sessionId, command, status, error? }`: a command (`command.kind` is `function` or `screenshot`) from the support agent changed status (`running`, `awaiting_approval`, `done`, `failed`, `rejected`) |
+| `remoteAssist:approval` | `{ sessionId, commandId, functionName, arguments, agentName }`: a gated function waits for the visitor; answer with `client.remoteAssist.approve(commandId)` or `reject(commandId)` |
 
 `waitFor` rejects if the optional `timeout` (ms) elapses first.
 

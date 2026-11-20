@@ -268,6 +268,27 @@ function OrderCart({
       </div>
 
       <footer className="gl-order-cart-footer">
+        {/* data-ago-mask: painted over in the screenshots a support agent takes. */}
+        <label className="gl-order-total-detail" style={{ alignItems: 'center', gap: '12px' }}>
+          <span>Téléphone pour le retrait</span>
+          <input
+            type="tel"
+            name="pickupPhone"
+            autoComplete="tel"
+            placeholder="06 12 34 56 78"
+            data-ago-mask
+            style={{
+              flex: '0 1 150px',
+              minWidth: 0,
+              font: 'inherit',
+              padding: '6px 10px',
+              border: '1px solid var(--border-strong)',
+              borderRadius: 'var(--r-md)',
+              background: 'var(--surface)',
+              color: 'var(--text-body)',
+            }}
+          />
+        </label>
         <div className="gl-order-total-detail">
           <span>Panier enregistré</span>
           <span>{cartTotal.toFixed(2).replace('.', ',')} €</span>

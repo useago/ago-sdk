@@ -64,6 +64,12 @@ export interface SSEHandlerCallbacks {
     waitingToolCallIds: string[];
   }) => void;
   onComplete?: (message: AgoMessage) => void;
+  /**
+   * The visitor wrote while a human owns the conversation: the backend saved
+   * the message and closed the stream with no answer. Fires instead of
+   * {@link onComplete}, which would otherwise land a blank assistant bubble.
+   */
+  onHandoffPaused?: (data: { conversationId: string }) => void;
   onError?: (error: Error) => void;
 }
 
@@ -92,6 +98,7 @@ export class SSEHandler {
   private isFirstChunk = true;
   private answerCompleteEmitted = false;
   private waitingClientEmitted = false;
+  private handoffPaused = false;
   // Client-function invocations already dispatched this stream: name+arguments
   // -> the invocation ids seen for that shape. The backend emits the same call
   // under two SSE shapes (see handleChunk), so this guards a handler from
@@ -252,6 +259,10 @@ export class SSEHandler {
         conversationId: this.message.conversationId,
         title: data.title,
       });
+    }
+
+    if (data.handoff_paused) {
+      this.handoffPaused = true;
     }
 
     // Handle content
@@ -431,6 +442,13 @@ export class SSEHandler {
 
   private buildFinalMessage(): AgoMessage {
     const message = this.buildMessage();
+    if (this.handoffPaused) {
+      message.handoffPaused = true;
+      this.callbacks.onHandoffPaused?.({
+        conversationId: message.conversationId,
+      });
+      return message;
+    }
     // A paused turn is not complete: onComplete stays silent for this stream and
     // fires at the end of the resumed one, so one logical turn completes once.
     if (message.status !== "WAITING_CLIENT") {

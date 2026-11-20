@@ -91,3 +91,13 @@ review (plan: fix DX audit findings).
   (`src/devtools/initDevPanel.ts:304`) while the widget uses `2147483000`, so
   the diagnostic tool is hidden behind the thing it should diagnose.
 - **Effort:** M.
+
+## Angular: human takeover and remote assistance (P2)
+
+- **What:** Angular has no equivalent of `useHandoff` and `useRemoteAssist`
+  (React) or the Vue composables. Add signals-based services over
+  `client.getHandoff` + `handoff:changed` and `client.remoteAssist.subscribe`
+  / `getSnapshot`, and handle `message:handoff-paused` and
+  `conversation:updated` in the Angular messages service.
+- **Why:** Angular apps get the takeover only through the vanilla widget today.
+- **Effort:** S.
