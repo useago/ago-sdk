@@ -413,6 +413,7 @@ export class AgoClient {
           );
           return Object.keys(state).length > 0 ? state : null;
         },
+        getErrors: () => this.errorWatcher?.getErrors() ?? null,
         onFunctionsChanged: (listener) => this.functionRegistry.onChange(listener),
         onContextChanged: (listener) => {
           this.eventEmitter.on("context:changed", listener);

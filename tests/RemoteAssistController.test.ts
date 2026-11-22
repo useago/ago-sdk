@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ActivityInput } from "../src/activity/ActivityLedger";
 import { AgoApiError } from "../src/client/errors";
+import type { CapturedError } from "../src/errors/ErrorWatcher";
 import { FunctionRegistry } from "../src/functions/FunctionRegistry";
 import {
   GRANT_STORAGE_KEY,
@@ -34,7 +35,13 @@ const flush = async (times = 20) => {
 };
 
 function setup(
-  options: { config?: boolean | RemoteAssistOptions; storage?: Storage; approval?: boolean; serverEnabled?: boolean } = {},
+  options: {
+    config?: boolean | RemoteAssistOptions;
+    storage?: Storage;
+    approval?: boolean;
+    serverEnabled?: boolean;
+    errors?: CapturedError[];
+  } = {},
 ) {
   const registry = new FunctionRegistry();
   const storage = options.storage ?? memoryStorage();
@@ -78,6 +85,8 @@ function setup(
     }),
   };
   const capture = vi.fn(async () => new Blob(["png"], { type: "image/png" }));
+  const contextListeners = new Set<() => void>();
+  const contextChanged = () => contextListeners.forEach((listener) => listener());
   const deps: RemoteAssistDeps = {
     http,
     emit: (event, data) => events.push({ event, data }),
@@ -91,8 +100,12 @@ function setup(
       options.approval === true || registry.get(invocation.functionName)?.requiresApproval === true,
     recordActivity: (entry) => activity.push(entry),
     getPageState: () => ({ status: "pending" }),
+    getErrors: () => options.errors ?? null,
     onFunctionsChanged: (listener) => registry.onChange(listener),
-    onContextChanged: () => () => undefined,
+    onContextChanged: (listener) => {
+      contextListeners.add(listener);
+      return () => contextListeners.delete(listener);
+    },
     capture,
     storage: () => storage,
   };
@@ -101,7 +114,7 @@ function setup(
     requests
       .filter((r) => r.path.endsWith("/result"))
       .map((r) => ({ id: r.path.split("/").at(-2), ...(r.body as object) }));
-  return { controller, registry, storage, requests, events, activity, server, http, capture, results };
+  return { controller, registry, storage, requests, events, activity, server, http, capture, results, contextChanged };
 }
 
 function fnCommand(id: string, seq: number, name: string, args: Record<string, unknown> = {}): RemoteAssistCommand {
@@ -366,6 +379,68 @@ describe("RemoteAssistController", () => {
       state: { status: "pending" },
       page: { url: expect.any(String), title: expect.any(String) },
     });
+  });
+
+  it("sends the recent page errors only when the host enabled the error watcher", async () => {
+    const off = setup();
+    await acceptSession(off);
+    expect((off.requests.find((r) => r.path.endsWith("/accept"))!.body as { errors: unknown }).errors).toBeNull();
+
+    const on = setup({
+      errors: [
+        {
+          type: "unhandledrejection",
+          message: "PDF export failed",
+          source: "https://app.example.com/app.js",
+          line: 42,
+          stack: "x".repeat(5_000),
+          route: "/invoices",
+          firstAt: Date.UTC(2026, 0, 1, 10, 0, 0),
+          lastAt: Date.UTC(2026, 0, 1, 10, 0, 5),
+          count: 2,
+        },
+      ],
+    });
+    await acceptSession(on);
+    const { errors } = on.requests.find((r) => r.path.endsWith("/accept"))!.body as { errors: Array<Record<string, unknown>> };
+    expect(errors).toEqual([
+      {
+        type: "unhandledrejection",
+        message: "PDF export failed",
+        source: "https://app.example.com/app.js",
+        line: 42,
+        col: null,
+        stack: "x".repeat(4_000),
+        route: "/invoices",
+        first_at: "2026-01-01T10:00:00.000Z",
+        last_at: "2026-01-01T10:00:05.000Z",
+        count: 2,
+      },
+    ]);
+  });
+
+  it("tells the agent about a new error, not about a known one firing again", async () => {
+    vi.useFakeTimers();
+    const pageError: CapturedError = { type: "console", message: "poll failed", route: "/", firstAt: 1_000, lastAt: 1_000, count: 1 };
+    const errors = [pageError];
+    const t = setup({ errors });
+    await acceptSession(t);
+    const updates = () => t.requests.filter((r) => r.path.endsWith("/context")).length;
+    const change = async () => {
+      t.contextChanged();
+      await vi.advanceTimersByTimeAsync(600);
+    };
+
+    await change();
+    expect(updates()).toBe(1);
+
+    errors[0] = { ...pageError, lastAt: 31_000, count: 2 };
+    await change();
+    expect(updates()).toBe(1);
+
+    errors.push({ ...pageError, message: "save failed", firstAt: 40_000, lastAt: 40_000 });
+    await change();
+    expect(updates()).toBe(2);
   });
 
   it("needs both opt-ins: the host config and the workspace setting", async () => {

@@ -3055,7 +3055,10 @@ they accepted, the agent can:
   you expose to the AI;
 - call the [functions](functions-and-context.md) you registered, exactly as the
   AI can;
-- take a screenshot of the visible part of the page, if you allowed it.
+- take a screenshot of the visible part of the page, if you allowed it;
+- see the page's recent JavaScript errors, if you turned on
+  [`errorWatcher`](functions-and-context.md#javascript-errors) for the AI. The agent only sees
+  them once the visitor accepts.
 
 The agent cannot click, type, or read the DOM. A banner with the agent's name
 and a Stop button stays at the top of the page for the whole session. Stop
@@ -3072,6 +3075,7 @@ Both are required:
 const client = new AgoClient({
   baseUrl: "https://YOUR-DOMAIN.api.useago.com",
   remoteAssist: true, // functions and page state only
+  // errorWatcher: true, // the agent also sees the page's recent errors
   // remoteAssist: { screenshot: true },
   // remoteAssist: { screenshot: { mask: [".iban", "#ssn"] } },
 });

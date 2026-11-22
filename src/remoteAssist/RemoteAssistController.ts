@@ -6,6 +6,7 @@ import type {
   ClientFunctionInvocation,
   HandoffState,
 } from "../client/types";
+import type { CapturedError } from "../errors/ErrorWatcher";
 import type { ClientFunctionSchema, RegisteredFunction } from "../functions/types";
 import { logger } from "../utils/logger";
 import { capState, pageUrl } from "./pageContext";
@@ -28,6 +29,8 @@ const ROUTE_POLL_MS = 1_000;
 /** Claims per run: a burst of commands is drained, a misbehaving server is not looped on. */
 const MAX_CLAIM_ROUNDS = 10;
 const API = "/api/sdk/v1";
+const MAX_ERRORS = 20;
+const MAX_ERROR_STACK_CHARS = 4_000;
 
 type RemoteAssistEvent =
   | "remoteAssist:requested"
@@ -76,6 +79,8 @@ export interface RemoteAssistDeps {
   requiresApproval: (invocation: ClientFunctionInvocation) => boolean;
   recordActivity: (entry: ActivityInput) => void;
   getPageState: () => unknown;
+  /** Recent page errors the AI agent already receives; `null` when the error watcher is off. */
+  getErrors?: () => CapturedError[] | null;
   onFunctionsChanged: (listener: () => void) => () => void;
   onContextChanged: (listener: () => void) => () => void;
   capture: (options: {
@@ -115,6 +120,22 @@ function toDate(value: string | null | undefined): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+/**
+ * What a context update would change for the agent. A known error firing
+ * again only moves its `count` and `last_at`, which is not worth a request.
+ */
+function contextSignature(body: Record<string, unknown>): string | null {
+  const errors = body.errors as Array<Record<string, unknown>> | null;
+  try {
+    return JSON.stringify({
+      ...body,
+      errors: errors?.map(({ count: _count, last_at: _lastAt, ...identity }) => identity) ?? null,
+    });
+  } catch {
+    return null;
+  }
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -143,6 +164,8 @@ export class RemoteAssistController {
   private refreshAgain = false;
   private expiryTimer: ReturnType<typeof setTimeout> | null = null;
   private contextTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Signature of the last context the server accepted for the current session. */
+  private sentContext: string | null = null;
   private stopReporting: (() => void) | null = null;
   private lastHref = "";
   private ui: RemoteAssistUi | null = null;
@@ -665,21 +688,48 @@ export class RemoteAssistController {
         title: typeof document !== "undefined" ? document.title : "",
       },
       state,
+      errors: this.recentErrors(),
     };
   }
 
-  private async pushContext(): Promise<void> {
+  private recentErrors(): Array<Record<string, unknown>> | null {
+    let errors: CapturedError[] | null = null;
+    try {
+      errors = this.deps.getErrors?.() ?? null;
+    } catch (error) {
+      logger.warn("Reading the page errors for remote assistance failed:", error);
+    }
+    if (!errors) return null;
+    return errors.slice(-MAX_ERRORS).map((entry) => ({
+      type: entry.type,
+      message: entry.message,
+      source: entry.source ?? null,
+      line: entry.line ?? null,
+      col: entry.col ?? null,
+      stack: entry.stack ? entry.stack.slice(0, MAX_ERROR_STACK_CHARS) : null,
+      route: entry.route,
+      first_at: new Date(entry.firstAt).toISOString(),
+      last_at: new Date(entry.lastAt).toISOString(),
+      count: entry.count,
+    }));
+  }
+
+  private async pushContext({ onlyIfChanged = false } = {}): Promise<void> {
     const sessionId = this.grantedId;
     if (!sessionId || !this.isGranted(sessionId, this.epoch)) return;
     if (this.contextTimer) {
       clearTimeout(this.contextTimer);
       this.contextTimer = null;
     }
+    const body = this.contextBody();
+    const signature = contextSignature(body);
+    if (onlyIfChanged && signature !== null && signature === this.sentContext) return;
     try {
       await this.deps.http.put(
         `${API}/remote-assist/sessions/${encodeURIComponent(sessionId)}/context`,
-        this.contextBody(),
+        body,
       );
+      this.sentContext = signature;
     } catch (error) {
       if (error instanceof AgoApiError && error.statusCode === 409) void this.refresh();
       else logger.warn("Sending the page context failed:", error);
@@ -691,7 +741,7 @@ export class RemoteAssistController {
     if (this.contextTimer) clearTimeout(this.contextTimer);
     this.contextTimer = setTimeout(() => {
       this.contextTimer = null;
-      void this.pushContext();
+      void this.pushContext({ onlyIfChanged: true });
     }, CONTEXT_DEBOUNCE_MS);
   }
 
@@ -731,6 +781,7 @@ export class RemoteAssistController {
     if (this.contextTimer) clearTimeout(this.contextTimer);
     this.expiryTimer = null;
     this.contextTimer = null;
+    this.sentContext = null;
     this.stopReporting?.();
     this.stopReporting = null;
   }
