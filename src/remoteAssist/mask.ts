@@ -22,11 +22,14 @@ const MASK_COLOR = "#1f2328";
 const REPLACED_ELEMENTS = new Set(["IMG", "VIDEO", "CANVAS", "IFRAME", "SVG", "OBJECT", "EMBED", "PICTURE"]);
 
 /**
- * One selector matching everything a screenshot must hide. A configured
- * selector that does not parse throws: skipping it would silently leave the
- * field it was meant to hide in the image.
+ * One selector matching everything a screenshot (or the live view) must hide.
+ * A configured selector that does not parse throws: skipping it would
+ * silently leave the field it was meant to hide in the image.
  */
-export function maskSelector(extra: readonly string[] = []): string {
+export function maskSelector(
+  extra: readonly string[] = [],
+  option = "remoteAssist.screenshot.mask",
+): string {
   const selectors = [
     ...ALWAYS_MASKED,
     ...SENSITIVE_AUTOCOMPLETE.map((token) => `[autocomplete~="${token}" i]`),
@@ -38,7 +41,7 @@ export function maskSelector(extra: readonly string[] = []): string {
       document.createDocumentFragment().querySelector(trimmed);
     } catch {
       throw new AgoError(
-        `Invalid screenshot mask selector "${trimmed}". Fix remoteAssist.screenshot.mask.`,
+        `Invalid mask selector "${trimmed}". Fix ${option}.`,
         "remote_assist_invalid_mask",
       );
     }

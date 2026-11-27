@@ -99,6 +99,42 @@ export function matchRoute(
     .sort((a, b) => b.path.length - a.path.length)[0];
 }
 
+/**
+ * The route a pathname IS (exact path, then `:param` pattern), with its
+ * decoded params. Unlike {@link matchRoute}, never a prefix match: a link to
+ * `/orders/42/edit` is not the `/orders` page.
+ */
+export function matchRoutePath(
+  pathname: string,
+  routes: NavRoute[]
+): { route: NavRoute; params: Record<string, string> } | undefined {
+  const exact = routes.find((r) => r.path === pathname);
+  if (exact) return { route: exact, params: {} };
+
+  for (const route of routes) {
+    if (!route.path.includes(":")) continue;
+    const pattern =
+      "^" +
+      route.path
+        .split("/")
+        .map((seg) => (seg.startsWith(":") ? "([^/]+)" : escapeRegExp(seg)))
+        .join("/") +
+      "/?$";
+    const match = new RegExp(pattern).exec(pathname);
+    if (!match) continue;
+    const params: Record<string, string> = {};
+    routeParamNames(route.path).forEach((name, i) => {
+      try {
+        params[name] = decodeURIComponent(match[i + 1]);
+      } catch {
+        params[name] = match[i + 1];
+      }
+    });
+    return { route, params };
+  }
+  return undefined;
+}
+
 /** Declared sections, in first-seen order. Empty when no route declares one. */
 export function routeSections(routes: NavRoute[]): string[] {
   return [

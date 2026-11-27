@@ -129,6 +129,7 @@ export default {
     "canSeePage": "Voir la page sur laquelle vous êtes",
     "canAct": "Effectuer des actions pour vous dans cette application",
     "canScreenshot": "Prendre des captures d'écran de cette page",
+    "canWatchLive": "Voir cette page en direct et y cliquer pour vous",
     "requestFootnote": "Vous pouvez arrêter à tout moment.",
     "accept": "Accepter",
     "decline": "Refuser",

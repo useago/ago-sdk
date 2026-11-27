@@ -1,4 +1,5 @@
 import type { RemoteAssistUi, RemoteAssistUiActions } from "./RemoteAssistController";
+import { ROOT_ID } from "./kit";
 import type { RemoteAssistSnapshot } from "./types";
 
 /** Texts of the built-in remote-assistance UI (see `UiCatalog.remoteAssist`). */
@@ -9,6 +10,7 @@ export interface RemoteAssistLabels {
   canSeePage: string;
   canAct: string;
   canScreenshot: string;
+  canWatchLive: string;
   requestFootnote: string;
   accept: string;
   decline: string;
@@ -21,7 +23,6 @@ export interface RemoteAssistLabels {
   deny: string;
 }
 
-export const ROOT_ID = "ago-remote-assist";
 const FONT = "var(--ago-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif)";
 const BRAND = "var(--ago-brand-color, #03182f)";
 const BRAND_TEXT = "var(--ago-brand-text-color, #fff)";
@@ -151,6 +152,7 @@ export function createRemoteAssistUi(
     body.appendChild(el("p", { margin: "0 0 6px" }, labels.requestIntro));
     const list = el("ul", { margin: "0 0 8px", padding: "0 0 0 20px" });
     const items = [labels.canSeePage, labels.canAct];
+    if (session.liveView) items.push(labels.canWatchLive);
     if (session.screenshot) items.push(labels.canScreenshot);
     for (const item of items) list.appendChild(el("li", { margin: "2px 0" }, item));
     body.appendChild(list);

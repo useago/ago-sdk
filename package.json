@@ -1,6 +1,6 @@
 {
   "name": "@useago/sdk",
-  "version": "1.16.0",
+  "version": "1.17.0",
   "description": "Create In-APP AI agents that answers question and performs actions. Works with React, Vue, Angular and vanilla JS/TS.",
   "type": "module",
   "sideEffects": [
@@ -176,6 +176,7 @@
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.0",
+    "@rrweb/record": "2.2.2",
     "@types/node": "^20.0.0",
     "@types/react": "^18.0.0",
     "@types/react-dom": "^18.0.0",

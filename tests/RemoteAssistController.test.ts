@@ -3,6 +3,7 @@ import type { ActivityInput } from "../src/activity/ActivityLedger";
 import { AgoApiError } from "../src/client/errors";
 import type { CapturedError } from "../src/errors/ErrorWatcher";
 import { FunctionRegistry } from "../src/functions/FunctionRegistry";
+import type { NavRoute } from "../src/functions/navigation";
 import {
   GRANT_STORAGE_KEY,
   RemoteAssistController,
@@ -41,6 +42,8 @@ function setup(
     approval?: boolean;
     serverEnabled?: boolean;
     errors?: CapturedError[];
+    canRecord?: boolean;
+    routes?: NavRoute[];
   } = {},
 ) {
   const registry = new FunctionRegistry();
@@ -52,7 +55,32 @@ function setup(
     session: null as null | { id: string; status: string; agent_name?: string | null; expires_at?: string | null },
     queue: [] as RemoteAssistCommand[][],
     failEnd: false,
+    /** Status the next `/live` posts fail with. */
+    liveStatus: null as null | number,
+    /** While set, `/live` posts wait for it. */
+    liveGate: null as null | Promise<void>,
   };
+  const recorder = {
+    mask: null as readonly string[] | null,
+    emit: (_event: unknown): void => undefined,
+    stopped: 0,
+    snapshots: 0,
+    nodes: new Map<number, Node>(),
+  };
+  const record = vi.fn(async (emit: (event: unknown) => void, mask: readonly string[]) => {
+    recorder.mask = mask;
+    recorder.emit = emit;
+    emit({ type: 4, timestamp: 1 });
+    emit({ type: 2, timestamp: 1 });
+    return {
+      stop: () => void recorder.stopped++,
+      getNode: (id: number) => recorder.nodes.get(id) ?? null,
+      takeFullSnapshot: () => {
+        recorder.snapshots++;
+        emit({ type: 2, timestamp: 2 });
+      },
+    };
+  });
   const http: RemoteAssistDeps["http"] = {
     get: vi.fn(async (path: string) => {
       requests.push({ method: "GET", path });
@@ -81,6 +109,10 @@ function setup(
     }),
     postFormData: vi.fn(async (path: string, body: FormData) => {
       requests.push({ method: "POST", path, body });
+      if (path.endsWith("/live")) {
+        await server.liveGate;
+        if (server.liveStatus) throw new AgoApiError("refused", "refused", server.liveStatus, "conflict");
+      }
       return new Response("{}");
     }),
   };
@@ -108,13 +140,20 @@ function setup(
     },
     capture,
     storage: () => storage,
+    canRecord: () => options.canRecord ?? true,
+    record,
+    getRoutes: () => options.routes ?? null,
   };
   const controller = new RemoteAssistController(deps, options.config ?? { ui: false, screenshot: true });
   const results = () =>
     requests
       .filter((r) => r.path.endsWith("/result"))
       .map((r) => ({ id: r.path.split("/").at(-2), ...(r.body as object) }));
-  return { controller, registry, storage, requests, events, activity, server, http, capture, results, contextChanged };
+  const liveBatches = () => requests.filter((r) => r.path.endsWith("/s1/live"));
+  return {
+    controller, registry, storage, requests, events, activity, server, http, capture, results, contextChanged,
+    recorder, record, liveBatches,
+  };
 }
 
 function fnCommand(id: string, seq: number, name: string, args: Record<string, unknown> = {}): RemoteAssistCommand {
@@ -460,5 +499,287 @@ describe("RemoteAssistController", () => {
     const client = new AgoClient({ baseUrl: "https://api.test", remoteAssist: true });
     expect(client.remoteAssist.isEnabled()).toBe(true);
     client.destroy();
+  });
+});
+
+describe("RemoteAssistController live view", () => {
+  const LIVE = { ui: false, liveView: { mask: [".iban"] } } as const;
+  const noop = { type: "object" as const, properties: {} };
+
+  const readBlob = (blob: Blob) =>
+    new Promise<Uint8Array>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer));
+      reader.readAsArrayBuffer(blob);
+    });
+
+  async function decode(request: { body?: unknown }): Promise<unknown[]> {
+    const bytes = await readBlob((request.body as FormData).get("file") as Blob);
+    if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+      const stream = new Response(bytes).body!.pipeThrough(new DecompressionStream("gzip"));
+      return JSON.parse(await new Response(stream).text());
+    }
+    return JSON.parse(new TextDecoder().decode(bytes));
+  }
+
+  /** Fake timers, and no gzip so batches are encoded without real async I/O. */
+  function plainTimers() {
+    vi.stubGlobal("CompressionStream", undefined);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    document.body.innerHTML = "";
+  });
+
+  function clickCommand(id: string, node: number, expectPreview: unknown): RemoteAssistCommand {
+    const fn = (expectPreview as { function?: string })?.function ?? null;
+    return { id, seq: 1, kind: "click", function: fn, arguments: { node, expect: expectPreview } };
+  }
+
+  it("records only with live view on, once the visitor accepted, and says so in the context", async () => {
+    const t = setup({ config: LIVE });
+    t.server.session = { id: "s1", status: "requested", agent_name: "Jane" };
+    await t.controller.refresh("conv-1");
+    expect(t.controller.getSnapshot().session?.liveView).toBe(true);
+    expect(t.record).not.toHaveBeenCalled();
+    await t.controller.accept();
+    await flush();
+    expect(t.record).toHaveBeenCalledTimes(1);
+    expect(t.recorder.mask).toEqual([".iban"]);
+    expect((t.requests.find((r) => r.path.endsWith("/accept"))!.body as { live_view: boolean }).live_view).toBe(true);
+
+    for (const off of [setup({ config: { ui: false } }), setup({ config: LIVE, canRecord: false })]) {
+      await acceptSession(off);
+      expect(off.record).not.toHaveBeenCalled();
+      expect((off.requests.find((r) => r.path.endsWith("/accept"))!.body as { live_view: boolean }).live_view).toBe(false);
+      expect(off.controller.getSnapshot().session?.liveView).toBe(false);
+    }
+  });
+
+  it("sends events in batches every 250 ms, never two requests in flight", async () => {
+    plainTimers();
+    const t = setup({ config: LIVE });
+    let release!: () => void;
+    t.server.liveGate = new Promise((resolve) => (release = resolve));
+    await acceptSession(t);
+    expect(t.liveBatches()).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(250);
+    expect(t.liveBatches()).toHaveLength(1);
+    t.recorder.emit({ type: 3, timestamp: 5 });
+    t.recorder.emit({ type: 3, timestamp: 6 });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(t.liveBatches()).toHaveLength(1);
+
+    t.server.liveGate = null;
+    release();
+    await vi.advanceTimersByTimeAsync(250);
+    expect(t.liveBatches()).toHaveLength(2);
+    vi.useRealTimers();
+    expect(await decode(t.liveBatches()[0])).toEqual([{ type: 4, timestamp: 1 }, { type: 2, timestamp: 1 }]);
+    expect(await decode(t.liveBatches()[1])).toEqual([{ type: 3, timestamp: 5 }, { type: 3, timestamp: 6 }]);
+  });
+
+  it("gzips the batch when the browser can", async () => {
+    const t = setup({ config: LIVE });
+    await acceptSession(t);
+    await vi.waitFor(() => expect(t.liveBatches()).toHaveLength(1));
+    const bytes = await readBlob((t.liveBatches()[0].body as FormData).get("file") as Blob);
+    expect([bytes[0], bytes[1]]).toEqual([0x1f, 0x8b]);
+    expect(await decode(t.liveBatches()[0])).toHaveLength(2);
+  });
+
+  it("takes a full snapshot every 60 s so a late viewer can rebuild the page", async () => {
+    plainTimers();
+    const t = setup({ config: LIVE });
+    await acceptSession(t);
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(t.recorder.snapshots).toBe(0);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(t.recorder.snapshots).toBe(1);
+  });
+
+  it("stops recording on every end path and sends nothing recorded afterwards", async () => {
+    plainTimers();
+    const ends: Array<(t: ReturnType<typeof setup>) => void> = [
+      (t) => t.controller.stop(),
+      (t) => t.controller.destroy(),
+      (t) => t.controller.onActiveConversationChange("conv-2"),
+      (t) => t.controller.configure({ ui: false }),
+    ];
+    for (const end of ends) {
+      const t = setup({ config: LIVE });
+      await acceptSession(t);
+      await vi.advanceTimersByTimeAsync(250);
+      const sent = t.liveBatches().length;
+      end(t);
+      expect(t.recorder.stopped).toBe(1);
+      t.recorder.emit({ type: 3, timestamp: 9 });
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(t.liveBatches()).toHaveLength(sent);
+    }
+  });
+
+  it("turning live view off mid-session tells the agent", async () => {
+    const t = setup({ config: LIVE });
+    await acceptSession(t);
+    t.controller.configure({ ui: false });
+    await flush();
+    expect(t.controller.getState()).toBe("active");
+    expect(t.recorder.stopped).toBe(1);
+    expect(t.requests.filter((r) => r.path.endsWith("/context")).at(-1)?.body).toMatchObject({ live_view: false });
+  });
+
+  it("a 409 stops the recording and re-reads the session", async () => {
+    plainTimers();
+    const t = setup({ config: LIVE });
+    t.server.liveStatus = 409;
+    await acceptSession(t);
+    const reads = t.requests.filter((r) => r.method === "GET").length;
+    await vi.advanceTimersByTimeAsync(250);
+    expect(t.recorder.stopped).toBe(1);
+    expect(t.requests.filter((r) => r.method === "GET").length).toBeGreaterThan(reads);
+    t.recorder.emit({ type: 3, timestamp: 9 });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(t.liveBatches()).toHaveLength(1);
+  });
+
+  it("a 413 stops the live view for the session and tells the agent; a 503 is retried", async () => {
+    plainTimers();
+    const t = setup({ config: LIVE });
+    t.server.liveStatus = 503;
+    await acceptSession(t);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(t.recorder.stopped).toBe(0);
+    t.server.liveStatus = 413;
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(t.liveBatches()).toHaveLength(2);
+    expect(t.recorder.stopped).toBe(1);
+    expect(t.requests.filter((r) => r.path.endsWith("/context")).at(-1)?.body).toMatchObject({ live_view: false });
+  });
+
+  it("runs the function a clicked element is declared for, typed by its schema", async () => {
+    const t = setup({ config: LIVE });
+    const handler = vi.fn(() => ({ shown: 12 }));
+    t.registry.register({
+      name: "setPageState",
+      description: "d",
+      parameters: { type: "object", properties: { page: { type: "integer" } } },
+      handler,
+    });
+    document.body.innerHTML = `<button data-ago-state="page" data-ago-value="3"><span>3</span></button>`;
+    t.recorder.nodes.set(7, document.querySelector("span")!);
+    t.server.queue.push([clickCommand("c1", 7, { function: "setPageState", arguments: { page: "3" } })]);
+
+    await acceptSession(t);
+
+    expect(handler).toHaveBeenCalledWith({ page: 3 });
+    expect(t.results()).toEqual([
+      {
+        id: "c1",
+        status: "done",
+        result: { function: "setPageState", arguments: { page: 3 }, result: { shown: 12 } },
+        error: null,
+      },
+    ]);
+    expect(t.activity[0]).toMatchObject({ actor: "support", name: "support.setPageState", data: { arguments: { page: 3 } } });
+  });
+
+  it("maps a clicked link to navigateToPage through the registered routes", async () => {
+    const t = setup({ config: LIVE, routes: [{ name: "order", path: "/orders/:id", description: "d" }] });
+    const navigate = vi.fn();
+    t.registry.register({ name: "navigateToPage", description: "d", parameters: noop, handler: navigate });
+    document.body.innerHTML = `<a href="/orders/42">Order 42</a>`;
+    t.recorder.nodes.set(3, document.querySelector("a")!);
+    t.server.queue.push([clickCommand("c1", 3, { function: "navigateToPage", href: "/orders/42" })]);
+    await acceptSession(t);
+    expect(navigate).toHaveBeenCalledWith({ page: "order", id: "42" });
+  });
+
+  it("runs nothing when the page changed, the element is gone, or live view is off", async () => {
+    const t = setup({ config: LIVE });
+    const handler = vi.fn();
+    t.registry.register({ name: "archive", description: "d", parameters: noop, handler });
+    document.body.innerHTML = `<button data-ago-action="archive" data-ago-args='{"id":2}'>Archive</button>`;
+    t.recorder.nodes.set(1, document.querySelector("button")!);
+    t.recorder.nodes.set(2, document.createElement("button"));
+    t.server.queue.push([
+      clickCommand("c1", 1, { function: "archive", arguments: { id: 1 } }),
+      clickCommand("c2", 2, { function: "archive", arguments: {} }),
+      clickCommand("c3", 99, { function: "archive", arguments: {} }),
+    ]);
+    await acceptSession(t);
+
+    const off = setup({ config: { ui: false } });
+    off.registry.register({ name: "archive", description: "d", parameters: noop, handler });
+    off.server.queue.push([clickCommand("c4", 1, { function: "archive", arguments: { id: 2 } })]);
+    await acceptSession(off);
+
+    expect(handler).not.toHaveBeenCalled();
+    expect([...t.results(), ...off.results()]).toEqual([
+      expect.objectContaining({ id: "c1", status: "rejected", error: "The page changed before the click arrived: nothing was run." }),
+      expect.objectContaining({ id: "c2", status: "rejected", error: "The element is no longer on the page." }),
+      expect.objectContaining({ id: "c3", status: "rejected", error: "The element is no longer on the page." }),
+      expect.objectContaining({ id: "c4", status: "rejected" }),
+    ]);
+  });
+
+  it("holds a click on a gated function for the visitor's approval, and refuses remote: false", async () => {
+    const t = setup({ config: LIVE });
+    const refund = vi.fn(() => "ok");
+    const secret = vi.fn();
+    t.registry.register({ name: "refund", description: "d", parameters: noop, handler: refund, requiresApproval: true });
+    t.registry.register({ name: "secret", description: "d", parameters: noop, handler: secret, remote: false });
+    document.body.innerHTML = `<button data-ago-action="refund">Refund</button><button data-ago-action="secret">S</button>`;
+    const [refundButton, secretButton] = Array.from(document.querySelectorAll("button"));
+    t.recorder.nodes.set(1, refundButton);
+    t.recorder.nodes.set(2, secretButton);
+    t.server.queue.push([
+      clickCommand("c0", 2, { function: "secret", arguments: {} }),
+      { ...clickCommand("c1", 1, { function: "refund", arguments: {} }), seq: 2 },
+    ]);
+    await acceptSession(t);
+
+    expect(secret).not.toHaveBeenCalled();
+    expect(refund).not.toHaveBeenCalled();
+    expect(t.controller.getSnapshot().pendingApproval).toMatchObject({ commandId: "c1", functionName: "refund" });
+    t.controller.approve("c1");
+    await flush();
+    expect(refund).toHaveBeenCalledTimes(1);
+    expect(t.results()).toEqual([
+      expect.objectContaining({ id: "c0", status: "rejected", error: expect.stringContaining("secret") }),
+      expect.objectContaining({ id: "c1", status: "awaiting_approval" }),
+      expect.objectContaining({ id: "c1", status: "done", result: { function: "refund", arguments: {}, result: "ok" } }),
+    ]);
+  });
+});
+
+describe("remote-assistance consent prompt", () => {
+  it("lists the live view only when the page allows it", async () => {
+    const { createRemoteAssistUi } = await import("../src/remoteAssist/ui");
+    const { uiCatalog } = await import("../src/i18n");
+    const labels = uiCatalog("en").remoteAssist;
+    const noop = () => undefined;
+    const ui = createRemoteAssistUi({ accept: noop, decline: noop, stop: noop, approve: noop, reject: noop }, labels);
+    const prompt = (liveView: boolean) => {
+      ui.render({
+        state: "requested",
+        session: {
+          id: `s-${liveView}`, conversationId: "c", status: "requested", agentName: null,
+          requestedAt: null, expiresAt: null, screenshot: false, liveView,
+        },
+        pendingApproval: null,
+        accepting: false,
+      });
+      return document.getElementById("ago-remote-assist")!.textContent;
+    };
+    try {
+      expect(prompt(true)).toContain(labels.canWatchLive);
+      expect(prompt(false)).not.toContain(labels.canWatchLive);
+    } finally {
+      ui.destroy();
+    }
   });
 });

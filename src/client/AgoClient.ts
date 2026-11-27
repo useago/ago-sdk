@@ -337,6 +337,8 @@ export class AgoClient {
 
   /** The `listPages` companion is live. */
   private listPagesRegistered = false;
+  /** Routes of the registered `navigateToPage`, for remote-assist link clicks. */
+  private navigationRoutes: NavRoute[] | null = null;
 
   /** Handoff state per conversation and the live stream of the active one. */
   private live: LiveConversation;
@@ -435,6 +437,14 @@ export class AgoClient {
             : Promise.reject(new AgoError("The remote-assistance UI needs a browser.", "remote_assist_ui_unavailable"));
         },
         storage: () => getRemoteAssistKit()?.storage() ?? null,
+        canRecord: () => getRemoteAssistKit()?.canRecord() ?? false,
+        record: (emit, mask) => {
+          const kit = getRemoteAssistKit();
+          return kit
+            ? kit.record(emit, mask)
+            : Promise.reject(new AgoError("The live view needs a browser.", "remote_assist_live_view_unavailable"));
+        },
+        getRoutes: () => this.navigationRoutes,
       },
       config.remoteAssist,
     );
@@ -2463,6 +2473,7 @@ export class AgoClient {
     opts?: AgoNavigationOptions,
   ): void {
     this.registerFunction(createNavigationFunction(navigate, routes, opts));
+    this.navigationRoutes = routes;
 
     // Flipping back to "inline" must drop the companion, or it keeps answering
     // for the old route table.
@@ -2507,6 +2518,7 @@ export class AgoClient {
    */
   unregisterNavigationFunction(): void {
     this.unregisterFunction(NAVIGATE_FUNCTION);
+    this.navigationRoutes = null;
     if (this.listPagesRegistered) {
       this.unregisterFunction(LIST_PAGES_FUNCTION);
       this.listPagesRegistered = false;
@@ -3156,6 +3168,7 @@ export class AgoClient {
     this.eventEmitter.removeAllListeners();
     this.functionRegistry.clear();
     this.listPagesRegistered = false;
+    this.navigationRoutes = null;
     this.contextRegistry.clear();
     this.pendingResumes.clear();
     this.pendingApprovals.clear();

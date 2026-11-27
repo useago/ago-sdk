@@ -119,3 +119,48 @@ describe("screenshot encoding", () => {
     ).rejects.toMatchObject({ code: "remote_assist_screenshot_too_large" });
   });
 });
+
+describe("live view recording", () => {
+  it("leaves masked fields, host selectors and the SDK's own UI out of the recording", async () => {
+    const { startRecorder } = await import("../src/remoteAssist/recorder");
+    document.body.innerHTML = `
+      <input id="pw" type="password" value="hunter2">
+      <div data-ago-mask><span>FR76 1234</span></div>
+      <p class="iban">FR76 5678</p>
+      <div id="ago-remote-assist"><p>Jane is assisting you</p></div>
+      <p>Visible text</p>
+    `;
+    const events: unknown[] = [];
+    const recorder = startRecorder((event) => events.push(event), [".iban"]);
+    try {
+      const json = JSON.stringify(events);
+      expect(json).toContain("Visible text");
+      for (const secret of ["hunter2", "FR76 1234", "FR76 5678", "Jane is assisting you"]) {
+        expect(json).not.toContain(secret);
+      }
+      const visible = Array.from(document.querySelectorAll("p")).at(-1)!;
+      expect(recorder.getNode(recordedId(events, "Visible text"))).toBe(visible.firstChild);
+    } finally {
+      recorder.stop();
+      document.body.innerHTML = "";
+    }
+  });
+
+  it("refuses to record with a mask selector that does not parse", async () => {
+    const { startRecorder } = await import("../src/remoteAssist/recorder");
+    expect(() => startRecorder(() => undefined, ["div >>> p"])).toThrowError(/remoteAssist\.liveView\.mask/);
+  });
+});
+
+/** rrweb id of the text node holding `text` in the recorded full snapshot. */
+function recordedId(events: unknown[], text: string): number {
+  let found = -1;
+  const visit = (node: { id: number; textContent?: string; childNodes?: unknown[] }) => {
+    if (node.textContent === text) found = node.id;
+    node.childNodes?.forEach((child) => visit(child as typeof node));
+  };
+  for (const event of events as Array<{ type: number; data: { node?: unknown } }>) {
+    if (event.type === 2 && event.data.node) visit(event.data.node as { id: number });
+  }
+  return found;
+}
