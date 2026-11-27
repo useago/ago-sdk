@@ -50,7 +50,7 @@ const final = await client.waitFor("message:complete", { timeout: 10_000 });
 | `remoteAssist:requested` | `RemoteAssistSession`: the support agent asks for remote assistance; show a consent prompt (the built-in one does) |
 | `remoteAssist:started` | `RemoteAssistSession`: the visitor accepted in this tab |
 | `remoteAssist:ended` | `{ sessionId, reason }`: `reason` is `declined`, `stopped`, `ended`, `expired`, `handoff_ended` or `conversation_changed` |
-| `remoteAssist:command` | `{ sessionId, command, status, error? }`: a command (`command.kind` is `function` or `screenshot`) from the support agent changed status (`running`, `awaiting_approval`, `done`, `failed`, `rejected`) |
+| `remoteAssist:command` | `{ sessionId, command, status, error? }`: a command (`command.kind` is `function`, `screenshot` or `click`) from the support agent changed status (`running`, `awaiting_approval`, `done`, `failed`, `rejected`) |
 | `remoteAssist:approval` | `{ sessionId, commandId, functionName, arguments, agentName }`: a gated function waits for the visitor; answer with `client.remoteAssist.approve(commandId)` or `reject(commandId)` |
 
 `waitFor` rejects if the optional `timeout` (ms) elapses first.

@@ -111,6 +111,7 @@ export type {
   RemoteAssistCommandEvent,
   RemoteAssistCommandStatus,
   RemoteAssistEndReason,
+  RemoteAssistLiveViewOptions,
   RemoteAssistOptions,
   RemoteAssistScreenshotOptions,
   RemoteAssistSession,

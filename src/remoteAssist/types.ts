@@ -14,6 +14,15 @@ export interface RemoteAssistScreenshotOptions {
   capture?: () => Promise<Blob>;
 }
 
+/** Live view settings of {@link RemoteAssistOptions}. */
+export interface RemoteAssistLiveViewOptions {
+  /**
+   * Extra CSS selectors left out of the live view (the agent sees an empty
+   * box). The fields screenshots always mask are always left out too.
+   */
+  mask?: string[];
+}
+
 /** Host opt-in for remote assistance (see `AgoConfig.remoteAssist`). */
 export interface RemoteAssistOptions {
   /**
@@ -21,6 +30,13 @@ export interface RemoteAssistOptions {
    * Off by default.
    */
   screenshot?: boolean | RemoteAssistScreenshotOptions;
+  /**
+   * Let the support agent watch the page live and click in it. A click only
+   * runs the registered function the clicked element is declared for
+   * (`data-ago-action`, `data-ago-state`, or a link to a declared route).
+   * Off by default.
+   */
+  liveView?: boolean | RemoteAssistLiveViewOptions;
   /**
    * Render the SDK's consent prompt, session banner and approval prompt.
    * Default `true`. Set `false` when your app renders its own UI from the
@@ -43,6 +59,8 @@ export interface RemoteAssistSession {
   expiresAt: Date | null;
   /** Whether this page allows the agent to take screenshots. */
   screenshot: boolean;
+  /** Whether this page lets the agent watch it live and click in it. */
+  liveView: boolean;
 }
 
 /** Why a session ended locally. */
@@ -58,7 +76,7 @@ export type RemoteAssistEndReason =
 export interface RemoteAssistCommand {
   id: string;
   seq: number;
-  kind: "function" | "screenshot";
+  kind: "function" | "screenshot" | "click";
   function: string | null;
   arguments: Record<string, unknown>;
 }

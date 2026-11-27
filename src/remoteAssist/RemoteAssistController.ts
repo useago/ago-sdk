@@ -7,14 +7,19 @@ import type {
   HandoffState,
 } from "../client/types";
 import type { CapturedError } from "../errors/ErrorWatcher";
+import type { NavRoute } from "../functions/navigation";
 import type { ClientFunctionSchema, RegisteredFunction } from "../functions/types";
+import { deepEqual } from "../utils/deepEqual";
 import { logger } from "../utils/logger";
+import { clickInvocation, findClickTarget } from "./clickTarget";
+import { LiveStream, type LiveRecorder } from "./liveStream";
 import { capState, pageUrl } from "./pageContext";
 import type {
   RemoteAssistApprovalRequest,
   RemoteAssistCommand,
   RemoteAssistCommandStatus,
   RemoteAssistEndReason,
+  RemoteAssistLiveViewOptions,
   RemoteAssistOptions,
   RemoteAssistScreenshotOptions,
   RemoteAssistSession,
@@ -31,6 +36,8 @@ const MAX_CLAIM_ROUNDS = 10;
 const API = "/api/sdk/v1";
 const MAX_ERRORS = 20;
 const MAX_ERROR_STACK_CHARS = 4_000;
+const ELEMENT_GONE = "The element is no longer on the page.";
+const PAGE_CHANGED = "The page changed before the click arrived: nothing was run.";
 
 type RemoteAssistEvent =
   | "remoteAssist:requested"
@@ -89,6 +96,12 @@ export interface RemoteAssistDeps {
     exclude?: (node: Node) => boolean;
   }) => Promise<Blob>;
   loadUi?: (actions: RemoteAssistUiActions) => Promise<RemoteAssistUi>;
+  /** The page can be recorded for the live view (a browser with the kit installed). */
+  canRecord?: () => boolean;
+  /** Start recording the page (loads the recorder on first use). */
+  record?: (emit: (event: unknown) => void, mask: readonly string[]) => Promise<LiveRecorder>;
+  /** Routes given to `registerNavigationFunction`, to map a clicked link to a page. */
+  getRoutes?: () => NavRoute[] | null;
   /** Where this tab's grant lives (`sessionStorage` in a browser). */
   storage?: () => Storage | null;
   /** The environment can host remote assistance (a browser entry installed its kit). */
@@ -98,20 +111,26 @@ export interface RemoteAssistDeps {
 interface ResolvedOptions {
   enabled: boolean;
   screenshot: RemoteAssistScreenshotOptions | null;
+  liveView: RemoteAssistLiveViewOptions | null;
   ui: boolean;
+}
+
+function optIn<T extends object>(value: boolean | T | undefined): T | Record<string, never> | null {
+  if (!value) return null;
+  return value === true ? {} : value;
 }
 
 export function resolveRemoteAssistOptions(
   value: boolean | RemoteAssistOptions | undefined,
 ): ResolvedOptions {
-  if (!value) return { enabled: false, screenshot: null, ui: true };
+  if (!value) return { enabled: false, screenshot: null, liveView: null, ui: true };
   const options = value === true ? {} : value;
-  const screenshot = options.screenshot
-    ? options.screenshot === true
-      ? {}
-      : options.screenshot
-    : null;
-  return { enabled: true, screenshot, ui: options.ui !== false };
+  return {
+    enabled: true,
+    screenshot: optIn(options.screenshot),
+    liveView: optIn(options.liveView),
+    ui: options.ui !== false,
+  };
 }
 
 function toDate(value: string | null | undefined): Date | null {
@@ -167,6 +186,9 @@ export class RemoteAssistController {
   /** Signature of the last context the server accepted for the current session. */
   private sentContext: string | null = null;
   private stopReporting: (() => void) | null = null;
+  private live: LiveStream | null = null;
+  /** Session whose live view was stopped (server refused it, or recording failed). */
+  private liveOff: string | null = null;
   private lastHref = "";
   private ui: RemoteAssistUi | null = null;
   private uiLoading: Promise<void> | null = null;
@@ -287,8 +309,17 @@ export class RemoteAssistController {
   // ── Wiring (called by AgoClient) ───────────────────────────────────
 
   configure(options: boolean | RemoteAssistOptions | undefined): void {
+    const previousLiveView = JSON.stringify(this.options.liveView);
     this.options = resolveRemoteAssistOptions(options);
-    if (!this.options.enabled) this.stop();
+    if (!this.options.enabled) {
+      this.stop();
+      return;
+    }
+    if (this.state !== "active" || JSON.stringify(this.options.liveView) === previousLiveView) return;
+    // A new mask must apply to what is already recorded: restart from a full snapshot.
+    this.stopLive();
+    this.startLive();
+    void this.pushContext({ onlyIfChanged: true });
   }
 
   /** Query string for the live stream: announce the capability only with both opt-ins. */
@@ -424,6 +455,7 @@ export class RemoteAssistController {
     this.session = session;
     this.armExpiry(session);
     this.startReporting();
+    this.startLive();
     this.changed();
     this.deps.emit("remoteAssist:started", session);
     void this.pushContext();
@@ -462,6 +494,7 @@ export class RemoteAssistController {
       requestedAt: toDate(raw.requested_at),
       expiresAt: toDate(raw.expires_at),
       screenshot: !!this.options.screenshot,
+      liveView: this.liveViewAllowed(),
     };
   }
 
@@ -559,47 +592,27 @@ export class RemoteAssistController {
     this.deps.emit("remoteAssist:command", { sessionId, command, status: "running" });
 
     if (command.kind === "screenshot") {
-      const screenshot = this.options.screenshot;
-      if (!screenshot) {
-        await report("rejected", null, "Screenshots are not enabled on this page.");
-        return;
-      }
-      let blob: Blob;
-      try {
-        blob = await this.deps.capture({
-          mask: screenshot.mask,
-          capture: screenshot.capture,
-          exclude: (node) => !!this.ui?.owns(node),
-        });
-      } catch (error) {
-        if (this.isGranted(sessionId, epoch)) await report("failed", null, errorMessage(error));
-        return;
-      }
-      // Stopped while capturing: the image never leaves the browser.
-      if (!this.isGranted(sessionId, epoch)) return;
-      try {
-        const form = new FormData();
-        const extension = blob.type.split("/")[1] || "png";
-        form.append("file", blob, `screenshot.${extension}`);
-        await this.deps.http.postFormData(
-          `${API}/remote-assist/commands/${encodeURIComponent(command.id)}/screenshot`,
-          form,
-        );
-        this.deps.emit("remoteAssist:command", { sessionId, command, status: "done" });
-        this.recordSupport("support.screenshot", "Support agent took a screenshot of the page");
-      } catch (error) {
-        await report("failed", null, `Uploading the screenshot failed: ${errorMessage(error)}`);
-      }
+      await this.runScreenshot(sessionId, epoch, command, report);
       return;
     }
 
-    const name = command.function ?? "";
+    const call =
+      command.kind === "click"
+        ? this.resolveClick(command)
+        : {
+            function: command.function ?? "",
+            arguments: command.arguments && typeof command.arguments === "object" ? command.arguments : {},
+          };
+    if ("error" in call) {
+      await report("rejected", null, call.error);
+      return;
+    }
+    const { function: name, arguments: args } = call;
     const registration = name ? this.deps.getFunction(name) : undefined;
     if (!registration || registration.remote === false) {
       await report("rejected", null, `Function "${name}" is not available on this page.`);
       return;
     }
-    const args = command.arguments && typeof command.arguments === "object" ? command.arguments : {};
     const invocation: ClientFunctionInvocation = {
       invocationId: `remote-${command.id}`,
       functionName: name,
@@ -633,7 +646,67 @@ export class RemoteAssistController {
       return;
     }
     this.recordSupport(`support.${name}`, `Support agent ran "${name}"`, args);
-    if (this.isGranted(sessionId, epoch)) await report("done", result);
+    if (!this.isGranted(sessionId, epoch)) return;
+    await report(
+      "done",
+      command.kind === "click" ? { function: name, arguments: args, result: result ?? null } : result,
+    );
+  }
+
+  /** The call a click stands for, read from the real page (never from the agent's copy). */
+  private resolveClick(
+    command: RemoteAssistCommand,
+  ): { function: string; arguments: Record<string, unknown> } | { error: string } {
+    const live = this.live;
+    if (!live) return { error: "The live view is not on in this page." };
+    const args = command.arguments ?? {};
+    const node = typeof args.node === "number" ? live.getNode(args.node) : null;
+    if (!node || !node.isConnected) return { error: ELEMENT_GONE };
+    const target = findClickTarget(node, window.location.href);
+    if (!target || !deepEqual(target.preview, args.expect)) return { error: PAGE_CHANGED };
+    return clickInvocation(target, {
+      getFunction: (name) => this.deps.getFunction(name),
+      routes: this.deps.getRoutes?.() ?? null,
+    });
+  }
+
+  private async runScreenshot(
+    sessionId: string,
+    epoch: number,
+    command: RemoteAssistCommand,
+    report: (status: "failed" | "rejected", result: null, error: string) => Promise<void>,
+  ): Promise<void> {
+    const screenshot = this.options.screenshot;
+    if (!screenshot) {
+      await report("rejected", null, "Screenshots are not enabled on this page.");
+      return;
+    }
+    let blob: Blob;
+    try {
+      blob = await this.deps.capture({
+        mask: screenshot.mask,
+        capture: screenshot.capture,
+        exclude: (node) => !!this.ui?.owns(node),
+      });
+    } catch (error) {
+      if (this.isGranted(sessionId, epoch)) await report("failed", null, errorMessage(error));
+      return;
+    }
+    // Stopped while capturing: the image never leaves the browser.
+    if (!this.isGranted(sessionId, epoch)) return;
+    try {
+      const form = new FormData();
+      const extension = blob.type.split("/")[1] || "png";
+      form.append("file", blob, `screenshot.${extension}`);
+      await this.deps.http.postFormData(
+        `${API}/remote-assist/commands/${encodeURIComponent(command.id)}/screenshot`,
+        form,
+      );
+      this.deps.emit("remoteAssist:command", { sessionId, command, status: "done" });
+      this.recordSupport("support.screenshot", "Support agent took a screenshot of the page");
+    } catch (error) {
+      await report("failed", null, `Uploading the screenshot failed: ${errorMessage(error)}`);
+    }
   }
 
   private recordSupport(name: string, summary: string, args?: Record<string, unknown>): void {
@@ -683,6 +756,7 @@ export class RemoteAssistController {
     return {
       functions: this.manifest(),
       screenshot: !!this.options.screenshot,
+      live_view: this.liveViewAllowed() && (!this.session || this.liveOff !== this.session.id),
       page: {
         url: hasWindow ? pageUrl(window.location) : "",
         title: typeof document !== "undefined" ? document.title : "",
@@ -784,6 +858,70 @@ export class RemoteAssistController {
     this.sentContext = null;
     this.stopReporting?.();
     this.stopReporting = null;
+    this.stopLive();
+  }
+
+  // ── Live view ──────────────────────────────────────────────────────
+
+  private liveViewAllowed(): boolean {
+    return !!this.options.liveView && !!this.deps.record && (this.deps.canRecord?.() ?? false);
+  }
+
+  /** Record the page while the session is active in this tab. */
+  private startLive(): void {
+    const sessionId = this.grantedId;
+    const epoch = this.epoch;
+    const record = this.deps.record;
+    if (this.live || !record || !sessionId || !this.isGranted(sessionId, epoch)) return;
+    if (!this.liveViewAllowed() || this.liveOff === sessionId) return;
+    const live = new LiveStream((body, signal) => this.sendLive(sessionId, epoch, body, signal));
+    this.live = live;
+    record((event) => live.push(event), this.options.liveView?.mask ?? [])
+      .then((recorder) => live.attach(recorder))
+      .catch((error) => {
+        if (this.live !== live) return;
+        logger.error(`The live view could not start: ${errorMessage(error)}`);
+        this.disableLive(sessionId);
+        void this.pushContext();
+      });
+  }
+
+  private stopLive(): void {
+    this.live?.stop();
+    this.live = null;
+  }
+
+  private disableLive(sessionId: string): void {
+    this.liveOff = sessionId;
+    this.stopLive();
+  }
+
+  private async sendLive(sessionId: string, epoch: number, body: Blob, signal: AbortSignal): Promise<void> {
+    if (!this.isGranted(sessionId, epoch)) return;
+    const form = new FormData();
+    form.append("file", body, "events.json");
+    try {
+      await this.deps.http.postFormData(
+        `${API}/remote-assist/sessions/${encodeURIComponent(sessionId)}/live`,
+        form,
+        { signal },
+      );
+    } catch (error) {
+      if (signal.aborted || !this.isGranted(sessionId, epoch)) return;
+      if (!(error instanceof AgoApiError) || error.statusCode === 429 || (error.statusCode ?? 500) >= 500) {
+        throw error;
+      }
+      if (error.statusCode === 409) {
+        this.disableLive(sessionId);
+        void this.refresh();
+      } else if (error.statusCode === 413) {
+        logger.warn("The live view stopped: the page sends more than the server accepts.");
+        this.disableLive(sessionId);
+        void this.pushContext();
+      } else {
+        logger.warn("A live view batch was refused and dropped:", error);
+      }
+    }
   }
 
   // ── Local grant (per tab) ──────────────────────────────────────────

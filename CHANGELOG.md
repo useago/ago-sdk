@@ -7,13 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Planned as 1.17.0.
+## [1.17.0] - 2026-11-27
 
 ### Added
 
 - **Human takeover.** Replies from a person on your team show with their name (`role: "staff"`, `staffName`), takeover events render as centered lines (`role: "system"`, parsed `marker`), and a status line says "Waiting for an agent" or "You are talking with Jane". Replies arrive live for the conversation on screen (the active conversation) while a person is involved, and the agent sees when they were read. New: `useHandoff` (React, Vue), `useChat().handoff`, `client.getHandoff()`, `client.setConversationVisible()`, and the `handoff:changed`, `conversation:updated` and `message:handoff-paused` events. In six languages.
 - **Remote assistance** (`remoteAssist`, off by default). During a takeover, the support agent can ask the visitor for help on the page. Once the visitor accepts, in that tab only, the agent sees the page and its state, the recent JavaScript errors when `errorWatcher` is on, calls your registered functions (approval rules apply), and, with `screenshot`, takes a screenshot of the viewport with password, card, one-time-code and `data-ago-mask` fields painted over. A banner with a Stop button stays up for the whole session. Keep a function from the agent with `remote: false`. Build your own prompt with `useRemoteAssist` (React, Vue) or `client.remoteAssist`. See [Human takeover and remote assistance](docs/general/human-takeover-and-remote-assist.md).
 - `ActivityActor` gains `"support"` for actions run by the support agent.
+- **Live view** for remote assistance (`remoteAssist.liveView`, off by default). Once the visitor accepts, the support agent watches the page live and can click in it. A click only runs the registered function the clicked element is declared for: `data-ago-action` (with `data-ago-args`), `data-ago-state` and `data-ago-value` (typed by the page-state function's schema, `data-ago-state-function` to pick another function), or a same-origin link to a route given to `registerNavigationFunction` (`navigateToPage`). `data-ago-ignore` stops it. `remote: false` and approval rules apply as for any remote call, and the click is refused if the page changed since the agent saw it. Password, card, one-time-code and `data-ago-mask` fields, the selectors in `liveView.mask` and the SDK's own prompts are left out of the recording. The recorder (rrweb) is a separate file loaded only when a session with live view starts. `RemoteAssistSession.liveView`, `RemoteAssistCommand.kind` `"click"`, and a consent line in six languages.
 
 ### Changed
 

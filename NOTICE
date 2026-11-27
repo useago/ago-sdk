@@ -12,3 +12,8 @@ You may obtain a copy of the License at
 This product bundles modern-screenshot (https://github.com/qq15725/modern-screenshot),
 loaded only when a remote-assistance screenshot is taken.
 Copyright (c) 2021-present wxm. Licensed under the MIT License.
+
+This product bundles the recorder of rrweb (https://github.com/rrweb-io/rrweb),
+loaded only when a remote-assistance live view starts.
+Copyright (c) 2018 Contributors (https://github.com/rrweb-io/rrweb/graphs/contributors)
+and SmartX Inc. Licensed under the MIT License.
