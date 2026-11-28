@@ -160,6 +160,8 @@ export type {
 } from "../client/types";
 export type {
   RemoteAssistApprovalRequest,
+  RemoteAssistCall,
+  RemoteAssistCallEvent,
   RemoteAssistOptions,
   RemoteAssistSession,
   RemoteAssistSnapshot,

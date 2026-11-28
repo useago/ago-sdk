@@ -36,5 +36,9 @@ export function useRemoteAssist(options: { client?: AgoClient } = {}) {
     stop: () => controller.stop(),
     approve: (commandId: string) => controller.approve(commandId),
     reject: (commandId: string) => controller.reject(commandId),
+    acceptCall: () => controller.acceptCall(),
+    declineCall: () => controller.declineCall(),
+    hangUpCall: () => controller.hangUpCall(),
+    setCallMuted: (muted: boolean) => controller.setCallMuted(muted),
   };
 }

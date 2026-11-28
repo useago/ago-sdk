@@ -182,7 +182,7 @@ export function createMockClient(
   // Plain value properties (not wrapped)
   mock.proactive = null;
   // An idle remote-assistance controller: no session ever starts on the mock.
-  const idleSnapshot = { state: "idle", session: null, pendingApproval: null, accepting: false };
+  const idleSnapshot = { state: "idle", session: null, pendingApproval: null, accepting: false, call: null };
   mock.remoteAssist = {
     isEnabled: () => false,
     getState: () => "idle",
@@ -193,6 +193,10 @@ export function createMockClient(
     stop: () => undefined,
     approve: () => undefined,
     reject: () => undefined,
+    acceptCall: async () => false,
+    declineCall: () => undefined,
+    hangUpCall: () => undefined,
+    setCallMuted: () => undefined,
     isAccepting: () => false,
   };
 

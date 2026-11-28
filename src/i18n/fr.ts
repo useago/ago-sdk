@@ -139,7 +139,19 @@ export default {
     "approvalTitle": "{name} souhaite effectuer une action",
     "approvalTitleAnonymous": "Un conseiller souhaite effectuer une action",
     "allow": "Autoriser",
-    "deny": "Refuser"
+    "deny": "Refuser",
+    "canTalk": "Vous appeler en vocal, si vous répondez",
+    "callTitle": "{name} vous appelle",
+    "callTitleAnonymous": "Un conseiller vous appelle",
+    "callIntro": "Votre navigateur va demander l'accès à votre micro. Vous pouvez raccrocher à tout moment.",
+    "answer": "Répondre",
+    "declineCall": "Refuser",
+    "callConnecting": "Connexion de l'appel…",
+    "callBanner": "En appel avec {name}",
+    "callBannerAnonymous": "En appel avec un conseiller",
+    "mute": "Couper le micro",
+    "unmute": "Réactiver le micro",
+    "hangUp": "Raccrocher"
   },
   "common": {
     "stopButton": "Arrêter",

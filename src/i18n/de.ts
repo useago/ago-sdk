@@ -139,7 +139,19 @@ export default {
     "approvalTitle": "{name} möchte eine Aktion ausführen",
     "approvalTitleAnonymous": "Ein Support-Mitarbeiter möchte eine Aktion ausführen",
     "allow": "Erlauben",
-    "deny": "Ablehnen"
+    "deny": "Ablehnen",
+    "canTalk": "Sie per Sprachanruf erreichen, wenn Sie annehmen",
+    "callTitle": "{name} ruft Sie an",
+    "callTitleAnonymous": "Ein Support-Mitarbeiter ruft Sie an",
+    "callIntro": "Ihr Browser fragt nach dem Zugriff auf Ihr Mikrofon. Sie können jederzeit auflegen.",
+    "answer": "Annehmen",
+    "declineCall": "Ablehnen",
+    "callConnecting": "Anruf wird verbunden…",
+    "callBanner": "Im Gespräch mit {name}",
+    "callBannerAnonymous": "Im Gespräch mit einem Support-Mitarbeiter",
+    "mute": "Stummschalten",
+    "unmute": "Stummschaltung aufheben",
+    "hangUp": "Auflegen"
   },
   "common": {
     "stopButton": "Stoppen",

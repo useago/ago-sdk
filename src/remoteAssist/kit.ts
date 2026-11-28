@@ -13,6 +13,9 @@ export interface RemoteAssistKit {
   record: NonNullable<RemoteAssistDeps["record"]>;
   loadUi: (actions: RemoteAssistUiActions, language: string | null | undefined) => Promise<RemoteAssistUi>;
   storage: () => Storage | null;
+  /** The browser can answer a voice call. */
+  canCall: () => boolean;
+  answerCall: NonNullable<RemoteAssistDeps["answerCall"]>;
 }
 
 /** Id of the SDK's own remote-assistance UI root (left out of the live view). */

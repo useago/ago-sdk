@@ -11,9 +11,11 @@ import type { NavRoute } from "../functions/navigation";
 import type { ClientFunctionSchema, RegisteredFunction } from "../functions/types";
 import { deepEqual } from "../utils/deepEqual";
 import { logger } from "../utils/logger";
+import { RemoteAssistCallLine, type RawCall } from "./callLine";
 import { clickInvocation, findClickTarget } from "./clickTarget";
 import { LiveStream, type LiveRecorder } from "./liveStream";
 import { capState, pageUrl } from "./pageContext";
+import type { AnswerCallOptions, VoiceConnection } from "./voice";
 import type {
   RemoteAssistApprovalRequest,
   RemoteAssistCommand,
@@ -44,7 +46,8 @@ type RemoteAssistEvent =
   | "remoteAssist:started"
   | "remoteAssist:ended"
   | "remoteAssist:command"
-  | "remoteAssist:approval";
+  | "remoteAssist:approval"
+  | "remoteAssist:call";
 
 interface RawSession {
   id: string;
@@ -52,6 +55,7 @@ interface RawSession {
   agent_name?: string | null;
   requested_at?: string | null;
   expires_at?: string | null;
+  call?: RawCall | null;
 }
 
 type Decision = "approved" | "rejected" | "cancelled";
@@ -70,6 +74,10 @@ export interface RemoteAssistUiActions {
   stop(): void;
   approve(commandId: string): void;
   reject(commandId: string): void;
+  acceptCall(): void;
+  declineCall(): void;
+  hangUpCall(): void;
+  setCallMuted(muted: boolean): void;
 }
 
 export interface RemoteAssistDeps {
@@ -106,12 +114,17 @@ export interface RemoteAssistDeps {
   storage?: () => Storage | null;
   /** The environment can host remote assistance (a browser entry installed its kit). */
   available?: () => boolean;
+  /** The browser can answer a voice call (WebRTC and a microphone API). */
+  canCall?: () => boolean;
+  /** Open the microphone and answer the agent's WebRTC offer. */
+  answerCall?: (options: AnswerCallOptions) => Promise<{ answer: string; connection: VoiceConnection }>;
 }
 
 interface ResolvedOptions {
   enabled: boolean;
   screenshot: RemoteAssistScreenshotOptions | null;
   liveView: RemoteAssistLiveViewOptions | null;
+  voice: boolean;
   ui: boolean;
 }
 
@@ -123,12 +136,13 @@ function optIn<T extends object>(value: boolean | T | undefined): T | Record<str
 export function resolveRemoteAssistOptions(
   value: boolean | RemoteAssistOptions | undefined,
 ): ResolvedOptions {
-  if (!value) return { enabled: false, screenshot: null, liveView: null, ui: true };
+  if (!value) return { enabled: false, screenshot: null, liveView: null, voice: false, ui: true };
   const options = value === true ? {} : value;
   return {
     enabled: true,
     screenshot: optIn(options.screenshot),
     liveView: optIn(options.liveView),
+    voice: options.voice === true,
     ui: options.ui !== false,
   };
 }
@@ -195,12 +209,19 @@ export class RemoteAssistController {
   private listeners = new Set<() => void>();
   private snapshot: RemoteAssistSnapshot | null = null;
   private destroyed = false;
+  private callLine: RemoteAssistCallLine;
 
   constructor(
     private deps: RemoteAssistDeps,
     options: boolean | RemoteAssistOptions | undefined,
   ) {
     this.options = resolveRemoteAssistOptions(options);
+    this.callLine = new RemoteAssistCallLine({
+      http: deps.http,
+      emit: (event) => deps.emit("remoteAssist:call", event),
+      onChange: () => this.changed(),
+      answer: deps.answerCall,
+    });
   }
 
   // ── Public surface (client.remoteAssist) ──────────────────────────
@@ -222,6 +243,7 @@ export class RemoteAssistController {
         session: this.session,
         pendingApproval: this.approval?.request ?? null,
         accepting: this.accepting,
+        call: this.callLine.snapshot(),
       };
     }
     return this.snapshot;
@@ -301,6 +323,25 @@ export class RemoteAssistController {
     this.decide(commandId, "rejected");
   }
 
+  /** Answer the agent's ringing call (only from the visitor's click: the browser asks for the microphone). */
+  acceptCall(): Promise<boolean> {
+    return this.callLine.accept();
+  }
+
+  /** Refuse the agent's ringing call. */
+  declineCall(): void {
+    this.callLine.decline();
+  }
+
+  /** Hang up the call; the session goes on. */
+  hangUpCall(): void {
+    this.callLine.hangUp();
+  }
+
+  setCallMuted(muted: boolean): void {
+    this.callLine.setMuted(muted);
+  }
+
   /** Whether an accept request is in flight (buttons should be disabled). */
   isAccepting(): boolean {
     return this.accepting;
@@ -310,10 +351,18 @@ export class RemoteAssistController {
 
   configure(options: boolean | RemoteAssistOptions | undefined): void {
     const previousLiveView = JSON.stringify(this.options.liveView);
+    const previousVoice = this.options.voice;
     this.options = resolveRemoteAssistOptions(options);
     if (!this.options.enabled) {
       this.stop();
       return;
+    }
+    if (this.state === "active" && previousVoice !== this.options.voice) {
+      if (!this.options.voice) {
+        this.callLine.decline();
+        this.callLine.hangUp();
+      }
+      void this.pushContext({ onlyIfChanged: true });
     }
     if (this.state !== "active" || JSON.stringify(this.options.liveView) === previousLiveView) return;
     // A new mask must apply to what is already recorded: restart from a full snapshot.
@@ -373,6 +422,7 @@ export class RemoteAssistController {
     this.epoch += 1;
     this.approval?.resolve("cancelled");
     this.approval = null;
+    this.callLine.reset();
     this.state = "idle";
     this.session = null;
     this.clearTimers();
@@ -444,6 +494,7 @@ export class RemoteAssistController {
       } else {
         this.activate(session);
       }
+      if (this.voiceAllowed()) this.callLine.sync(raw.id, raw.call);
       return;
     }
     // Accepted in another tab: this one stays out of it.
@@ -474,6 +525,7 @@ export class RemoteAssistController {
     }
     this.approval?.resolve("cancelled");
     this.approval = null;
+    this.callLine.reset();
     this.clearTimers();
     this.changed();
     this.deps.emit("remoteAssist:ended", { sessionId: session.id, reason });
@@ -495,6 +547,7 @@ export class RemoteAssistController {
       expiresAt: toDate(raw.expires_at),
       screenshot: !!this.options.screenshot,
       liveView: this.liveViewAllowed(),
+      voice: this.voiceAllowed(),
     };
   }
 
@@ -757,6 +810,7 @@ export class RemoteAssistController {
       functions: this.manifest(),
       screenshot: !!this.options.screenshot,
       live_view: this.liveViewAllowed() && (!this.session || this.liveOff !== this.session.id),
+      voice: this.voiceAllowed(),
       page: {
         url: hasWindow ? pageUrl(window.location) : "",
         title: typeof document !== "undefined" ? document.title : "",
@@ -859,6 +913,10 @@ export class RemoteAssistController {
     this.stopReporting?.();
     this.stopReporting = null;
     this.stopLive();
+  }
+
+  private voiceAllowed(): boolean {
+    return this.options.voice && !!this.deps.answerCall && (this.deps.canCall?.() ?? false);
   }
 
   // ── Live view ──────────────────────────────────────────────────────
@@ -990,6 +1048,10 @@ export class RemoteAssistController {
         stop: () => this.stop(),
         approve: (id) => this.approve(id),
         reject: (id) => this.reject(id),
+        acceptCall: () => void this.acceptCall(),
+        declineCall: () => this.declineCall(),
+        hangUpCall: () => this.hangUpCall(),
+        setCallMuted: (muted) => this.setCallMuted(muted),
       })
       .then((ui) => {
         if (this.destroyed) {

@@ -38,6 +38,13 @@ export interface RemoteAssistOptions {
    */
   liveView?: boolean | RemoteAssistLiveViewOptions;
   /**
+   * Let the support agent call the visitor during the session. The visitor
+   * answers or declines each call, and the browser asks for the microphone
+   * when they answer. The audio goes from browser to browser through a relay;
+   * it is not recorded. Off by default.
+   */
+  voice?: boolean;
+  /**
    * Render the SDK's consent prompt, session banner and approval prompt.
    * Default `true`. Set `false` when your app renders its own UI from the
    * `remoteAssist:*` events (or `useRemoteAssist()`).
@@ -61,6 +68,37 @@ export interface RemoteAssistSession {
   screenshot: boolean;
   /** Whether this page lets the agent watch it live and click in it. */
   liveView: boolean;
+  /** Whether this page takes voice calls from the agent. */
+  voice: boolean;
+}
+
+/** Where the voice call of a session stands, as the visitor sees it. */
+export type RemoteAssistCallStatus = "ringing" | "connecting" | "connected";
+
+/** The agent's voice call of the current session. */
+export interface RemoteAssistCall {
+  id: string;
+  sessionId: string;
+  status: RemoteAssistCallStatus;
+  /** The visitor's microphone is muted. */
+  muted: boolean;
+}
+
+/** Why a call ended locally. */
+export type RemoteAssistCallEndReason =
+  | "declined"
+  | "hung_up"
+  | "ended"
+  | "failed"
+  | "microphone_denied";
+
+/** Payload of `remoteAssist:call`. */
+export interface RemoteAssistCallEvent {
+  sessionId: string;
+  callId: string;
+  status: RemoteAssistCallStatus | "ended";
+  /** Set when `status` is `"ended"`. */
+  reason?: RemoteAssistCallEndReason;
 }
 
 /** Why a session ended locally. */
@@ -113,4 +151,6 @@ export interface RemoteAssistSnapshot {
   pendingApproval: RemoteAssistApprovalRequest | null;
   /** An accept request is in flight (disable the Accept button). */
   accepting: boolean;
+  /** The agent's voice call, while it rings or runs. */
+  call: RemoteAssistCall | null;
 }
