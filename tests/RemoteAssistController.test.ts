@@ -44,6 +44,7 @@ function setup(
     errors?: CapturedError[];
     canRecord?: boolean;
     routes?: NavRoute[];
+    answerCall?: RemoteAssistDeps["answerCall"];
   } = {},
 ) {
   const registry = new FunctionRegistry();
@@ -52,7 +53,13 @@ function setup(
   const events: Array<{ event: string; data: unknown }> = [];
   const activity: ActivityInput[] = [];
   const server = {
-    session: null as null | { id: string; status: string; agent_name?: string | null; expires_at?: string | null },
+    session: null as null | {
+      id: string;
+      status: string;
+      agent_name?: string | null;
+      expires_at?: string | null;
+      call?: { id: string; status: string } | null;
+    },
     queue: [] as RemoteAssistCommand[][],
     failEnd: false,
     /** Status the next `/live` posts fail with. */
@@ -95,6 +102,21 @@ function setup(
         server.session = { ...server.session, status: "active" };
         return { session: server.session } as never;
       }
+      if (path.endsWith("/call/join")) {
+        return {
+          call: { id: server.session?.call?.id, offer: "v=0 offer" },
+          ice_servers: [{ urls: ["turn:turn.example.com:3478"], username: "u", credential: "c" }],
+          ice_transport_policy: "relay",
+        } as never;
+      }
+      if (path.endsWith("/call/answer")) {
+        if (server.session?.call) server.session = { ...server.session, call: { ...server.session.call, status: "connected" } };
+        return {} as never;
+      }
+      if (path.endsWith("/call/end")) {
+        if (server.session) server.session = { ...server.session, call: null };
+        return {} as never;
+      }
       if (path.endsWith("/end")) {
         if (server.failEnd) throw new TypeError("Failed to fetch");
         server.session = null;
@@ -117,6 +139,14 @@ function setup(
     }),
   };
   const capture = vi.fn(async () => new Blob(["png"], { type: "image/png" }));
+  const voice = {
+    connection: { setMuted: vi.fn(), close: vi.fn() },
+    onConnectionState: (_state: RTCPeerConnectionState): void => undefined,
+    answerCall: vi.fn(async (callOptions: Parameters<NonNullable<RemoteAssistDeps["answerCall"]>>[0]) => {
+      voice.onConnectionState = callOptions.onConnectionState;
+      return { answer: "v=0 answer", connection: voice.connection };
+    }),
+  };
   const contextListeners = new Set<() => void>();
   const contextChanged = () => contextListeners.forEach((listener) => listener());
   const deps: RemoteAssistDeps = {
@@ -143,6 +173,8 @@ function setup(
     canRecord: () => options.canRecord ?? true,
     record,
     getRoutes: () => options.routes ?? null,
+    canCall: () => true,
+    answerCall: options.answerCall ?? voice.answerCall,
   };
   const controller = new RemoteAssistController(deps, options.config ?? { ui: false, screenshot: true });
   const results = () =>
@@ -152,7 +184,7 @@ function setup(
   const liveBatches = () => requests.filter((r) => r.path.endsWith("/s1/live"));
   return {
     controller, registry, storage, requests, events, activity, server, http, capture, results, contextChanged,
-    recorder, record, liveBatches,
+    recorder, record, liveBatches, voice,
   };
 }
 
@@ -762,16 +794,20 @@ describe("remote-assistance consent prompt", () => {
     const { uiCatalog } = await import("../src/i18n");
     const labels = uiCatalog("en").remoteAssist;
     const noop = () => undefined;
-    const ui = createRemoteAssistUi({ accept: noop, decline: noop, stop: noop, approve: noop, reject: noop }, labels);
+    const ui = createRemoteAssistUi({
+      accept: noop, decline: noop, stop: noop, approve: noop, reject: noop,
+      acceptCall: noop, declineCall: noop, hangUpCall: noop, setCallMuted: noop,
+    }, labels);
     const prompt = (liveView: boolean) => {
       ui.render({
         state: "requested",
         session: {
           id: `s-${liveView}`, conversationId: "c", status: "requested", agentName: null,
-          requestedAt: null, expiresAt: null, screenshot: false, liveView,
+          requestedAt: null, expiresAt: null, screenshot: false, liveView, voice: false,
         },
         pendingApproval: null,
         accepting: false,
+        call: null,
       });
       return document.getElementById("ago-remote-assist")!.textContent;
     };
@@ -783,3 +819,145 @@ describe("remote-assistance consent prompt", () => {
     }
   });
 });
+
+describe("RemoteAssistController voice call", () => {
+  const VOICE = { ui: false, voice: true } as const;
+  const callRequests = (t: ReturnType<typeof setup>) =>
+    t.requests.filter((r) => r.path.includes("/call/")).map((r) => [r.path.split("/").at(-1), r.body]);
+  const callEvents = (t: ReturnType<typeof setup>) =>
+    t.events.filter((e) => e.event === "remoteAssist:call").map((e) => e.data);
+
+  async function ring(t: ReturnType<typeof setup>) {
+    await acceptSession(t);
+    t.server.session = { ...t.server.session!, call: { id: "call-1", status: "ringing" } };
+    await t.controller.refresh("conv-1");
+  }
+
+  it("rings only on a page that opted in to voice, and tells the agent it can call", async () => {
+    const opted = setup({ config: VOICE });
+    const other = setup({ config: { ui: false } });
+
+    await ring(opted);
+    await ring(other);
+
+    expect((opted.requests.find((r) => r.path.endsWith("/accept"))!.body as { voice: boolean }).voice).toBe(true);
+    expect((other.requests.find((r) => r.path.endsWith("/accept"))!.body as { voice: boolean }).voice).toBe(false);
+    expect(opted.controller.getSnapshot().call).toEqual({ id: "call-1", sessionId: "s1", status: "ringing", muted: false });
+    expect(callEvents(opted)).toEqual([{ sessionId: "s1", callId: "call-1", status: "ringing" }]);
+    expect(other.controller.getSnapshot().call).toBeNull();
+  });
+
+  it("answers the agent's offer through the relay it was given, then mutes on demand", async () => {
+    const t = setup({ config: VOICE });
+    await ring(t);
+
+    await t.controller.acceptCall();
+    t.voice.onConnectionState("connected");
+    t.controller.setCallMuted(true);
+
+    expect(t.voice.answerCall).toHaveBeenCalledWith(expect.objectContaining({
+      offer: "v=0 offer",
+      iceServers: [{ urls: ["turn:turn.example.com:3478"], username: "u", credential: "c" }],
+      iceTransportPolicy: "relay",
+    }));
+    expect(callRequests(t)).toEqual([
+      ["join", { call_id: "call-1" }],
+      ["answer", { call_id: "call-1", answer: "v=0 answer" }],
+    ]);
+    expect(t.controller.getSnapshot().call).toMatchObject({ status: "connected", muted: true });
+    expect(t.voice.connection.setMuted).toHaveBeenCalledWith(true);
+  });
+
+  it("a refused microphone declines the call; any other failure tells the agent it failed", async () => {
+    const denied = setup({
+      config: VOICE,
+      answerCall: async () => Promise.reject(new DOMException("Permission denied", "NotAllowedError")),
+    });
+    const broken = setup({ config: VOICE, answerCall: async () => Promise.reject(new Error("no ICE")) });
+    await ring(denied);
+    await ring(broken);
+
+    await denied.controller.acceptCall();
+    await broken.controller.acceptCall();
+
+    expect(callRequests(denied).at(-1)).toEqual(["end", { call_id: "call-1", failed: false }]);
+    expect(callRequests(broken).at(-1)).toEqual(["end", { call_id: "call-1", failed: true }]);
+    expect(callEvents(denied).at(-1)).toMatchObject({ status: "ended", reason: "microphone_denied" });
+    expect(denied.controller.getSnapshot().call).toBeNull();
+  });
+
+  it("hangs up locally when the agent does, and when the session ends, without telling the server again", async () => {
+    const t = setup({ config: VOICE });
+    await ring(t);
+    await t.controller.acceptCall();
+
+    t.server.session = { ...t.server.session!, call: null };
+    await t.controller.refresh("conv-1");
+
+    expect(t.voice.connection.close).toHaveBeenCalledTimes(1);
+    expect(callEvents(t).at(-1)).toMatchObject({ status: "ended", reason: "ended" });
+    expect(callRequests(t).map(([name]) => name)).toEqual(["join", "answer"]);
+  });
+
+  it("does not ring again for a declined call", async () => {
+    const t = setup({ config: VOICE });
+    await ring(t);
+
+    t.controller.declineCall();
+    t.server.session = { ...t.server.session!, call: { id: "call-1", status: "ringing" } };
+    await t.controller.refresh("conv-1");
+
+    expect(t.controller.getSnapshot().call).toBeNull();
+    expect(callRequests(t)).toEqual([["end", { call_id: "call-1", failed: false }]]);
+  });
+
+  it("reports a call answered before a reload as failed instead of leaving the agent talking to nobody", async () => {
+    const storage = memoryStorage();
+    storage.setItem(GRANT_STORAGE_KEY, JSON.stringify({ sessionId: "s1", conversationId: "conv-1" }));
+    const t = setup({ config: VOICE, storage });
+    t.server.session = { id: "s1", status: "active", call: { id: "call-1", status: "connected" } };
+
+    t.controller.start();
+    await flush();
+
+    expect(callRequests(t)).toEqual([["end", { call_id: "call-1", failed: true }]]);
+    expect(t.controller.getSnapshot().call).toBeNull();
+  });
+});
+
+describe("remote-assistance call UI", () => {
+  it("shows an incoming call card, then mute and hang up in the banner", async () => {
+    const { createRemoteAssistUi } = await import("../src/remoteAssist/ui");
+    const { uiCatalog } = await import("../src/i18n");
+    const labels = uiCatalog("en").remoteAssist;
+    const actions = {
+      accept: vi.fn(), decline: vi.fn(), stop: vi.fn(), approve: vi.fn(), reject: vi.fn(),
+      acceptCall: vi.fn(), declineCall: vi.fn(), hangUpCall: vi.fn(), setCallMuted: vi.fn(),
+    };
+    const ui = createRemoteAssistUi(actions, labels);
+    const session = {
+      id: "s1", conversationId: "c", status: "active" as const, agentName: "Jane",
+      requestedAt: null, expiresAt: null, screenshot: false, liveView: false, voice: true,
+    };
+    const render = (call: { status: "ringing" | "connected"; muted: boolean }) =>
+      ui.render({ state: "active", session, pendingApproval: null, accepting: false, call: { id: "call-1", sessionId: "s1", ...call } });
+    const click = (name: string) =>
+      [...document.querySelectorAll<HTMLButtonElement>("#ago-remote-assist button")].find((b) => b.textContent === name)!.click();
+    try {
+      render({ status: "ringing", muted: false });
+      expect(document.getElementById("ago-remote-assist")!.textContent).toContain("Jane is calling you");
+      click(labels.answer);
+
+      render({ status: "connected", muted: false });
+      click(labels.mute);
+      click(labels.hangUp);
+
+      expect(document.getElementById("ago-remote-assist")!.textContent).toContain("On a call with Jane");
+      expect([actions.acceptCall.mock.calls.length, actions.setCallMuted.mock.calls, actions.hangUpCall.mock.calls.length])
+        .toEqual([1, [[true]], 1]);
+    } finally {
+      ui.destroy();
+    }
+  });
+});
+

@@ -7,7 +7,7 @@ mountChatWidget(document.body, {
   config: {
     baseUrl: "https://YOUR-DOMAIN.api.useago.com",
     agent: "support",
-    remoteAssist: { screenshot: true, liveView: true },
+    remoteAssist: { screenshot: true, liveView: true, voice: true },
   },
   placement: "bubble",
 });
@@ -122,6 +122,8 @@ they accepted, the agent can:
 - take a screenshot of the visible part of the page, if you allowed it;
 - watch the page live and click in it, if you allowed it (see
   [Live view](#live-view));
+- call the visitor by voice, if you allowed it and the visitor answers (see
+  [Voice calls](#voice-calls));
 - see the page's recent JavaScript errors, if you turned on
   [`errorWatcher`](functions-and-context.md#javascript-errors) for the AI. The agent only sees
   them once the visitor accepts.
@@ -255,6 +257,31 @@ The recorder ([rrweb](https://github.com/rrweb-io/rrweb), about 25 kB
 gzipped) is a separate file the SDK loads when a session with live view
 starts. Pages without `liveView` never load it.
 
+### Voice calls
+
+With `voice`, the agent can call the visitor during the session to talk it
+through.
+
+```ts
+remoteAssist: { liveView: true, voice: true },
+```
+
+The visitor sees "Jane is calling you" with Answer and Decline. When they
+answer, the browser asks for the microphone; the banner then shows the call
+with Mute and Hang up. Either side can hang up at any time, and the session
+goes on without the call. A call ends with the session.
+
+- The audio goes from one browser to the other through an encrypted relay,
+  which also keeps each side's network address from the other. AGO does not
+  record or store it.
+- Only the tab where the visitor accepted the session rings. After a reload,
+  a call in progress ends and the agent can call again.
+- A page in an iframe needs `allow="microphone"` on the iframe. A page served
+  with a `Permissions-Policy` header must allow `microphone=(self)`.
+- If the visitor refuses the microphone, the call is declined. If the
+  connection cannot be made (a network that blocks the relay), the agent is
+  told the call failed.
+
 ### Your own consent prompt
 
 The SDK renders the consent prompt, the banner and the approval prompt with
@@ -292,11 +319,17 @@ function RemoteAssistBar() {
 }
 ```
 
+For voice calls, the hook also returns `call` (`status` is `"ringing"`,
+`"connecting"` or `"connected"`, and `muted`) with `acceptCall`, `declineCall`,
+`hangUpCall` and `setCallMuted(muted)`. Only call `acceptCall()` from the
+visitor's own click: the browser asks for the microphone.
+
 Vue: `useRemoteAssist()` returns `snapshot` (a ref) and the same actions. Plain
 TypeScript: `client.remoteAssist` has `getSnapshot()`, `subscribe(listener)`,
-`accept()`, `decline()`, `stop()`, `approve(id)` and `reject(id)`, and the
-`remoteAssist:*` [events](events-and-streaming.md#1-raw-events) fire either
-way. Only call `accept()` from the visitor's own click.
+`accept()`, `decline()`, `stop()`, `approve(id)`, `reject(id)` and the call
+actions, and the `remoteAssist:*` [events](events-and-streaming.md#1-raw-events)
+(`remoteAssist:call` for calls) fire either way. Only call `accept()` from the
+visitor's own click.
 
 ### Sessions
 
@@ -315,7 +348,7 @@ way. Only call `accept()` from the visitor's own click.
 Angular has no `useHandoff` or `useRemoteAssist` equivalent. The vanilla widget
 and the `client.remoteAssist` API work in Angular apps.
 
-In React Native (`@useago/sdk/native`), remote assistance (live view included) is always off. Human
+In React Native (`@useago/sdk/native`), remote assistance (live view and voice calls included) is always off. Human
 takeover works: staff replies and markers arrive in `messages`. With React
 Native's built-in `fetch`, live replies arrive when the server closes the live
 connection (every few minutes); pass `fetch` from `expo/fetch` to get them at

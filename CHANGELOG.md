@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.18.0] - 2026-11-28
+
+### Added
+
+- **Voice calls** for remote assistance (`remoteAssist.voice`, off by default). During an accepted session, the support agent can call the visitor: "Jane is calling you" with Answer and Decline, then Mute and Hang up in the banner. The browser asks for the microphone when the visitor answers; refusing it declines the call. The audio goes browser to browser through an encrypted relay that also hides each side's address, and is not recorded. Either side hangs up without ending the session. `RemoteAssistSnapshot.call`, `RemoteAssistSession.voice`, `client.remoteAssist.acceptCall()`, `declineCall()`, `hangUpCall()`, `setCallMuted()`, the same actions on `useRemoteAssist` (React, Vue), the `remoteAssist:call` event, and labels in six languages. Needs an AGO backend with voice calls; older backends never ring.
+
 ## [1.17.0] - 2026-11-27
 
 ### Added

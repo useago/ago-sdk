@@ -139,7 +139,19 @@ export default {
     "approvalTitle": "{name} quiere realizar una acción",
     "approvalTitleAnonymous": "Un agente de soporte quiere realizar una acción",
     "allow": "Permitir",
-    "deny": "Denegar"
+    "deny": "Denegar",
+    "canTalk": "Llamarte por voz, si respondes",
+    "callTitle": "{name} te está llamando",
+    "callTitleAnonymous": "Un agente de soporte te está llamando",
+    "callIntro": "Tu navegador te pedirá acceso al micrófono. Puedes colgar en cualquier momento.",
+    "answer": "Responder",
+    "declineCall": "Rechazar",
+    "callConnecting": "Conectando la llamada…",
+    "callBanner": "En llamada con {name}",
+    "callBannerAnonymous": "En llamada con un agente de soporte",
+    "mute": "Silenciar",
+    "unmute": "Activar micrófono",
+    "hangUp": "Colgar"
   },
   "common": {
     "stopButton": "Detener",

@@ -10,6 +10,7 @@ import type {
 } from "../proactive/types";
 import type {
   RemoteAssistApprovalRequest,
+  RemoteAssistCallEvent,
   RemoteAssistCommandEvent,
   RemoteAssistEndReason,
   RemoteAssistOptions,
@@ -894,6 +895,8 @@ export interface AgoClientEvents {
    * `client.remoteAssist.approve(commandId)` / `reject(commandId)`.
    */
   "remoteAssist:approval": RemoteAssistApprovalRequest;
+  /** The agent's voice call rang, connected or ended (see `client.remoteAssist.acceptCall()`). */
+  "remoteAssist:call": RemoteAssistCallEvent;
   "message:error": {
     error: string;
     /** Stable error code (see configuration.md#error-codes) when the failure was an AgoError. */

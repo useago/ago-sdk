@@ -139,7 +139,19 @@ export default {
     "approvalTitle": "{name} vuole eseguire un'azione",
     "approvalTitleAnonymous": "Un operatore vuole eseguire un'azione",
     "allow": "Consenti",
-    "deny": "Nega"
+    "deny": "Nega",
+    "canTalk": "Chiamarti a voce, se rispondi",
+    "callTitle": "{name} ti sta chiamando",
+    "callTitleAnonymous": "Un operatore ti sta chiamando",
+    "callIntro": "Il browser ti chiederà l'accesso al microfono. Puoi riagganciare in qualsiasi momento.",
+    "answer": "Rispondi",
+    "declineCall": "Rifiuta",
+    "callConnecting": "Connessione della chiamata…",
+    "callBanner": "In chiamata con {name}",
+    "callBannerAnonymous": "In chiamata con un operatore",
+    "mute": "Disattiva microfono",
+    "unmute": "Riattiva microfono",
+    "hangUp": "Riaggancia"
   },
   "common": {
     "stopButton": "Interrompi",

@@ -21,6 +21,18 @@ export interface RemoteAssistLabels {
   approvalTitleAnonymous: string;
   allow: string;
   deny: string;
+  canTalk: string;
+  callTitle: string;
+  callTitleAnonymous: string;
+  callIntro: string;
+  answer: string;
+  declineCall: string;
+  callConnecting: string;
+  callBanner: string;
+  callBannerAnonymous: string;
+  mute: string;
+  unmute: string;
+  hangUp: string;
 }
 
 const FONT = "var(--ago-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif)";
@@ -154,6 +166,7 @@ export function createRemoteAssistUi(
     const items = [labels.canSeePage, labels.canAct];
     if (session.liveView) items.push(labels.canWatchLive);
     if (session.screenshot) items.push(labels.canScreenshot);
+    if (session.voice) items.push(labels.canTalk);
     for (const item of items) list.appendChild(el("li", { margin: "2px 0" }, item));
     body.appendChild(list);
     body.appendChild(el("p", { margin: "0", color: MUTED, "font-size": "13px" }, labels.requestFootnote));
@@ -197,6 +210,41 @@ export function createRemoteAssistUi(
     return node;
   }
 
+  function renderCallPrompt(snapshot: RemoteAssistSnapshot): HTMLElement {
+    const session = snapshot.session!;
+    const node = card("ago-remote-assist-call-title", "ago-remote-assist-call-body");
+    const title = el("h2", { margin: "0 0 8px", font: `600 16px/1.4 ${FONT}`, color: TEXT },
+      withName(labels.callTitle, labels.callTitleAnonymous, session.agentName));
+    title.id = "ago-remote-assist-call-title";
+    const body = el("p", { margin: "0", color: MUTED, "font-size": "13px" }, labels.callIntro);
+    body.id = "ago-remote-assist-call-body";
+    node.append(title, body, actions(
+      button(labels.declineCall, false, () => handlers.declineCall()),
+      button(labels.answer, true, () => handlers.acceptCall()),
+    ));
+    node.addEventListener("keydown", onEscape(() => handlers.declineCall()));
+    return node;
+  }
+
+  function pill(label: string, onClick: () => void, pressed?: boolean): HTMLButtonElement {
+    const node = el("button", {
+      "min-height": "36px",
+      "min-width": "44px",
+      padding: "0 14px",
+      "border-radius": "999px",
+      border: "none",
+      background: BRAND_TEXT,
+      color: BRAND,
+      font: `600 13px/1 ${FONT}`,
+      cursor: "pointer",
+      "flex-shrink": "0",
+    }, label);
+    node.type = "button";
+    if (pressed !== undefined) node.setAttribute("aria-pressed", String(pressed));
+    node.addEventListener("click", onClick);
+    return node;
+  }
+
   function renderBanner(snapshot: RemoteAssistSnapshot): HTMLElement {
     const session = snapshot.session!;
     const bar = el("div", {
@@ -210,12 +258,14 @@ export function createRemoteAssistUi(
       "max-width": "calc(100vw - 16px)",
       "box-sizing": "border-box",
       display: "flex",
+      "flex-wrap": "wrap",
       "align-items": "center",
-      gap: "12px",
+      gap: "8px 12px",
       padding: "6px 6px 6px 16px",
       background: BRAND,
       color: BRAND_TEXT,
-      "border-radius": "999px",
+      // Half the one-row height: a pill on one row, a rounded card once the buttons wrap.
+      "border-radius": "24px",
       "box-shadow": "rgba(15, 15, 15, 0.25) 0px 4px 20px 0px",
       font: `500 14px/1.3 ${FONT}`,
       "z-index": Z_INDEX,
@@ -230,46 +280,54 @@ export function createRemoteAssistUi(
       "flex-shrink": "0",
     });
     dot.setAttribute("aria-hidden", "true");
-    const text = el("span", { "min-width": "0", "overflow-wrap": "break-word" },
-      withName(labels.banner, labels.bannerAnonymous, session.agentName));
+    const call = snapshot.call?.status === "ringing" ? null : snapshot.call;
+    const message = !call
+      ? withName(labels.banner, labels.bannerAnonymous, session.agentName)
+      : call.status === "connecting"
+        ? labels.callConnecting
+        : withName(labels.callBanner, labels.callBannerAnonymous, session.agentName);
+    const text = el("span", { "min-width": "0", "overflow-wrap": "break-word" }, message);
     text.setAttribute("role", "status");
-    const stop = el("button", {
-      "min-height": "36px",
-      "min-width": "44px",
-      padding: "0 14px",
-      "border-radius": "999px",
-      border: "none",
-      background: BRAND_TEXT,
-      color: BRAND,
-      font: `600 13px/1 ${FONT}`,
-      cursor: "pointer",
-      "flex-shrink": "0",
-    }, labels.stop);
-    stop.type = "button";
-    stop.addEventListener("click", () => handlers.stop());
-    bar.append(dot, text, stop);
+    // The message keeps a readable width; the buttons wrap below it rather than squeezing it.
+    const label = el("span", { display: "flex", "align-items": "center", gap: "12px", flex: "1 1 10em", "min-width": "0" });
+    label.append(dot, text);
+    const controls = el("span", { display: "flex", "flex-wrap": "wrap", gap: "6px", "margin-left": "auto" });
+    if (call) {
+      controls.append(
+        pill(call.muted ? labels.unmute : labels.mute, () => handlers.setCallMuted(!call.muted), call.muted),
+        pill(labels.hangUp, () => handlers.hangUpCall()),
+      );
+    }
+    controls.append(pill(labels.stop, () => handlers.stop()));
+    bar.append(label, controls);
     return bar;
   }
 
   return {
     render(snapshot) {
+      const call = snapshot.call;
+      const ringing = snapshot.state === "active" && call?.status === "ringing";
       const key = snapshot.pendingApproval
         ? `approval:${snapshot.pendingApproval.commandId}`
-        : snapshot.state === "requested" && snapshot.session
-          ? `prompt:${snapshot.session.id}:${snapshot.accepting}`
-          : snapshot.state === "active" && snapshot.session
-            ? `banner:${snapshot.session.id}:${snapshot.session.agentName ?? ""}`
-            : null;
+        : ringing
+          ? `call:${call.id}`
+          : snapshot.state === "requested" && snapshot.session
+            ? `prompt:${snapshot.session.id}:${snapshot.accepting}`
+            : snapshot.state === "active" && snapshot.session
+              ? `banner:${snapshot.session.id}:${snapshot.session.agentName ?? ""}:${call?.status ?? ""}:${!!call?.muted}`
+              : null;
       if (key === shown) return;
-      const wasDialog = shown?.startsWith("prompt:") || shown?.startsWith("approval:");
+      const wasDialog = ["prompt:", "approval:", "call:"].some((prefix) => shown?.startsWith(prefix));
       shown = key;
       root.replaceChildren();
       if (snapshot.state === "active" && snapshot.session) root.appendChild(renderBanner(snapshot));
       const dialog = snapshot.pendingApproval
         ? renderApproval(snapshot)
-        : snapshot.state === "requested" && snapshot.session
-          ? renderPrompt(snapshot)
-          : null;
+        : ringing
+          ? renderCallPrompt(snapshot)
+          : snapshot.state === "requested" && snapshot.session
+            ? renderPrompt(snapshot)
+            : null;
       if (dialog) {
         root.appendChild(dialog);
         if (wasDialog) dialog.focus({ preventScroll: true });

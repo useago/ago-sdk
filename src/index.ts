@@ -107,6 +107,10 @@ export { parseConversationMarker } from "./handoff/handoff";
 export type { RemoteAssistController } from "./remoteAssist/RemoteAssistController";
 export type {
   RemoteAssistApprovalRequest,
+  RemoteAssistCall,
+  RemoteAssistCallEndReason,
+  RemoteAssistCallEvent,
+  RemoteAssistCallStatus,
   RemoteAssistCommand,
   RemoteAssistCommandEvent,
   RemoteAssistCommandStatus,

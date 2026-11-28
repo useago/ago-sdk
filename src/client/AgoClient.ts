@@ -445,6 +445,13 @@ export class AgoClient {
             : Promise.reject(new AgoError("The live view needs a browser.", "remote_assist_live_view_unavailable"));
         },
         getRoutes: () => this.navigationRoutes,
+        canCall: () => getRemoteAssistKit()?.canCall() ?? false,
+        answerCall: (options) => {
+          const kit = getRemoteAssistKit();
+          return kit
+            ? kit.answerCall(options)
+            : Promise.reject(new AgoError("Voice calls need a browser.", "remote_assist_voice_unavailable"));
+        },
       },
       config.remoteAssist,
     );

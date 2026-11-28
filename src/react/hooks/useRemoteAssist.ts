@@ -13,6 +13,11 @@ export interface UseRemoteAssistResult extends RemoteAssistSnapshot {
   /** Answer a command waiting for approval (`pendingApproval.commandId`). */
   approve: (commandId: string) => void;
   reject: (commandId: string) => void;
+  /** Answer the agent's ringing call (`call.status === "ringing"`), from the visitor's click. */
+  acceptCall: () => Promise<boolean>;
+  declineCall: () => void;
+  hangUpCall: () => void;
+  setCallMuted: (muted: boolean) => void;
 }
 
 /**
@@ -51,5 +56,9 @@ export function useRemoteAssist(options: { client?: AgoClient } = {}): UseRemote
     stop: useCallback(() => controller.stop(), [controller]),
     approve: useCallback((id: string) => controller.approve(id), [controller]),
     reject: useCallback((id: string) => controller.reject(id), [controller]),
+    acceptCall: useCallback(() => controller.acceptCall(), [controller]),
+    declineCall: useCallback(() => controller.declineCall(), [controller]),
+    hangUpCall: useCallback(() => controller.hangUpCall(), [controller]),
+    setCallMuted: useCallback((muted: boolean) => controller.setCallMuted(muted), [controller]),
   };
 }

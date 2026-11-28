@@ -139,7 +139,19 @@ export default {
     "approvalTitle": "{name} quer realizar uma ação",
     "approvalTitleAnonymous": "Um atendente quer realizar uma ação",
     "allow": "Permitir",
-    "deny": "Negar"
+    "deny": "Negar",
+    "canTalk": "Ligar para você por voz, se você atender",
+    "callTitle": "{name} está ligando para você",
+    "callTitleAnonymous": "Um atendente está ligando para você",
+    "callIntro": "Seu navegador vai pedir acesso ao microfone. Você pode desligar a qualquer momento.",
+    "answer": "Atender",
+    "declineCall": "Recusar",
+    "callConnecting": "Conectando a chamada…",
+    "callBanner": "Em chamada com {name}",
+    "callBannerAnonymous": "Em chamada com um atendente",
+    "mute": "Desativar microfone",
+    "unmute": "Ativar microfone",
+    "hangUp": "Desligar"
   },
   "common": {
     "stopButton": "Parar",
